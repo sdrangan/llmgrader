@@ -1,0 +1,14 @@
+[project]
+name = "graderchat"
+version = "0.1.0"
+description = "Lightweight Flask-based chatbot autograder"
+authors = [
+    { name = "Your Name" }
+]
+dependencies = [
+    "flask"
+]
+
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
