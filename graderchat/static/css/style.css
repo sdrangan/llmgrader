@@ -1,64 +1,131 @@
+/* ------------------------------
+   GLOBAL
+------------------------------ */
+
 body {
     font-family: Arial, sans-serif;
-    margin: 20px;
+    margin: 12px;
     background: #f5f5f5;
 }
 
 .container {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    grid-template-rows: auto auto 1fr auto;
-    gap: 20px;
+    gap: 12px;
 }
+
+.left-column,
+.right-column {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+
+.resizable-container {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    height: 100%;
+}
+
+
+.divider {
+    height: 6px;
+    background: #ccc;
+    cursor: row-resize;
+    margin: 4px 0;
+}
+
+.divider:hover {
+    background: #bbb;
+}
+
+
+/* ------------------------------
+   PANELS
+------------------------------ */
 
 .panel {
     background: white;
-    padding: 15px;
-    border-radius: 8px;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    padding: 8px 10px;
+    border: 1px solid #ccc;
+    border-radius: 6px;
 }
 
-#question-panel {
-    grid-column: 1 / 3;
+.panel h3 {
+    font-size: 0.95em;
+    margin: 2px 0 6px 0;
+    font-weight: bold;
 }
 
-#solution-panel {
-    grid-column: 1 / 3;
+/* ------------------------------
+   FORM ELEMENTS
+------------------------------ */
+
+.panel textarea,
+.panel input,
+.panel select,
+.panel button {
+    font-size: 0.9em;
+    padding: 4px 6px;
+    width: 100%;
+    box-sizing: border-box;
 }
 
-#chat-panel {
-    height: 300px;
+textarea {
+    height: 110px;
+    resize: vertical;
+}
+
+/* ------------------------------
+   COMPACT CONTROL ROWS
+------------------------------ */
+
+.control-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 6px;
+}
+
+.control-row label {
+    min-width: 90px;
+    font-size: 0.9em;
+    font-weight: bold;
+}
+
+/* ------------------------------
+   CHAT
+------------------------------ */
+
+.scrollable {
+    height: 180px;
     overflow-y: auto;
-}
-
-#chat-history {
-    height: 240px;
-    overflow-y: scroll;
     border: 1px solid #ddd;
-    padding: 10px;
+    padding: 8px;
     background: #fafafa;
 }
 
 #chat-input-panel {
     display: flex;
-    gap: 10px;
+    gap: 8px;
 }
 
 #chat-input {
     flex: 1;
-    padding: 10px;
+    padding: 6px;
 }
 
-#grade-panel {
-    grid-column: 1 / 3;
-    text-align: center;
-}
+/* ------------------------------
+   GRADE STATUS
+------------------------------ */
 
 #grade-status {
-    margin: 10px 0;
-    padding: 10px;
-    border-radius: 6px;
+    padding: 8px;
+    border-radius: 4px;
     font-weight: bold;
+    text-align: center;
 }
 
 .status-not-graded {
@@ -76,34 +143,35 @@ body {
     color: #7a2d2d;
 }
 
-textarea {
-    width: 100%;
-    height: 120px;
-    padding: 10px;
-}
-
-.container {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 20px;
-}
-
-.left-column, .right-column {
+/* ------------------------------
+   TEXT BLOCKS
+------------------------------ */
+#question-panel {
     display: flex;
     flex-direction: column;
-    gap: 20px;
+    overflow: hidden;   /* panel can shrink */
 }
 
-.scrollable {
-    height: 200px;
-    overflow-y: auto;
-    border: 1px solid #ddd;
-    padding: 10px;
-    background: #fafafa;
-}
-
-#question-text,
-#ref-solution,
-#grading-notes {
+#question-text {
+    flex: 1;                 /* take available space */
+    overflow-y: auto;        /* scroll when needed */
+    padding: 8px;
+    border: 1px solid #ccc;
+    background: #fff;
     white-space: pre-wrap;
+    min-height: 0;           /* IMPORTANT: allows shrinking */
 }
+
+#student-solution {
+    flex: 1;
+    overflow-y: auto;
+    padding: 8px;
+    border: 1px solid #ccc;
+    background: #fff;
+    white-space: pre-wrap;
+    min-height: 0;
+    font-size: 14px;
+    font-family: monospace;
+    resize: vertical; /* optional: allow manual resizing */
+}
+

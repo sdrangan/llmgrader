@@ -1,7 +1,16 @@
 console.log("UI loaded.");
-let loadedData = null;
 
-
+//
+// GLOBAL STATE
+//
+let currentUnitQuestions = null;     // plain text
+let currentUnitQuestionsLatex = null; // latex version
+let currentUnitSolutions = null;     // reference solutions
+let currentUnitNotes = null;         // grading notes
+//
+// ---------------------------
+//  CHAT SEND BUTTON
+// ---------------------------
 document.getElementById("send-chat").onclick = function () {
     const input = document.getElementById("chat-input");
     const history = document.getElementById("chat-history");
@@ -15,10 +24,14 @@ document.getElementById("send-chat").onclick = function () {
     }
 };
 
-document.getElementById("grade-button").onclick = function () {
-    const status = document.getElementById("grade-status"); 
 
-    // Dummy toggle for now
+//
+// ---------------------------
+//  GRADE BUTTON (dummy for now)
+// ---------------------------
+document.getElementById("grade-button").onclick = function () {
+    const status = document.getElementById("grade-status");
+
     if (status.classList.contains("status-not-graded")) {
         status.textContent = "Correct";
         status.className = "status-correct";
@@ -31,8 +44,13 @@ document.getElementById("grade-button").onclick = function () {
     }
 };
 
-document.getElementById("load-file").onclick = function () {
-    const fileInput = document.getElementById("solution-file");
+
+//
+// ---------------------------
+//  LOAD STUDENT SOLUTIONS FILE
+// ---------------------------
+document.getElementById("load-student-file").onclick = function () {
+    const fileInput = document.getElementById("student-file");
     if (!fileInput.files.length) {
         console.log("No file selected");
         return;
@@ -45,58 +63,167 @@ document.getElementById("load-file").onclick = function () {
         method: "POST",
         body: formData
     })
-    .then(response => response.json())  
+    .then(response => response.json())
     .then(data => {
         if (data.error) {
             console.error("Server error:", data.error);
             return;
         }
-  
-        // Validate structure
-        if (!data.questions || !data.solutions || !data.grading_notes) {
-            console.error("Malformed data:", data);
-            return;
-        }
 
-        const dropdown = document.getElementById("question-number");
-       
-        // Clear any old options
-        dropdown.innerHTML = "";
+        // Store student solutions
+        currentStudentSolutions = data.questions;
 
-        // Populate with new options
-        for (let i = 0; i < data.num_items; i++) {
-            const opt = document.createElement("option");
-            opt.value = i;                     // index of the question
-            opt.textContent = `Question ${i+1}`; // what the user sees
-            dropdown.appendChild(opt);
-        }
-
-        // Initially select the first question
-        dropdown.selectedIndex = 0;
-
-        // Store parsed data for later use
-        loadedData = data;
-        
-        // Populate fields for the first question
-        document.getElementById("question-text").textContent = data.questions[0];
-        document.getElementById("ref-solution").textContent = data.solutions[0];
-        document.getElementById("grading-notes").textContent = data.grading_notes[0];
+        // If the unit is already loaded, update the student solution box
+        const qIdx = Number(document.getElementById("question-number").value);
+        document.getElementById("student-solution").value =
+            currentStudentSolutions[qIdx] || "Not loaded";
+    });
+};
 
 
+//
+// ---------------------------
+//  UNIT LOADING
+// ---------------------------
+document.addEventListener("DOMContentLoaded", () => {
+    loadUnits();
+});
+
+async function loadUnits() {
+    const resp = await fetch("/units");
+    const units = await resp.json();
+
+    const dropdown = document.getElementById("unit-select");
+    dropdown.innerHTML = "";
+
+    units.forEach(unit => {
+        const opt = document.createElement("option");
+        opt.value = unit;
+        opt.textContent = unit;
+        dropdown.appendChild(opt);
     });
 
-};
-
-document.getElementById("question-number").onchange = function () {
-    const idx = Number(this.value);
-    const data = loadedData;
-
-    if (!data) {
-        console.log("No data loaded yet");
-        return;
+    if (units.length > 0) {
+        dropdown.value = units[0];
+        loadUnit(units[0]);
     }
 
-    document.getElementById("ref-solution").textContent = data.solutions[idx];
-    document.getElementById("grading-notes").textContent = data.grading_notes[idx];
-    document.getElementById("question-text").textContent = data.questions[idx];
-};
+    // When user selects a different unit
+    dropdown.onchange = () => {
+        loadUnit(dropdown.value);
+    };
+}
+
+async function loadUnit(unitName) {
+    const resp = await fetch(`/unit/${unitName}`);
+    const data = await resp.json();
+
+    // Store everything the backend sends
+    currentUnitQuestions = data.questions_text;     // plain text
+    currentUnitQuestionsLatex = data.questions_latex; // latex version
+    currentUnitSolutions = data.solutions;          // reference solutions
+    currentUnitNotes = data.grading;                // grading notes
+
+    populateQuestionDropdown(currentUnitQuestions);
+}
+
+
+
+//
+// ---------------------------
+//  DISPLAY QUESTION
+// ---------------------------
+function displayQuestion(idx) {
+    // Update question text
+    const qText = currentUnitQuestions[idx];
+    document.getElementById("question-text").textContent = qText;
+
+    // Update student solution text
+    const solBox = document.getElementById("student-solution");
+    if (currentStudentSolutions) {
+        solBox.value = currentStudentSolutions[idx] || "";
+    } else {
+        solBox.value = "";
+    }
+
+    // Reset grading UI
+    document.getElementById("explanation").textContent = "No explanation yet.";
+    document.getElementById("grade-status").textContent = "Not graded";
+    document.getElementById("grade-status").className = "status-not-graded";
+}
+
+
+//
+// ---------------------------
+//  DIVIDER DRAGGING
+// ---------------------------
+
+const divider = document.querySelector(".divider");
+const topPanel = document.getElementById("question-panel");
+const bottomPanel = document.getElementById("solution-panel");
+
+let dragging = false;
+
+divider.addEventListener("mousedown", () => dragging = true);
+document.addEventListener("mouseup", () => dragging = false);
+
+document.addEventListener("mousemove", (e) => {
+    if (!dragging) return;
+
+    const containerHeight = divider.parentElement.offsetHeight;
+    const newTopHeight = e.clientY - divider.parentElement.offsetTop;
+
+    if (newTopHeight < 100 || newTopHeight > containerHeight - 100) return;
+
+    topPanel.style.flex = `0 0 ${newTopHeight}px`;
+    bottomPanel.style.flex = `1`;
+});
+
+
+divider.addEventListener("mousedown", () => {
+    dragging = true;
+    document.body.style.userSelect = "none";
+});
+
+document.addEventListener("mouseup", () => {
+    dragging = false;
+    document.body.style.userSelect = "";
+});
+
+
+
+
+//
+// ---------------------------
+//  QUESTION DROPDOWN
+// ---------------------------
+function populateQuestionDropdown(questions) {
+    const dropdown = document.getElementById("question-number");
+    dropdown.innerHTML = "";
+
+    questions.forEach((q, idx) => {
+        const opt = document.createElement("option");
+        opt.value = idx;
+        opt.textContent = `Question ${idx + 1}`;
+        dropdown.appendChild(opt);
+    });
+
+    if (questions.length > 0) {
+        dropdown.value = 0;
+        displayQuestion(0);
+    }
+
+    dropdown.onchange = () => {
+        displayQuestion(Number(dropdown.value));
+    };
+}
+
+// ---------------------------
+//  QUESTION DROPDOWN HANDLER
+// ---------------------------
+document.getElementById("question-number").addEventListener("change", () => {
+    const idx = Number(document.getElementById("question-number").value);
+    displayQuestion(idx);
+});
+
+

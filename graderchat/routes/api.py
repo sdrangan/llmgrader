@@ -34,6 +34,7 @@ class APIController:
         
         @bp.post("/load_file")
         def load_file():
+            # Loads the student solution file
             file = request.files.get("file")
             if not file:
                 return jsonify({"error": "No file uploaded"}), 400
@@ -45,6 +46,29 @@ class APIController:
 
             # For now, just return a simple response
             return jsonify(parsed)
+        
+        @bp.get("/units")
+        def units():
+            # Return the list of unit folder names
+            return jsonify(list(self.grader.units.keys()))
 
 
+        @bp.get("/unit/<unit_name>")
+        def unit(unit_name):
+            units = self.grader.units
+
+            if unit_name not in units:
+                return jsonify({"error": "Unknown unit"}), 404
+
+            u = units[unit_name]
+
+            return jsonify({
+                "unit": unit_name,
+                "count": len(u["questions_text"]),
+                "questions_text": u["questions_text"],
+                "questions_latex": u["questions_latex"],
+                "solutions": u["solutions"],
+                "grading": u["grading"]
+            })
+                
         app.register_blueprint(bp)

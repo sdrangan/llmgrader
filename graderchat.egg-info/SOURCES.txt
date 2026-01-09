@@ -6,9 +6,17 @@ graderchat/app.py
 graderchat.egg-info/PKG-INFO
 graderchat.egg-info/SOURCES.txt
 graderchat.egg-info/dependency_links.txt
+graderchat.egg-info/entry_points.txt
 graderchat.egg-info/requires.txt
 graderchat.egg-info/top_level.txt
 graderchat/routes/__init__.py
+graderchat/routes/api.py
 graderchat/routes/main.py
 graderchat/services/__init__.py
+graderchat/services/autograde_llm_latex.py
+graderchat/services/grader.py
+graderchat/services/llm_client.py
 graderchat/services/openai_client.py
+graderchat/services/parselatex.py
+graderchat/utils/__init__.py
+graderchat/utils/latextotxt.py

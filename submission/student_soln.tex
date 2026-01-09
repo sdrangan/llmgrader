@@ -1,0 +1,209 @@
+\documentclass[11pt]{article}
+
+\usepackage{fullpage}
+\usepackage{amsmath, amssymb, bm, cite, epsfig, psfrag}
+\usepackage{graphicx}
+\usepackage{float}
+\usepackage{amsthm}
+\usepackage{amsfonts}
+\usepackage{cite}
+\usepackage{hyperref}
+\usepackage{pgf,tikz}
+\usepackage{enumitem}
+\usepackage{mathtools}
+\usepackage{siunitx}
+\usepackage{../styles/course}
+
+
+\begin{document}
+
+\title{Introduction to Hardware Design\\
+Basic Digital Logic:  Solutions}
+\author{Profs. Sundeep Rangan, Siddharth Garg}
+\date{}
+
+\maketitle
+
+\begin{enumerate}
+\item \emph{Propagation delay}:  A signal $x$ has time-value change points
+\[
+    (10, 0), (20, 4), (30, 2)
+\]
+where the time is in nanoseconds.  The signal is passed through
+a circuit that produces $y = 2x+1$ with a propagation delay of \SI{3}{ns}.
+What are the time-value change points of $y$?  Use $\text{x}$ for unknown values.
+
+\begin{solution}
+Times are 10, 13, 20, 23, 30 and 33 ns.  Values = x, 1, x, 9, x, 5.  
+\end{solution} 
+
+
+\item \emph{Critical path}: Consider the following SystemVerilog code:
+\begin{systemverilogcode}
+  always_ff @(posedge clk) begin
+      x1 <= 3*x1>>2 - 5*x>>3 + 7;
+      x2 <= 3*x1>>2 +  2;
+  end
+\end{systemverilogcode}
+Here \texttt{3*x>>2} denotes multiplication by 3 followed by a right shift
+by 2 bits (division by 4).  
+Assume that:
+\begin{itemize}
+\item Each multiplication with shift takes \SI{4}{ns}.
+\item Each addition or subtraction takes \SI{2}{ns}.
+\item Registers have zero delay.
+\end{itemize}
+What is the critical path delay of this circuit?
+
+\begin{solution}
+2 mults + 2 adds = 2*4ns + 2*2ns = 12ns.
+\end{solution}
+
+
+\item \emph{Sequential updates}:
+Consider the following SystemVerilog code:
+\begin{systemverilogcode}
+  always_ff @(posedge clk) begin
+      x <= x + v;
+      if (x > 30) begin
+          v <= -10;
+      end else if (x < 0) begin
+          v <= 10;
+      end
+  end
+\end{systemverilogcode}
+Starting from $(x,v)=(15,10)$, what are the values of $(x,v)$
+for the next 5 clock cycles?
+
+\begin{solution}
+The values of $x$ are $15, 25, 15, 5, 15$ and $v$ are
+$10, 10, -10, -10, 10, 10$.
+\end{solution}
+
+
+\item \emph{Splitting paths over multiple cycles}: Consider the following
+SystemVerilog code:
+\begin{systemverilogcode}
+  always_comb begin
+      act_in = w1*xreg+b1;
+      if (act_in > 0) begin
+          a = act_in;
+      end else begin
+          a = 0;
+      end
+      xsq = xreg*xreg>>4;
+      y = xsq + w2*a + b2;
+  end
+  always_ff @(posedge clk) begin
+      xreg <= x;
+  end
+\end{systemverilogcode} 
+where \texttt{>>4} denotes a right shift by 4 bits (division by 16).
+So, the code registers the input \texttt{x} into \texttt{xreg} on each clock cycle,
+and produces the output \texttt{y} in a single clock cycle based on the registered value.
+The circuit is to be syntheized with components:
+\begin{itemize}
+\item Multiplication with shift:  \SI{4}{ns}
+\item Addition or subtraction:  \SI{2}{ns}
+\item Logic to compute $\max\{0,u\}$:  \SI{1}{ns}
+\item Registers:  zero delay
+\end{itemize}
+Assume that $w_1$, $b_1$, $w_2$, and $b_2$ are constants.
+\begin{enumerate}[label=(\alph*)]
+\item Draw a block diagram of the circuit showing an implementation of the circuit.
+If this is being auto-graded, you do not need to submit the diagram.  But, I will include it in the solutions.
+
+\item What is the critical path delay of this circuit?
+\item Rewrite the code to operate over two clock cycles instead of one
+to minimize the critical path delay.
+What is the critical path delay of the new circuit?
+\end{enumerate}
+
+\begin{solution}
+For part (b), there is a path from xreg to act_in (4ns + 2ns = 6ns).
+Then, it takes 1 mult = 4ns to compute xsq.  Then, to compute y, it takes
+2 additions and 1 mult = 2ns + 4ns + 2ns = 8ns.
+So, the total critical path is 6ns + 4ns + 8ns = 18ns.
+For part (c), one possible solution is below:
+\begin{systemverilogcode}
+    always_comb begin
+        act_in = w1*xreg+b1;
+        if (act_in > 0) begin
+            a = act_in;
+        end else begin
+            a = 0;
+        end
+        y = term1 + w2*a;
+    end
+    always_ff @(posedge clk) begin
+        xreg <= x;
+        a_reg <=  a;
+        term1 <= xreg*xreg>>4 + b2;
+        
+    end
+\end{systemverilogcode}
+\end{solution}
+The new critical path is the final combinational output of y, 
+which involves 2 adds and 1 mult = 8ns.
+
+\item \emph{Exponent}
+Suppose we wish to implement the function
+\[
+    y = x^i, 
+\]
+with an integer exponent $i \in \{0,1,2,3\}$.
+The input $x$ and output $y$ are signed short integers
+-- do not worry about overflow.
+Write a SystemVerilog module that computes $y$.
+The output should always be 2 cycles after the input, 
+even if $i=0,1$ or $2$.  Use only one multiplication in 
+each clock cycle.  
+
+Hint:  You will need to use delay lines to store
+the input $x$ and exponent $i$.
+
+\begin{solution}  One possible solution is below.
+\begin{systemverilogcode}
+module exponent  (
+    input logic clk,
+    input logic shortint x,
+    input logic int i,
+    output logic shortint y
+);
+
+    logic shortint x_reg;
+    logic shortint x2;
+    logic int ireg, ireg1;
+    logic shortint mult_out;
+
+    
+    always_ff @(posedge clk) begin
+        // Delay line for the exponent
+        ireg <= i;
+
+        // Delay line
+        x_reg <= x;
+        xsq <= x_reg * x_reg;
+    end
+
+    always_comb begin
+        // First cycle: compute x^2
+        if (i==0) begin
+            mult_out = 1;
+        end else if (i==1) begin
+            mult_out = x_reg; // pass through for i=1
+        end else if (i==2) begin
+            mult_out = xsq; // pass through for i=2
+        end else begin
+            mult_out = xsq * x_reg; // compute x^3
+        end
+    end
+    
+  endmodule
+\end{systemverilogcode}
+\end{solution}
+
+\end{enumerate}
+
+  \end{document}
+

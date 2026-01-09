@@ -11,36 +11,36 @@
     <!-- LEFT COLUMN -->
     <div class="left-column">
 
-        <!-- File Upload -->
-        <div class="panel">
-            <h3>Solution File</h3>
-            <input type="file" id="solution-file">
-            <button id="load-file" type="button">Load</button>
-        </div>
-        <div class="panel">
-            <h3>Student Solutions File</h3>
-            <input type="file" id="student-file">
-            <button id="load-student-file" type="button">Load Student Solutions</button>
-        </div>
+        <div class="stacked-controls">
 
-        
+            <div class="control-row">
+                <label for="unit-select">Unit:</label>
+                <select id="unit-select"></select>
+            </div>
 
-        <!-- Question Selector -->
-        <div class="panel">
-            <h3>Question Number</h3>
-            <select id="question-number"></select>
+            <div class="control-row">
+                <label for="question-number">Question:</label>
+                <select id="question-number"></select>
+            </div>
+
+            <div class="control-row">
+                <label for="student-file">Student File:</label>
+                <input type="file" id="student-file">
+                <button id="load-student-file" type="button">Load</button>
+            </div>
+
         </div>
+        <div class="resizable-container">
+            <div class="panel" id="question-panel">
+                <h3>Question</h3>
+                <div id="question-text"></div>
+            </div>
+            <div class="divider"></div>
 
-        <!-- Question Text -->
-        <div class="panel">
-            <h3>Question</h3>
-            <div id="question-text">Load a file to begin.</div>
-        </div>
-
-        <!-- Student Solution -->
-        <div class="panel">
-            <h3>Your Solution</h3>
-            <textarea id="student-solution" rows="8" style="width: 100%;">Not loaded</textarea>
+            <div class="panel" id="solution-panel">
+                <h3>Your Solution</h3>
+                <textarea id="student-solution"></textarea>
+            </div>
         </div>
 
         <!-- Grade Button -->
@@ -57,18 +57,6 @@
         <div class="panel">
             <h3>Grade</h3>
             <div id="grade-status" class="status-not-graded">Not graded</div>
-        </div>
-
-        <!-- Reference Solution -->
-        <div class="panel">
-            <h3>Reference Solution</h3>
-            <div id="ref-solution">Not loaded</div>
-        </div>
-
-        <!-- Grading Notes -->
-        <div class="panel">
-            <h3>Grading Notes</h3>
-            <div id="grading-notes">Not loaded</div>
         </div>
 
         <!-- Explanation -->
