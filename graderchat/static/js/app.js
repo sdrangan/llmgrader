@@ -9,7 +9,7 @@ let currentUnitSolutions = null;     // reference solutions
 let currentUnitNotes = null;         // grading notes
 let currentUnitName = null;          // current unit name
 let currentStudentSolutions = null; // student solutions
-
+let currentPartLabels = [];       // part labels for current unit
 
 //
 // ---------------------------
@@ -89,6 +89,7 @@ async function loadUnit(unitName) {
     currentUnitQuestionsLatex = data.questions_latex; // latex version
     currentUnitSolutions = data.solutions;          // reference solutions
     currentUnitNotes = data.grading;                // grading notes
+    currentPartLabels = data.part_labels;          // part labels
     currentUnitName = unitName;
 
     populateQuestionDropdown(currentUnitQuestions);
@@ -112,6 +113,38 @@ function displayQuestion(idx) {
     } else {
         solBox.value = "";
     }
+
+    // ---------------------------
+    // Update PART DROPDOWN
+    // ---------------------------
+    const partSelect = document.getElementById("part-select");
+    const parts = currentPartLabels[idx] || [];
+
+    // Clear old options
+    partSelect.innerHTML = "";
+
+    if (parts.length === 0) {
+        // No parts → only "All"
+        const opt = document.createElement("option");
+        opt.value = "all";
+        opt.textContent = "All";
+        partSelect.appendChild(opt);
+    } else {
+        // Insert "All" first
+        const optAll = document.createElement("option");
+        optAll.value = "all";
+        optAll.textContent = "All";
+        partSelect.appendChild(optAll);
+
+        // Insert each part label
+        parts.forEach(label => {
+            const opt = document.createElement("option");
+            opt.value = label;
+            opt.textContent = label;
+            partSelect.appendChild(opt);
+        });
+    }
+
 
     // Reset grading UI
     document.getElementById("full-explanation-box").textContent = "Not yet graded.  No explanation yet.";
@@ -198,6 +231,8 @@ document.getElementById("question-number").addEventListener("change", () => {
 async function gradeCurrentQuestion() {
     const idx = Number(document.getElementById("question-number").value);
     const studentSolution = document.getElementById("student-solution").value;
+    const partSelect = document.getElementById("part-select");
+    const selectedPart = partSelect.value;   // "all", "a", "b", ...
 
     const gradeBtn = document.getElementById("grade-button");
     gradeBtn.disabled = true;
@@ -209,7 +244,8 @@ async function gradeCurrentQuestion() {
         body: JSON.stringify({
             unit: currentUnitName,
             question_idx: idx,
-            student_solution: studentSolution
+            student_solution: studentSolution,
+            part_label: selectedPart
         })
     });
     const data = await resp.json();  

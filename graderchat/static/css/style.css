@@ -177,3 +177,11 @@ textarea {
     white-space: pre-wrap;
     overflow-y: auto;   /* optional but recommended */
 }
+
+.grade-row {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 10px;   /* spacing between Grade | Part | dropdown */
+}
+

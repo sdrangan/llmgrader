@@ -43,9 +43,17 @@
             </div>
         </div>
 
-        <!-- Grade Button -->
-        <div class="panel">
+
+        <!-- Grade Button + Part Selector -->
+        <div class="panel grade-row">
             <button id="grade-button" onclick="gradeCurrentQuestion()">Grade</button>
+
+            <span class="part-label">Part</span>
+
+            <select id="part-select">
+                <!-- Filled dynamically -->
+                <option value="all">All</option>
+            </select>
         </div>
 
 
@@ -77,6 +85,6 @@
 
 </div>
 
-    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+<script src="{{ url_for('static', filename='js/app.js') }}"></script>
 </body>
 </html>

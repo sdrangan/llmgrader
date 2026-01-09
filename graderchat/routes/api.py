@@ -59,7 +59,8 @@ class APIController:
                 "questions_text": u["questions_text"],
                 "questions_latex": u["questions_latex"],
                 "solutions": u["solutions"],
-                "grading": u["grading"]
+                "grading": u["grading"],
+                "part_labels": u["part_labels"]
             })
         
         @bp.post("/grade")
@@ -68,6 +69,7 @@ class APIController:
             unit = data["unit"]
             idx = int(data["question_idx"])
             student_soln = data["student_solution"]
+            part_label = data.get("part_label", "all")
 
             u = self.grader.units[unit]
 
@@ -93,14 +95,18 @@ class APIController:
                 f.write("=== Student Solution ===\n")
                 f.write(student_soln + "\n")
 
-            print(f'Wrote {fn}')
+                f.write(f"\n=== Grading Part Label ===\n")
+                f.write(part_label + "\n")
+
+            print(f'Sent grader input {fn}')
 
             # Call the grader with relevant data
             result = self.grader.grade(
                 question_latex=ref_problem, 
                 ref_solution=ref_solution, 
                 grading_notes=grading_notes, 
-                student_soln=student_soln)
+                student_soln=student_soln,
+                part_label=part_label)
 
             return jsonify(result)
                 
