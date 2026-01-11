@@ -70,6 +70,8 @@ class APIController:
             idx = int(data["question_idx"])
             student_soln = data["student_solution"]
             part_label = data.get("part_label", "all")
+            model = data.get("model", "gpt-4.1-mini")
+            api_key = data.get("api_key", None)
 
             u = self.grader.units[unit]
 
@@ -98,17 +100,32 @@ class APIController:
                 f.write(f"\n=== Grading Part Label ===\n")
                 f.write(part_label + "\n")
 
+                f.write(f"\n=== Model ===\n")
+                f.write(model + "\n")
+
             print(f'Sent grader input {fn}')
 
             # Call the grader with relevant data
-            result = self.grader.grade(
+            grade = self.grader.grade(
                 question_latex=ref_problem, 
                 ref_solution=ref_solution, 
                 grading_notes=grading_notes, 
                 student_soln=student_soln,
-                part_label=part_label)
+                part_label=part_label,
+                model=model,
+                api_key=api_key)
 
-            return jsonify(result)
+            return jsonify(grade)
+        
+        @bp.post("/reload")
+        def reload_units():
+
+            print("In /reload endpoint")
+   
+            # Re-run discovery
+            self.grader.discover_units()
+            return jsonify({"status": "ok"})
+
                 
         app.register_blueprint(bp)
 

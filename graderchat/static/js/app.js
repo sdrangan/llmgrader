@@ -47,6 +47,32 @@ document.getElementById("load-student-file").onclick = function () {
 };
 
 
+// ---------------------------
+//  OpenAI KEY MANAGEMENT
+// ---------------------------
+document.addEventListener("DOMContentLoaded", () => {
+    const input = document.getElementById("apiKeyInput");
+    const saveBtn = document.getElementById("saveKeyBtn");
+
+    // Preload saved key
+    const saved = localStorage.getItem("openai_api_key");
+    if (saved) input.value = saved;
+
+    // Save key on click
+    saveBtn.addEventListener("click", () => {
+        const key = input.value.trim();
+        if (key) {
+            localStorage.setItem("openai_api_key", key);
+            alert("API key saved in your browser.");
+        }
+    });
+});
+
+function getApiKey() {
+    return localStorage.getItem("openai_api_key") || "";
+}
+
+
 //
 // ---------------------------
 //  UNIT LOADING
@@ -148,7 +174,7 @@ function displayQuestion(idx) {
 
     // Reset grading UI
     document.getElementById("full-explanation-box").textContent = "Not yet graded.  No explanation yet.";
-    document.getElementById("summary-box").textContent = "Not yet graded. No summary yet.";
+    document.getElementById("feedback-box").textContent = "Not yet graded. No feedback yet.";
     document.getElementById("grade-status").className = "status-not-graded";
 }
 
@@ -233,11 +259,20 @@ async function gradeCurrentQuestion() {
     const studentSolution = document.getElementById("student-solution").value;
     const partSelect = document.getElementById("part-select");
     const selectedPart = partSelect.value;   // "all", "a", "b", ...
+    const apiKey = getApiKey();
+
+    if (!apiKey) {
+        alert("Please set your OpenAI API key first.");
+        return;
+    }
 
     const gradeBtn = document.getElementById("grade-button");
     gradeBtn.disabled = true;
     gradeBtn.textContent = "Grading...";
 
+    const model = document.getElementById("model-select").value;
+
+    console.log('API Key being used:', apiKey);
     const resp = await fetch("/grade", {
         method: "POST",
         headers: {"Content-Type": "application/json"},
@@ -245,7 +280,9 @@ async function gradeCurrentQuestion() {
             unit: currentUnitName,
             question_idx: idx,
             student_solution: studentSolution,
-            part_label: selectedPart
+            part_label: selectedPart,
+            model: model,
+            api_key: apiKey
         })
     });
     const data = await resp.json();  
@@ -265,7 +302,32 @@ async function gradeCurrentQuestion() {
         data.result === "fail" ? "status-incorrect" :
         "status-error";
 
-    document.getElementById("summary-box").textContent = data.summary;
+    document.getElementById("feedback-box").textContent = data.feedback;
     document.getElementById("full-explanation-box").textContent = data.full_explanation;
 }
+
+// ---------------------------
+// Unit Reloading
+// ---------------------------
+async function reloadUnitData() {
+    console.log("Reloading all units...");
+
+    const res = await fetch("/reload", { method: "POST" });
+    const data = await res.json();
+
+    if (data.status === "ok") {
+        console.log("Units reloaded.");
+
+        // Refresh the unit dropdown
+        await loadUnits();
+
+        // Re-load the currently selected unit
+        const unitName = document.getElementById("unit-select").value;
+        if (unitName) {
+            await loadUnit(unitName);
+        }
+    }
+}
+
+
 

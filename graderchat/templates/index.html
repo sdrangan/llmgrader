@@ -1,9 +1,26 @@
 <!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8">
+
 <html>
 <head>
-    <title>GraderChat</title>
+    <title>AI-Auto Grader</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
 </head>
+
+<!-- Top Banner -->
+<div class="nyu-banner">
+    <div class="left">
+        <img src="{{ url_for('static', filename='images/nyu-logo.png') }}"
+             alt="NYU Logo" class="nyu-logo">
+        <span class="title">OpenAI Grader for NYU Applied Hardware Design</span>
+    </div>
+
+    <div class="right">
+        <input id="apiKeyInput" type="password" placeholder="OpenAI API Key" class="key-box">
+        <button id="saveKeyBtn" class="save-btn">Save</button>
+    </div>
+</div>
 
 <body>
     <div class="container">
@@ -16,7 +33,9 @@
             <div class="control-row">
                 <label for="unit-select">Unit:</label>
                 <select id="unit-select"></select>
+                <button id="reload-unit" type="button" onclick="reloadUnitData()">Reload</button>
             </div>
+
 
             <div class="control-row">
                 <label for="question-number">Question:</label>
@@ -45,7 +64,7 @@
 
 
         <!-- Grade Button + Part Selector -->
-        <div class="panel grade-row">
+        <div class="grade-row">
             <button id="grade-button" onclick="gradeCurrentQuestion()">Grade</button>
 
             <span class="part-label">Part</span>
@@ -54,6 +73,16 @@
                 <!-- Filled dynamically -->
                 <option value="all">All</option>
             </select>
+
+            <label for="model-select" class="model-label">Model:</label>
+            <select id="model-select">
+                <option value="gpt-4.1-mini">gpt‑4.1‑mini</option>
+                <option value="gpt-5-mini">gpt‑5‑mini</option>
+                <option value="gpt-5.1">gpt‑5.1</option>
+                <option value="gpt-5.2">gpt‑5.2</option>
+            </select>
+
+
         </div>
 
 
@@ -65,13 +94,13 @@
         <!-- Grade Status -->
         <div id="grade-status" class="status-not-graded">
             Not graded
-        </div>
+        </div>  
 
         <div id="grading-output">
 
-            <h3>Summary</h3>
-            <div id="summary-box" class="panel">
-                No summary yet.
+            <h3>Feedback</h3>
+            <div id="feedback-box" class="panel">
+                No feedback yet.
             </div>
 
             <h3>Full Explanation</h3>

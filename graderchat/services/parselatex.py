@@ -1,8 +1,42 @@
 # parselatex.py:  module for parsing latex solution files
 
+import json
 import re
 from pathlib import Path
 import pandas as pd
+from openai import OpenAI
+import textwrap
+import json 
+
+def extract_json_block(text, left_char="{") -> str | None:
+    """
+    Extracts the first JSON block from the given text.  This is useful
+    for extracting JSON embedded in text in OpenAI responses.
+    
+    """
+    if left_char not in ["{", "["]:
+        raise ValueError("left_char must be '{' or '['")
+    if left_char == "{":
+        right_char = "}"
+    else:
+        right_char = "]"
+
+    # Find the first '{'
+    start = text.find(left_char)
+    if start == -1:
+        return None
+
+    brace_count = 0
+    for i in range(start, len(text)):
+        if text[i] == left_char:
+            brace_count += 1
+        elif text[i] == right_char:
+            brace_count -= 1
+            if brace_count == 0:
+                return text[start:i+1]
+
+    # Unbalanced braces
+    return None
 
 def split_top_level_items(enum_body: str) -> list[str]:
     lines = enum_body.splitlines()
@@ -203,4 +237,109 @@ def check_soln_core(schema, parsed_items, output_path):
 
     Path(output_path).write_text("\n".join(lines), encoding="utf-8")
 
-   
+def get_text_soln(
+        latex_path: str,
+        model : str = "gpt-4.1-mini") -> list[str]:
+    r"""
+    Given a LaTeX solution file path, extract the text-only versions.
+
+    The latex file is assumed to have the form:
+
+        <front matter>
+        \begin{enumerate}
+            \item <question 1 text>
+            \item <question 2 text>
+            ...
+        \end{enumerate}
+
+    Before processing, the solution and gradingnotes environments
+    are stripped out.
+
+    Parameters:
+    -----------
+    latex_path : str
+        Path to the LaTeX solution file.
+    Returns:
+    -------- 
+    data, list[str]
+        List of question texts in plain text.
+    """ 
+ 
+
+    # Read LaTeX
+    latex_text = Path(latex_path).read_text(encoding="utf-8")
+
+    # Strip the
+    envs = [
+        "solution",
+        "gradingnotes",
+    ]
+    for env in envs:
+        # Build a pattern like r"\\begin{solution}.*?\\end{solution}"
+        pattern = rf"\\begin{{{env}}}.*?\\end{{{env}}}"
+        latex_text = re.sub(pattern, "", latex_text, flags=re.DOTALL)
+
+    # Prepare task
+    task = textwrap.dedent(r"""
+    You are a LaTeX‑to‑plain‑text converter.
+
+    You will be given the full contents of a LaTeX file. The file has the structure:
+
+        <front matter>
+        \begin{enumerate}
+            \item <question 1 text>
+            \item <question 2 text>
+            ...
+        \end{enumerate}
+
+    Your task:
+
+    1. Ignore all front matter before \begin{enumerate}.
+    2. Extract each \item as a separate question.
+    3. Convert each question’s LaTeX into clean, readable ASCII text.
+    - Remove LaTeX commands.
+    - Preserve mathematical meaning using plain text (e.g., "x^2 + y^2").
+    - Omit figures, images, and environments that cannot be represented in text.
+    4. Return the result as a JSON array of strings, in order.
+
+    Your output must be ONLY valid JSON of the form:
+
+        ["question 1 text", "question 2 text", ...]
+
+    """)
+
+    # Create OpenAI client
+    client = OpenAI()
+
+    # Get response
+    print('Calling OpenAI to convert LaTeX to text...')
+    response = client.chat.completions.create(
+        model=model,
+        messages=[
+            {"role": "system", "content": task},
+            {"role": "user", "content": latex_text},
+        ],
+        temperature=0,
+    )
+    print('Finished calling OpenAI to convert LaTeX to text.')
+
+    raw = response.choices[0].message.content.strip()
+
+    # Extract JSON block
+    json_block = extract_json_block(raw, left_char="[")
+    if json_block is None:
+        raise RuntimeError(
+            f"Failed to find JSON output.\nModel returned:\n{raw}"
+        )
+    
+    # Parse JSON
+    try:
+        data = json.loads(json_block)
+        if not isinstance(data, list):
+            raise ValueError("Expected a JSON list")
+    except Exception as e:
+        raise RuntimeError(
+            f"Failed to parse JSON output.\nModel returned:\n{raw}"
+        ) from e
+
+    return data
