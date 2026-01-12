@@ -81,7 +81,8 @@ def main():
     - Remove LaTeX commands.
     - Preserve mathematical meaning using plain text (e.g., "x^2 + y^2").
     - Omit figures, images, and environments that cannot be represented in text.
-    4. Return the result as a JSON array of strings, in order.
+    4. Place newlines (\n) between paragraphs and code blocks as appropriate.
+    5. Return the result as a JSON array of strings, in order.
 
     Your output must be ONLY valid JSON of the form:
 

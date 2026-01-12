@@ -4,20 +4,15 @@ import os
 import argparse
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--no_qtext_reload", default=False, action="store_true",
-                    help="Disable question text reloading")
+parser.add_argument("--questions_repo", type=str, default=None,\
+                    help="Git repo URL for questions (if not local)")
 args = parser.parse_args()
-
-# Overwrite the default if specified
-args.no_qtext_reload = True
-
 questions_root = os.path.join(os.getcwd(), "questions")
 scratch_dir = os.path.join(os.getcwd(), "scratch")
 
 app = create_app(
     questions_root=questions_root, 
-    scratch_dir=scratch_dir,
-    qtext_reload=not args.no_qtext_reload)
+    scratch_dir=scratch_dir)
 
 if __name__ == "__main__":
     

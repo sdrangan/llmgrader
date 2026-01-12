@@ -4,8 +4,7 @@ from llmgrader.services.grader import Grader
 
 def create_app(
         questions_root : str ="questions", 
-        scratch_dir : str ="scratch", 
-        qtext_reload: bool =True):
+        scratch_dir : str ="scratch"):
     """
     Creates and configures the Flask application.
     
@@ -15,17 +14,12 @@ def create_app(
         Path to the root directory containing question units.
     scratch_dir: str
         Path to the scratch directory for temporary files.
-    qtext_reload: bool
-        Whether to enable question text reloading.
-        This will save time as each reload requires
-        reading/parsing LaTeX files.
     """
     app = Flask(__name__)
 
     grader = Grader(
         questions_root=questions_root, 
-        scratch_dir=scratch_dir, 
-        qtext_reload=qtext_reload)
+        scratch_dir=scratch_dir)
     controller = APIController(grader)
     controller.register(app)
 

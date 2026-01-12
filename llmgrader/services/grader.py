@@ -9,6 +9,9 @@ import json
 import pandas as pd
 from openai import OpenAI
 import xml.etree.ElementTree as ET
+import pandas as pd
+
+from llmgrader.services.repo import load_from_repo
 
 
 from pydantic import BaseModel
@@ -93,7 +96,8 @@ class Grader:
     def __init__(self, 
                  questions_root : str ="questions", 
                  scratch_dir : str ="scratch",
-                 qtext_reload: bool =True):
+                 remote_repo : str | None = "https://github.com/sdrangan/hwdesign-soln.git"
+                 ):
         """
         Main Grader service class.
 
@@ -103,15 +107,16 @@ class Grader:
             Path to the root directory containing question units.
         scratch_dir: str
             Path to the scratch directory for temporary files.
-        qtext_reload: bool
-            Whether to enable question text reloading.
-            This will save time as each reload requires
-            reading/parsing LaTeX files.
+        remote_repo: str | None
+            URL of the remote git repository containing questions.
+            If None, no repository is loaded.
         """
         self.questions_root = questions_root
         self.scratch_dir = scratch_dir
-        self.qtext_reload = qtext_reload
+        self.remote_repo = remote_repo
 
+    
+    
         # Initialize units dictionary
         self.units = {}
 
@@ -128,63 +133,59 @@ class Grader:
 
     def discover_units(self):
         """
-        Discovers question units in the questions_root directory.
-        Each subdirectory is expected to contain exactly one .tex file
-        with question and solutions formatted in LaTeX.
-        Optionally, a grading_schema.xml file can be included to specify
-        grading schema for the questions.
+        Discovers question units in the local_repo directory.
         """
-        units = {}
+
+        # Load the git repo if specified
+        self.local_repo = os.path.join(os.getcwd(), 'soln_repo')
+        if self.remote_repo is not None:
+            print('Loading questions repository from:', self.remote_repo)
+            load_from_repo(self.remote_repo, target_dir=self.local_repo)
+            print('Git repository loaded into:', self.local_repo)
 
         # Log the search process
         log = open(os.path.join(self.scratch_dir, "discovery_log.txt"), "w")
 
-        # List everything inside the root directory
-        for name in os.listdir(self.questions_root):
-            folder = os.path.join(self.questions_root, name)
+        # Look for the units.csv file in the local_repo directory
+        units_csv_path = os.path.join(self.local_repo, "units.csv")
 
-            # Only consider subdirectories
-            if not os.path.isdir(folder):
-                continue
+        # Check if units.csv exists
+        if not os.path.exists(units_csv_path):
+            log.write(f'No units.csv file found in {self.local_repo}.\n')
+            self.units = {}
+            log.close()
+            return
+        
+        # Check if has required columns
+        units_df = pd.read_csv(units_csv_path)
+        required = {"unit_name", "soln_fn"}
+        if not required.issubset(units_df.columns):
+            missing = required - set(units_df.columns)
+            log.write(f"units.csv is missing required columns: {missing}\n")
+            self.units = {}
+            log.close()
+            return
+        
+        # Get the columns as lists        
+        self.units_list = units_df['unit_name'].tolist()
+        self.soln_fn_list = units_df['soln_fn'].tolist()
 
-            # Find .tex files in the folder
-            tex_files = [
-                f for f in os.listdir(folder)
-                if f.endswith(".tex")
-            ]
+        units = {}
+
     
-            log.write(f'Checking folder: {folder}\n')
-            log.write(f'  Found .tex files: {tex_files}\n')
+        # Loop over each unit and specified solution file
+        for name, soln_fn in zip(self.units_list, self.soln_fn_list):
+            soln_fn = os.path.normpath(soln_fn)
+            tex_path = os.path.join(self.local_repo, soln_fn)
+            soln_folder = os.path.dirname(tex_path)
 
-            # Require exactly one latex file
-            if len(tex_files) != 1:
-                log.write(f"Skipping folder {folder}: expected exactly one .tex file, found {len(tex_files)} .tex files.\n")
+            log.write(f'Processing unit: {name}\n')
+            log.write(f'  Solution file: {soln_fn}\n')
+
+            # Check that the path exists
+            if not os.path.exists(tex_path):
+                log.write(f"Skipping unit {name}: file {tex_path} does not exist.\n")
                 continue
-            tex_path = os.path.join(folder, tex_files[0])
-
-            # Check if we need to reload question text
-            need_new = False
-            questions_path = os.path.join(folder, f"{name}_questions.json")
-            if os.path.exists(questions_path):
-                log.write(f'  Found existing question text JSON file: {questions_path}\n')
-                try:
-                    with open(questions_path, "r", encoding="utf-8") as f:
-                        questions_text = json.load(f)
-                except Exception:
-                    log.write(f'  Failed to load existing question text file. Will regenerate.\n')  
-                    need_new = True
-            else:
-                need_new = True
-
-
-            if need_new:
-                log.write(f'  Generating question text JSON using OpenAI...\n')
-                # Call the OpenAI to convert LaTeX to text
-                questions_text = get_text_soln(tex_path,  model="gpt-4.1-mini")
-
-                # Save the question text for future use
-                with open(questions_path, "w", encoding="utf-8") as f:
-                    json.dump(questions_text, f)
 
             # Load LaTeX (original source)
             with open(tex_path, "r", encoding="utf-8") as f:
@@ -192,33 +193,62 @@ class Grader:
 
             # Parse the latex solution 
             parsed_items = parse_latex_soln(latex_text)
+
             questions_latex = []
             ref_soln = []
             grading = []
             for item in parsed_items:
-                questions_latex.append(item["question"])
-                ref_soln.append(item["solution"])
+                q = item["question"]
+                if q is None:
+                    q = "No question found"
+                questions_latex.append(q)
+                s = item["solution"]
+                if s is None:
+                    s = "No solution provided"
+                ref_soln.append(s)
 
             log.write(f'  Parsed items: {len(parsed_items)}\n')
 
-            # Write parsed question text for debugging
-            qtext_fn = os.path.join(self.scratch_dir, f"{name}_questions.txt")
-            with open(qtext_fn, "w", encoding="utf-8") as f:
-                for i, qtext in enumerate(questions_text):
-                    f.write(f"Question {i+1}:\n")
-                    f.write(f"---------------\n")
-                    f.write(qtext + "\n")
-                    f.write("\n")
-            log.write(f'  Wrote question text to {qtext_fn}\n')
+            # Get the question text JSON, either by loading existing or generating new
+            base = os.path.basename(soln_fn)      # "soln.tex"
+            stem, _ = os.path.splitext(base)      # ("soln", ".tex")
+            question_fn = stem + ".json"          # "soln.json"
+            question_fn = os.path.join(soln_folder, question_fn)
+
+
+            # Check if an ASCII version of the question text exists
+            if os.path.exists(question_fn):
+                log.write(f'  Found existing question text JSON file: {question_fn}\n')
+                try:
+                    with open(question_fn, "r", encoding="utf-8") as f:
+                        questions_text = json.load(f)
+                except Exception:
+                    log.write(f'  Failed to load existing question text file.\n')  
+                    questions_text = None
+            else:
+                log.write(f'  No existing question text JSON file found: {question_fn}\n')
+                questions_text = None
+
+            # Check if questions_text is valid
+            if not (questions_text is None):
+                if (len(questions_text) != len(parsed_items)):
+                    log.write(f'  Existing question text has {len(questions_text)} items, expected {len(parsed_items)}.\n')
+                    questions_text = None 
+
+            # If not valid, use the LaTeX version
+            if questions_text is None:
+                questions_text = questions_latex
+                log.write(f'  Using LaTeX question text as fallback.\n')
 
             # Parse the grade_schema.xml file to get the grading notes and part labels
-            grade_schema_path = os.path.join(folder, f"grade_schema.xml")
+            grade_schema_path = os.path.join(soln_folder, f"grade_schema.xml")
             if not os.path.exists(grade_schema_path):
-                log.write(f'  No grading_schema.xml file found in {folder}. Using empty grading notes.\n')
+                log.write(f'  No grading_schema.xml file found in {soln_folder}. Using empty grading notes.\n')
                 # Create empty grading notes and part labels
                 grading = [""] * len(questions_latex)
                 part_labels = [["all"] for _ in range(len(questions_latex))]
             else:
+                log.write(f'  Found grading_schema.xml file: {grade_schema_path}\n')
                 questions = parse_grading_schema(grade_schema_path)
                 grading = [q["grading"] for q in questions]
                 part_labels = [q["part_labels"] for q in questions]
@@ -226,7 +256,7 @@ class Grader:
 
             # Save unit info
             units[name] = {
-                "folder": folder,
+                "folder": soln_folder,
                 "tex_path": tex_path,
                 "latex": latex_text,
                 "questions_text": questions_text,
@@ -240,9 +270,7 @@ class Grader:
 
         if len(self.units) == 0:
             log.write("No valid directories units found.\n")    
-            log.close() 
-            raise ValueError("No valid directories units found in '%s'." % self.questions_root)
-        
+         
         log.close()
     
     

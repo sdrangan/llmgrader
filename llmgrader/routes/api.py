@@ -128,8 +128,3 @@ class APIController:
 
                 
         app.register_blueprint(bp)
-
-        print("=== ROUTES REGISTERED ===")
-        for rule in app.url_map.iter_rules():
-            print(rule)
-        print("==========================")
