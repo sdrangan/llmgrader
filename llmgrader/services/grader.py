@@ -5,11 +5,9 @@ import shutil
 from pathlib import Path
 import json
 import os
-import json
 import pandas as pd
 from openai import OpenAI
 import xml.etree.ElementTree as ET
-import pandas as pd
 
 from llmgrader.services.repo import load_from_repo
 
@@ -96,7 +94,7 @@ class Grader:
     def __init__(self, 
                  questions_root : str ="questions", 
                  scratch_dir : str ="scratch",
-                 remote_repo : str | None = "https://github.com/sdrangan/hwdesign-soln.git"
+                 remote_repo : str | None = None
                  ):
         """
         Main Grader service class.
@@ -135,16 +133,26 @@ class Grader:
         """
         Discovers question units in the local_repo directory.
         """
-
-        # Load the git repo if specified
-        self.local_repo = os.path.join(os.getcwd(), 'soln_repo')
-        if self.remote_repo is not None:
-            print('Loading questions repository from:', self.remote_repo)
-            load_from_repo(self.remote_repo, target_dir=self.local_repo)
-            print('Git repository loaded into:', self.local_repo)
+        self.units = {}
 
         # Log the search process
         log = open(os.path.join(self.scratch_dir, "discovery_log.txt"), "w")
+
+        # Get the local repo path
+        env_path = os.environ.get("SOLN_REPO_PATH")
+        if env_path:
+            self.local_repo = env_path
+        else:
+            self.local_repo = os.path.join(os.getcwd(), "soln_repo")
+        log.write('Using local repository path: ' + self.local_repo + '\n')
+
+        # Load the git repo if specified
+        if self.remote_repo is not None:
+            log.write('Loading questions repository from: ' + self.remote_repo + '\n')
+            load_from_repo(self.remote_repo, target_dir=self.local_repo)
+            log.write('Git repository loaded into: ' + self.local_repo + '\n')
+        else:
+            log.write('No remote repository specified. Using local files only.\n')
 
         # Look for the units.csv file in the local_repo directory
         units_csv_path = os.path.join(self.local_repo, "units.csv")
