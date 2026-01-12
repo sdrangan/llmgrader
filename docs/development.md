@@ -18,3 +18,14 @@ To enable GitHub Pages:
 2. Set Branch: main
 3. Set Folder: /docs
 4. Save
+
+## Creating the requirements file
+
+Since we are deploying to render.com, we have to be picky about the requirements.txt:
+
+- In render, add the environment variable `PYTHON_VERSION=3.12.3`. 
+- In the `requirements.txt`:
+   - Replace `pydantic` with `pydantic==1.10.15`
+   - Remove `pydantic_core`
+   - Remove `rpds-py`
+ 
