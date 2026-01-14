@@ -275,3 +275,14 @@ textarea {
     font-size: 0.9em;
     box-sizing: border-box;
 }
+
+/* Timeout input field */
+.timeout-label {
+    margin-left: 10px;
+}
+
+.timeout-input {
+    width: 60px;
+    margin-left: 4px;
+}
+

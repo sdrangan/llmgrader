@@ -237,6 +237,8 @@ async function gradeCurrentQuestion() {
         return;
     }
 
+    const timeout = Number(document.getElementById("timeout-input").value);
+
     const gradeBtn = document.getElementById("grade-button");
     gradeBtn.disabled = true;
     gradeBtn.textContent = "Grading...";
@@ -252,7 +254,8 @@ async function gradeCurrentQuestion() {
             student_solution: studentSolution,
             part_label: selectedPart,
             model: model,
-            api_key: apiKey
+            api_key: apiKey,
+            timeout: timeout
         })
     });
 
