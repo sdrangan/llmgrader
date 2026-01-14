@@ -62,6 +62,8 @@ class APIController:
             part_label = data.get("part_label", "all")
             model = data.get("model", "gpt-4.1-mini")
             api_key = data.get("api_key", None)
+            timeout = data.get("timeout", 20)
+
 
             # Retrieve the question data
             u = self.grader.units[unit]
@@ -114,7 +116,8 @@ class APIController:
                 student_soln=student_soln,
                 part_label=part_label,
                 model=model,
-                api_key=api_key
+                api_key=api_key,
+                timeout=timeout
             )
 
             return jsonify(grade_result)

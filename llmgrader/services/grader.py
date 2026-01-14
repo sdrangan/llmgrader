@@ -5,7 +5,7 @@ from pathlib import Path
 import json
 import os
 import pandas as pd
-from openai import OpenAI
+from openai import OpenAI, APITimeoutError
 import xml.etree.ElementTree as ET
 import zipfile
 from datetime import datetime
@@ -40,7 +40,7 @@ class Grader:
     def __init__(self, 
                  questions_root : str ="questions", 
                  scratch_dir : str ="scratch",
-                 remote_repo : str | None = None
+                 remote_repo : str | None = None,
                  ):
         """
         Main Grader service class.
@@ -59,8 +59,7 @@ class Grader:
         self.scratch_dir = scratch_dir
         self.remote_repo = remote_repo
 
-    
-    
+
         # Initialize units dictionary
         self.units = {}
 
@@ -348,7 +347,8 @@ class Grader:
             student_soln : str, 
             part_label: str="all", 
             model: str="gpt-4.1-mini",
-            api_key: str | None = None) -> GradeResult:
+            api_key: str | None = None,
+            timeout: float = 20.) -> GradeResult:
         """
         Grades a student's solution using the OpenAI API.
         
@@ -368,6 +368,8 @@ class Grader:
             The OpenAI model to use for grading.
         api_key: str | None
             The OpenAI API key to use for authentication.
+        timeout: float
+            The timeout in seconds for the OpenAI API call.
 
         Returns
         -------
@@ -418,10 +420,16 @@ class Grader:
                 model=model,
                 input=task,
                 text_format=GradeResult,
-                temperature=temperature
+                temperature=temperature,
+                timeout=timeout
             )   
             print('Received response from OpenAI.')
             grade = response.output_parsed.model_dump()
+        except APITimeoutError:
+            grade = {
+                'result': 'error', 
+                'full_explanation': f'OpenAI API exceeded time out limit of {timeout} seconds.', 
+                'feedback': 'The grading request took too long to process.'}
         except Exception as e:
             grade = {
                 'result': 'error', 
