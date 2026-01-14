@@ -1,5 +1,4 @@
 import textwrap
-from llmgrader.services.parselatex import parse_latex_soln, get_text_soln, extract_json_block
 import os
 import shutil
 from pathlib import Path
@@ -10,6 +9,7 @@ from openai import OpenAI
 import xml.etree.ElementTree as ET
 import zipfile
 from datetime import datetime
+from llmgrader.services.parselatex import parse_latex_soln
 
 from llmgrader.services.repo import load_from_repo
 
@@ -24,62 +24,6 @@ class GradeResult(BaseModel):
     full_explanation: str
     feedback: str
 
-def parse_grading_schema(path : str) -> list[dict]:
-    """
-    Parses the grading schema XML file.
-
-    Parameters
-    ----------
-    path: str
-        Path to the grading_schema.xml file.
-    Returns
-    -------
-    List of question grading schema dictionaries.
-    Each dictionary contains:
-    - id: Question ID
-    - grading_notes: Grading notes text
-    - grade: Boolean indicating if the question should be graded
-    - preferred_model: Preferred OpenAI model for grading
-    - part_labels: List of part labels
-    - points: List of points corresponding to each part
-    """
-    tree = ET.parse(path)
-    root = tree.getroot()
-
-    questions = []
-
-    for question in root.findall("question"):
-        qid = question.get("id")
-
-        # Extract and clean grading notes (CDATA or plain text)
-        raw_notes = question.findtext("grading_notes", default="")
-        grading = textwrap.dedent(raw_notes).strip()
-
-        # Boolean field
-        grade_flag = question.findtext("grade", default="false").strip().lower() == "true"
-
-        # Preferred model
-        preferred_model = question.findtext("preferred_model", default="gpt-4.1-mini").strip()
-
-        # Parts
-        part_labels = []
-        points = []
-        for part in question.find("parts").findall("part"):
-            label = part.findtext("part_label").strip()
-            points0 = float(part.findtext("points"))    
-            part_labels.append(label)
-            points.append(points0)
-
-        questions.append({
-            "id": qid,
-            "grading": grading,
-            "grade": grade_flag,
-            "preferred_model": preferred_model,
-            "part_labels": part_labels,
-            "points": points
-        })
-
-    return questions
 
 
 def strip_code_fences(text):
@@ -147,7 +91,7 @@ class Grader:
         if env_path:
             parent_repo = env_path
         else:
-            parent_repo = os.path.join(os.getcwd(), "soln_repo")
+            parent_repo = os.path.join(os.getcwd(), 'soln_repos')
         
         # If the directory doesn't exist, create it
         os.makedirs(parent_repo, exist_ok=True)
@@ -243,7 +187,7 @@ class Grader:
         
         # Check if has required columns
         units_df = pd.read_csv(units_csv_path)
-        required = {"unit_name", "soln_fn"}
+        required = {"unit_name", "json_path"}
         if not required.issubset(units_df.columns):
             missing = required - set(units_df.columns)
             log.write(f"units.csv is missing required columns: {missing}\n")
@@ -253,103 +197,58 @@ class Grader:
         
         # Get the columns as lists        
         self.units_list = units_df['unit_name'].tolist()
-        self.soln_fn_list = units_df['soln_fn'].tolist()
+        self.json_path_list = units_df['json_path'].tolist()
 
         units = {}
 
-    
         # Loop over each unit and specified solution file
-        for name, soln_fn in zip(self.units_list, self.soln_fn_list):
-            soln_fn = os.path.normpath(soln_fn)
-            tex_path = os.path.join(local_repo, soln_fn)
-            soln_folder = os.path.dirname(tex_path)
+        for name, json_path in zip(self.units_list, self.json_path_list):
+
+
+            json_path = os.path.normpath(json_path)
+            json_path = os.path.join(local_repo, json_path)
 
             log.write(f'Processing unit: {name}\n')
-            log.write(f'  Solution file: {soln_fn}\n')
+            log.write(f'  JSON file: {json_path}\n')
 
             # Check that the path exists
-            if not os.path.exists(tex_path):
-                log.write(f"Skipping unit {name}: file {tex_path} does not exist.\n")
+            if not os.path.exists(json_path):
+                log.write(f"Skipping unit {name}: file {json_path} does not exist.\n")
                 continue
 
-            # Load LaTeX (original source)
-            with open(tex_path, "r", encoding="utf-8") as f:
-                latex_text = f.read()
+            with open(json_path, "r", encoding="utf-8") as f:
+                unit_dict = json.load(f)    
 
-            # Parse the latex solution 
-            parsed_items = parse_latex_soln(latex_text)
+            # Validate the unit_dict has required fields
+            required_fields = [
+                "question_latex",
+                "question_text",
+                "solution",
+                "grading_notes",
+                "parts",
+                "id",
+                "grade",
+            ]
 
-            questions_latex = []
-            ref_soln = []
-            grading = []
-            for item in parsed_items:
-                q = item["question"]
-                if q is None:
-                    q = "No question found"
-                questions_latex.append(q)
-                s = item["solution"]
-                if s is None:
-                    s = "No solution provided"
-                ref_soln.append(s)
+            if not isinstance(unit_dict, dict):
+                log.write(f"Skipping unit {name}: JSON content is not a dictionary.\n")
+                continue
+            
+            # Check that every question has the required fields
+            for qtag in unit_dict:
+                qdict = unit_dict[qtag]
+                missing_fields = [field for field in required_fields if field not in qdict]
+                if missing_fields:
+                    log.write(f"Skipping unit {name}, question {qtag}: missing required fields: {missing_fields}\n")
+                    continue
+                
+            # Log questions found
+            log.write(f"Unit {name} successfully loaded with questions:\n")
+            for qtag in unit_dict:
+                log.write(f"  qtag={qtag} \n")
 
-            log.write(f'  Parsed items: {len(parsed_items)}\n')
+            units[name] = unit_dict
 
-            # Get the question text JSON, either by loading existing or generating new
-            base = os.path.basename(soln_fn)      # "soln.tex"
-            stem, _ = os.path.splitext(base)      # ("soln", ".tex")
-            question_fn = stem + ".json"          # "soln.json"
-            question_fn = os.path.join(soln_folder, question_fn)
-
-
-            # Check if an ASCII version of the question text exists
-            if os.path.exists(question_fn):
-                log.write(f'  Found existing question text JSON file: {question_fn}\n')
-                try:
-                    with open(question_fn, "r", encoding="utf-8") as f:
-                        questions_text = json.load(f)
-                except Exception:
-                    log.write(f'  Failed to load existing question text file.\n')  
-                    questions_text = None
-            else:
-                log.write(f'  No existing question text JSON file found: {question_fn}\n')
-                questions_text = None
-
-            # Check if questions_text is valid
-            if not (questions_text is None):
-                if (len(questions_text) != len(parsed_items)):
-                    log.write(f'  Existing question text has {len(questions_text)} items, expected {len(parsed_items)}.\n')
-                    questions_text = None 
-
-            # If not valid, use the LaTeX version
-            if questions_text is None:
-                questions_text = questions_latex
-                log.write(f'  Using LaTeX question text as fallback.\n')
-
-            # Parse the grade_schema.xml file to get the grading notes and part labels
-            grade_schema_path = os.path.join(soln_folder, f"grade_schema.xml")
-            if not os.path.exists(grade_schema_path):
-                log.write(f'  No grading_schema.xml file found in {soln_folder}. Using empty grading notes.\n')
-                # Create empty grading notes and part labels
-                grading = [""] * len(questions_latex)
-                part_labels = [["all"] for _ in range(len(questions_latex))]
-            else:
-                log.write(f'  Found grading_schema.xml file: {grade_schema_path}\n')
-                questions = parse_grading_schema(grade_schema_path)
-                grading = [q["grading"] for q in questions]
-                part_labels = [q["part_labels"] for q in questions]
-                log.write(f'  Parsed grading notes and part labels from {grade_schema_path}\n')
-
-            # Save unit info
-            units[name] = {
-                "folder": soln_folder,
-                "tex_path": tex_path,
-                "latex": latex_text,
-                "questions_text": questions_text,
-                "questions_latex": questions_latex,
-                "solutions": ref_soln,
-                "grading": grading,
-                "part_labels": part_labels,
-            }
 
         self.units = units
 
@@ -539,21 +438,26 @@ class Grader:
         
     
     def load_solution_file(self, text):
+        """
+        Parse a student solution file or reference solution file.
+        Return a dict keyed by qtag, matching the new JSON structure.
+        """
 
-        # Parse the latex solution file
-        items = parse_latex_soln(text)
+        # Parse the LaTeX solution file
+        items = parse_latex_soln(text)   # now returns dict: qtag -> {question, solution, grading}
 
-        quest_list = [item.get("question", "") for item in items]
-        soln_list = [item.get("solution", "") for item in items]
-        grading_notes_list = [item.get("grading", "") for item in items]
-        resp = {
-            "num_questions": len(items),
-            "questions": quest_list,
-            "solutions": soln_list,
-            "grading_notes": grading_notes_list
-        }
-        print("Loaded solution file with %d items." % len(items))
-    
-    
-        # You don’t need to return anything yet
+        if not isinstance(items, dict):
+            print("ERROR: parse_latex_soln did not return a dict keyed by qtag.")
+            return {"error": "Invalid solution file format"}
+
+        resp = {}
+        for qtag, entry in items.items():
+            resp[qtag] = {
+                "question_latex": entry.get("question_latex", ""),
+                "solution": entry.get("solution", ""),
+                "grading_notes": entry.get("grading", "")
+            }
+
+        print(f"Loaded solution file with {len(resp)} qtags.")
         return resp
+    

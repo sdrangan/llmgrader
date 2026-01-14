@@ -1,345 +1,333 @@
-# parselatex.py:  module for parsing latex solution files
-
-import json
+# Parses LaTeX documents and grading_schema 
+# to extract information from all the environments
 import re
-from pathlib import Path
-import pandas as pd
-from openai import OpenAI
 import textwrap
-import json 
+import xml.etree.ElementTree as ET
 
-def extract_json_block(text, left_char="{") -> str | None:
+def find_duplicates(seq):
     """
-    Extracts the first JSON block from the given text.  This is useful
-    for extracting JSON embedded in text in OpenAI responses.
-    
-    """
-    if left_char not in ["{", "["]:
-        raise ValueError("left_char must be '{' or '['")
-    if left_char == "{":
-        right_char = "}"
-    else:
-        right_char = "]"
+    Finds duplicate items in a sequence.
 
-    # Find the first '{'
-    start = text.find(left_char)
-    if start == -1:
+    Parameters
+    ----------
+    seq:  iterable
+        Sequence to check for duplicates.
+    Returns
+    -------
+    dupes:  set
+        Set of duplicate items found in the sequence.
+    """
+    seen = set()
+    dupes = set()
+    for x in seq:
+        if x in seen:
+            dupes.add(x)
+        else:
+            seen.add(x)
+    return dupes
+
+def extract_enumerate_body(latex: str) -> str | None:
+    """
+    Extract the content inside the first *top-level* enumerate environment.
+    Correctly handles nested enumerate/itemize environments.
+    """
+    # Find the first \begin{enumerate}
+    m = re.search(r'\\begin{enumerate}', latex)
+    if not m:
         return None
 
-    brace_count = 0
-    for i in range(start, len(text)):
-        if text[i] == left_char:
-            brace_count += 1
-        elif text[i] == right_char:
-            brace_count -= 1
-            if brace_count == 0:
-                return text[start:i+1]
+    start = m.end()  # position right after \begin{enumerate}
+    i = start
+    n = len(latex)
+    depth = 1  # we've seen one \begin{enumerate}
 
-    # Unbalanced braces
-    return None
-
-def split_top_level_items(enum_body: str) -> list[str]:
-    lines = enum_body.splitlines()
-    items = []
-    current = []
-    stack = []
-    seen_first_item = False
-
-    for line in lines:
-        # Track environment starts
-        if "\\begin{" in line:
-            env = re.findall(r"\\begin{([^}]+)}", line)
-            if env:
-                stack.append(env[0])
-
-        # Detect top-level \item
-        if line.strip().startswith("\\item") and stack == ["enumerate"]:
-            seen_first_item = True
-            # Start a new item
-            if current:
-                items.append("\n".join(current).strip())
-                current = []
-            current.append(line)
-        else:
-            if seen_first_item:
-                current.append(line)
-
-        # Track environment ends
-        if "\\end{" in line:
-            env = re.findall(r"\\end{([^}]+)}", line)
-            if env and stack and stack[-1] == env[0]:
-                stack.pop()
-
-    # Add the last item
-    if current:
-        items.append("\n".join(current).strip())
-
-    return items
-
-def extract_outer_enumerate(text: str) -> str:
-    lines = text.splitlines()
-    stack = []
-    captured = []
-    recording = False
-
-    for line in lines:
-        if "\\begin{enumerate}" in line:
-            stack.append("enumerate")
-            if not recording:
-                # This is the OUTER enumerate
-                recording = True
-                captured.append(line)
+    while i < n:
+        # Look for any \begin{...} or \end{...}
+        if latex.startswith(r'\begin{', i):
+            m2 = re.match(r'\\begin\{([^\}]*)\}', latex[i:])
+            if m2:
+                env = m2.group(1)
+                if env == 'enumerate':
+                    depth += 1
+                i += len(m2.group(0))
                 continue
 
-        if "\\end{enumerate}" in line:
-            if recording:
-                captured.append(line)
-            if stack:
-                stack.pop()
-            if recording and len(stack) == 0:
-                # Finished capturing the OUTER enumerate
-                return "\n".join(captured)
+        if latex.startswith(r'\end{', i):
+            m2 = re.match(r'\\end\{([^\}]*)\}', latex[i:])
+            if m2:
+                env = m2.group(1)
+                if env == 'enumerate':
+                    depth -= 1
+                    if depth == 0:
+                        # i is at the backslash of the matching \end{enumerate}
+                        end = i
+                        return latex[start:end]
+                i += len(m2.group(0))
+                continue
+
+        i += 1
+
+    # If we get here, the enumerate wasn't properly closed
+    return None
+
+def split_top_level_items(body: str) -> list[str]:
+    items = []
+    i = 0
+    n = len(body)
+
+    current = []
+    depth_env = 0
+    seen_first_item = False
+
+    while i < n:
+        # Detect environment begin
+        if body.startswith(r'\begin{', i):
+            m = re.match(r'\\begin\{([^\}]*)\}', body[i:])
+            if m:
+                env = m.group(1)
+                if env in ('enumerate', 'itemize'):
+                    depth_env += 1
+                current.append(body[i:i+len(m.group(0))])
+                i += len(m.group(0))
+                continue
+
+        # Detect environment end
+        if body.startswith(r'\end{', i):
+            m = re.match(r'\\end\{([^\}]*)\}', body[i:])
+            if m:
+                env = m.group(1)
+                if env in ('enumerate', 'itemize'):
+                    depth_env -= 1
+                current.append(body[i:i+len(m.group(0))])
+                i += len(m.group(0))
+                continue
+
+        # Detect top-level \item
+        if body.startswith(r'\item', i) and depth_env == 0:
+            if seen_first_item:
+                # flush previous item
+                item_text = ''.join(current).strip()
+                if item_text:
+                    items.append(item_text)
+                current = []
+            else:
+                seen_first_item = True
+
+            # consume \item
+            current.append(r'\item')
+            i += len(r'\item')
             continue
 
-        if recording:
-            captured.append(line)
+        # Default: accumulate characters
+        current.append(body[i])
+        i += 1
 
-    return ""
+    # Only flush the final item if we actually saw an \item
+    if seen_first_item:
+        item_text = ''.join(current).strip()
+        if item_text:
+            items.append(item_text)
 
-def parse_latex_soln(text : str) -> list[dict]:
-    r"""
-    Parse the LaTeX solution file and return a list of items.
+    # Remove leading \item from each item
+    cleaned = [
+        re.sub(r'^\\item\s*', '', it, flags=re.S)
+        for it in items
+    ]
 
-    The solution file is expected to have an enumerate environment
-    with items that may contain question, solution, and grading notes.
+    return cleaned
 
-    \begin{enumerate}
-    \item Question text
+def extract_qtag_and_text(item: str) -> dict:
+    """
+    Extract qtag, question text, and solution text from a LaTeX item.
+
+    Expected structure:
+
+        \qtag{...}  question text
         \begin{solution}
-        Solution text
+            solution text
         \end{solution}
-        \begin{gradingnotes}
-        Grading notes text
-        \end{gradingnotes}
-    \item Another question...
-    \end{enumerate}
 
-    Parameters:
-    -----------
-    text : str
-        Text of the LaTeX solution file.  This should be performed with a file read.
     Returns:
-    --------
-    List[dict]
-        List of items, each item is a dict with keys: question, solution, grading.
-        Missing fields are set to None.
+        {
+            "qtag": str | None,
+            "latex": str,        # question text only
+            "solution": str | None
+        }
     """
 
-    # Extract everything inside the enumerate
-    enum_body = extract_outer_enumerate(text)
+    # --- 1. Extract qtag if present ---
+    qtag = None
+    m = re.match(r'\\qtag\{([^}]*)\}\s*(.*)', item, re.S)
+    if m:
+        qtag = m.group(1).strip()
+        body = m.group(2)
+    else:
+        body = item
 
-    # Split into items
-    raw_items = split_top_level_items(enum_body)
+    # --- 2. Extract solution environment if present ---
+    sol_pattern = r'\\begin{solution}(.*?)\\end{solution}'
+    sol_match = re.search(sol_pattern, body, re.S)
 
-    # Remove leading empty entry if present
-    if raw_items and raw_items[0].strip() == "":
-        raw_items = raw_items[1:]
+    if sol_match:
+        solution_text = sol_match.group(1).strip()
+        # Remove the entire solution environment from the question text
+        question_text = re.sub(sol_pattern, '', body, flags=re.S).strip()
+    else:
+        solution_text = None
+        question_text = body.strip()
 
-    items = []
-
-    for raw in raw_items:
-        raw = raw.strip()
-
-        # Extract question = text before first environment
-        # (solution or gradingnotes)
-        q_match = re.split(r"\\begin{solution}|\\begin{gradingnotes}", raw, maxsplit=1)
-        question = q_match[0].strip() if q_match else None
-        if question == "":
-            question = None
-
-        # Extract solution
-        sol_match = re.search(
-            r"\\begin{solution}(.*?)\\end{solution}", raw, re.S
-        )
-        solution = sol_match.group(1).strip() if sol_match else None
-
-        # Extract grading notes
-        grade_match = re.search(
-            r"\\begin{gradingnotes}(.*?)\\end{gradingnotes}", raw, re.S
-        )
-        grading = grade_match.group(1).strip() if grade_match else None
-
-        items.append({
-            "question": question,
-            "solution": solution,
-            "grading": grading
-        })
-
-    return items
+    return {
+        "qtag": qtag,
+        "latex": question_text,
+        "solution": solution_text,
+    }
 
 
-def load_schema(path: str) -> list[dict]:
-    df = pd.read_csv(path)
-
-    # Strip whitespace from all *string* columns except question_name
-    for col in df.columns:
-        if col != "question_name" and df[col].dtype == object:
-            df[col] = df[col].map(lambda x: x.strip() if isinstance(x, str) else x)
-
-    # Normalize booleans
-    df['grade'] = df['grade'].str.lower().isin(['1', 'true', 'yes'])
-
-    # Normalize points
-    df['points'] = df['points'].astype(int)
-
-    return df.to_dict(orient='records')
-
-
-def check_soln_core(schema, parsed_items, output_path):
-    lines = []
-    lines.append("Parsed Solution Summary")
-    lines.append("=" * 60)
-    lines.append("")
-
-    max_len = max(len(schema), len(parsed_items))
-
-    for i in range(max_len):
-        if i < len(schema):
-            row = schema[i]
-            qname = row["question_name"]
-            reqd = row["grade"]
-            pts = row["points"]
-        else:
-            qname = f"Extra item {i+1}"
-            reqd = False
-            pts = 0
-
-        soln = parsed_items[i].get("solution") if i < len(parsed_items) else None
-
-        lines.append(f"Question {i+1}: {qname}")
-        lines.append(f"Required: {'Yes' if reqd else 'No'}")
-        lines.append(f"Points: {pts}")
-
-        if soln is None or soln.strip() == "":
-            lines.append("Solution: None present")
-        else:
-            lines.append("Solution:")
-            for line in soln.splitlines():
-                lines.append(f"    {line}")
-
-        lines.append("-" * 60)
-        lines.append("")
-
-        if reqd is True and (soln is None or soln.strip() == ""):
-            line = f"WARNING: Required solution for question {i+1} is missing!"
-            print(line)
-            lines.append(line)
-
-    Path(output_path).write_text("\n".join(lines), encoding="utf-8")
-
-def get_text_soln(
-        latex_path: str,
-        model : str = "gpt-4.1-mini") -> list[str]:
+def parse_latex_soln(
+        latex: str) -> dict[str, dict]:
     r"""
-    Given a LaTeX solution file path, extract the text-only versions.
+    This method parses a LateX document of the form:
 
-    The latex file is assumed to have the form:
+    <front matter>
+    \begin{enumerate}
+        \item \qtag{...} 
+        Question 1 text
+        \begin{solution}
+        Solution 1 text
+        \end{solution}
+         ...
+        \item \qtag{...} 
+        Question 2 text
+        \begin{solution}
+        Solution 2 text
+        \end{solution}
+        ...
+    \end{enumerate}
 
-        <front matter>
-        \begin{enumerate}
-            \item <question 1 text>
-            \item <question 2 text>
-            ...
-        \end{enumerate}
 
-    Before processing, the solution and gradingnotes environments
-    are stripped out.
+    Full pipeline:
+    - find enumerate
+    - split items
+    - extract qtags
 
-    Parameters:
-    -----------
-    latex_path : str
-        Path to the LaTeX solution file.
-    Returns:
-    -------- 
-    data, list[str]
-        List of question texts in plain text.
-    """ 
- 
-
-    # Read LaTeX
-    latex_text = Path(latex_path).read_text(encoding="utf-8")
-
-    # Strip the
-    envs = [
-        "solution",
-        "gradingnotes",
-    ]
-    for env in envs:
-        # Build a pattern like r"\\begin{solution}.*?\\end{solution}"
-        pattern = rf"\\begin{{{env}}}.*?\\end{{{env}}}"
-        latex_text = re.sub(pattern, "", latex_text, flags=re.DOTALL)
-
-    # Prepare task
-    task = textwrap.dedent(r"""
-    You are a LaTeX‑to‑plain‑text converter.
-
-    You will be given the full contents of a LaTeX file. The file has the structure:
-
-        <front matter>
-        \begin{enumerate}
-            \item <question 1 text>
-            \item <question 2 text>
-            ...
-        \end{enumerate}
-
-    Your task:
-
-    1. Ignore all front matter before \begin{enumerate}.
-    2. Extract each \item as a separate question.
-    3. Convert each question’s LaTeX into clean, readable ASCII text.
-    - Remove LaTeX commands.
-    - Preserve mathematical meaning using plain text (e.g., "x^2 + y^2").
-    - Omit figures, images, and environments that cannot be represented in text.
-    4. Return the result as a JSON array of strings, in order.
-
-    Your output must be ONLY valid JSON of the form:
-
-        ["question 1 text", "question 2 text", ...]
-
-    """)
-
-    # Create OpenAI client
-    client = OpenAI()
-
-    # Get response
-    print('Calling OpenAI to convert LaTeX to text...')
-    response = client.chat.completions.create(
-        model=model,
-        messages=[
-            {"role": "system", "content": task},
-            {"role": "user", "content": latex_text},
-        ],
-        temperature=0,
-    )
-    print('Finished calling OpenAI to convert LaTeX to text.')
-
-    raw = response.choices[0].message.content.strip()
-
-    # Extract JSON block
-    json_block = extract_json_block(raw, left_char="[")
-    if json_block is None:
-        raise RuntimeError(
-            f"Failed to find JSON output.\nModel returned:\n{raw}"
-        )
+    Parameters
+    ----------
+    latex:  str
+        Full LaTeX document text.
     
-    # Parse JSON
-    try:
-        data = json.loads(json_block)
-        if not isinstance(data, list):
-            raise ValueError("Expected a JSON list")
-    except Exception as e:
-        raise RuntimeError(
-            f"Failed to parse JSON output.\nModel returned:\n{raw}"
-        ) from e
+    Returns
+    -------
+    soln_dict:  dict[str, dict]
+        A dictionary with key of the qtags with each value
+         being a dictionary with "question" and "solution" keys.
+    """
+    body = extract_enumerate_body(latex)
+    if body is None:
+        return {}
 
-    return data
+    raw_items = split_top_level_items(body)
+
+    soln_dict = {}
+    for it in raw_items:
+        d = extract_qtag_and_text(it)
+        qtag = d["qtag"]
+        if qtag is None:
+            raise ValueError("Some questions in LaTeX are missing qtags.")
+        if qtag in soln_dict:
+            err_msg = f"Duplicate qtags {qtag} found in LaTeX:\n"
+            raise ValueError(err_msg)
+        soln_dict[qtag] = {
+            "question_latex": d["latex"],
+            "solution": d["solution"],
+        }
+    
+    return soln_dict
+
+
+class SchemaError(Exception):
+    """Custom exception for schema validation errors."""
+    pass
+
+
+def parse_grade_schema(schema_path: str) -> dict:
+    """
+    Parse grade_schema.xml, extract qtags, validate uniqueness,
+    and return a dictionary keyed by qtag.
+
+    Parameters
+    ----------
+    schema_path: str
+        Path to grade_schema.xml file.
+    
+    Returns
+    -------
+    schema_dict: dict[str,dict]
+        Dictionary keyed by qtag, with each value being a dictionary:
+            {
+                qtag: {
+                    "id": str,
+                    "grading_notes": str | None,
+                    "grade": bool,
+                    "parts": [...],
+                    "preferred_model": str | None
+                },
+                ...
+            }
+    """
+
+    tree = ET.parse(schema_path)
+    root = tree.getroot()
+
+    schema_dict = {}
+    seen_qtags = set()
+
+    for qnode in root.findall("question"):
+        qtag_node = qnode.find("qtag")
+
+        # --- 1. Missing qtag ---
+        if qtag_node is None or not (qtag_node.text and qtag_node.text.strip()):
+            qid = qnode.get("id", "<no id>")
+            raise SchemaError(f"Missing <qtag> in question id={qid}")
+
+        qtag = qtag_node.text.strip()
+
+        # --- 2. Duplicate qtag ---
+        if qtag in seen_qtags:
+            raise SchemaError(f"Duplicate qtag found in schema: '{qtag}'")
+        seen_qtags.add(qtag)
+
+        # --- 3. Extract other fields (optional but useful) ---
+        grading_notes_node = qnode.find("grading_notes")
+        grade_node = qnode.find("grade")
+        preferred_model_node = qnode.find("preferred_model")
+
+        if grading_notes_node is None:
+            grading_notes = ""
+        else:
+            grading_notes = grading_notes_node.text or ""
+            grading_notes = textwrap.dedent(grading_notes).strip()
+
+        # Extract parts
+        parts_list = []
+        parts_node = qnode.find("parts")
+        if parts_node is not None:
+            for p in parts_node.findall("part"):
+                part_label = p.findtext("part_label", "").strip()
+                points = p.findtext("points", "").strip()
+                parts_list.append({
+                    "part_label": part_label,
+                    "points": points,
+                })
+
+        # Build dictionary entry
+        schema_dict[qtag] = {
+            "id": qnode.get("id"),
+            "grading_notes": grading_notes,
+            "grade": (grade_node.text.strip().lower() == "true") if grade_node is not None else False,
+            "parts": parts_list,
+            "preferred_model": preferred_model_node.text.strip() if preferred_model_node is not None else None
+            #"xml_node": qnode,   # keep original node for future updates
+        }
+
+    return schema_dict
+    

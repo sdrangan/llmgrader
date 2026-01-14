@@ -17,5 +17,5 @@ build-backend = "setuptools.build_meta"
 include = ["llmgrader*"]
 
 [project.scripts]
-latextotxt = "llmgrader.utils.latextotxt:main"
+create_grading_json = "llmgrader.utils.create_grading_json:main"
 

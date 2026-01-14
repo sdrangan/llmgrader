@@ -25,24 +25,17 @@ class APIController:
 
         @bp.post("/load_file")
         def load_file():
-            # Loads the student solution file
             file = request.files.get("file")
             if not file:
                 return jsonify({"error": "No file uploaded"}), 400
 
             text = file.read().decode("utf-8")
-
-            # Call your grader (which will print something)
             parsed = self.grader.load_solution_file(text)
-
-            # For now, just return a simple response
             return jsonify(parsed)
-        
+
         @bp.get("/units")
         def units():
-            # Return the list of unit folder names
             return jsonify(list(self.grader.units.keys()))
-
 
         @bp.get("/unit/<unit_name>")
         def unit(unit_name):
@@ -51,40 +44,48 @@ class APIController:
             if unit_name not in units:
                 return jsonify({"error": "Unknown unit"}), 404
 
-            u = units[unit_name]
+            u = units[unit_name]   # dict keyed by qtag
 
             return jsonify({
                 "unit": unit_name,
-                "count": len(u["questions_text"]),
-                "questions_text": u["questions_text"],
-                "questions_latex": u["questions_latex"],
-                "solutions": u["solutions"],
-                "grading": u["grading"],
-                "part_labels": u["part_labels"]
+                "qtags": list(u.keys()),
+                "items": u
             })
-        
+
         @bp.post("/grade")
         def grade():
-            data = request.json 
+            data = request.json
+
             unit = data["unit"]
-            idx = int(data["question_idx"])
+            qtag = data["qtag"]                     # NEW: qtag instead of index
             student_soln = data["student_solution"]
             part_label = data.get("part_label", "all")
             model = data.get("model", "gpt-4.1-mini")
             api_key = data.get("api_key", None)
 
+            # Retrieve the question data
             u = self.grader.units[unit]
 
-            ref_problem = u["questions_latex"][idx]
-            ref_solution = u["solutions"][idx]
-            grading_notes = u["grading"][idx]
+            if qtag not in u:
+                return jsonify({"error": f"Unknown qtag '{qtag}'"}), 400
 
-            # Save the grader inputs for debugging
-            fn = os.path.join(self.grader.scratch_dir, f"grade_input_{unit}_{idx}.txt")
+            qdata = u[qtag]
+
+            ref_problem = qdata["question_latex"]
+            ref_solution = qdata["solution"]
+            grading_notes = qdata["grading_notes"]
+
+            # Save grader inputs for debugging
+            safe_qtag = qtag.replace(" ", "_").replace("/", "_")
+            fn = os.path.join(
+                self.grader.scratch_dir,
+                f"grade_input_{unit}_{safe_qtag}.txt"
+            )
 
             with open(fn, "w") as f:
                 f.write(f"Unit: {unit}\n")
-                f.write(f"Question Index: {idx}\n\n")
+                f.write(f"Qtag: {qtag}\n\n")
+
                 f.write("=== Reference Problem (LaTeX) ===\n")
                 f.write(ref_problem + "\n\n")
 
@@ -97,35 +98,33 @@ class APIController:
                 f.write("=== Student Solution ===\n")
                 f.write(student_soln + "\n")
 
-                f.write(f"\n=== Grading Part Label ===\n")
+                f.write("\n=== Grading Part Label ===\n")
                 f.write(part_label + "\n")
 
-                f.write(f"\n=== Model ===\n")
+                f.write("\n=== Model ===\n")
                 f.write(model + "\n")
 
-            print(f'Sent grader input {fn}')
+            print(f"Sent grader input {fn}")
 
-            # Call the grader with relevant data
-            grade = self.grader.grade(
-                question_latex=ref_problem, 
-                ref_solution=ref_solution, 
-                grading_notes=grading_notes, 
+            # Call the grader
+            grade_result = self.grader.grade(
+                question_latex=ref_problem,
+                ref_solution=ref_solution,
+                grading_notes=grading_notes,
                 student_soln=student_soln,
                 part_label=part_label,
                 model=model,
-                api_key=api_key)
+                api_key=api_key
+            )
 
-            return jsonify(grade)
-        
+            return jsonify(grade_result)
+
         @bp.post("/reload")
         def reload_units():
-
             print("In /reload endpoint")
-   
-            # Re-run discovery
             self.grader.discover_units()
             return jsonify({"status": "ok"})
-        
+
         @app.route("/admin")
         def admin_page():
             return render_template("admin.html")
@@ -136,12 +135,8 @@ class APIController:
                 return {"error": "no file"}, 400
 
             f = request.files["file"]
-
-            # Hand the Werkzeug FileStorage object to the grader
             self.grader.save_uploaded_file(f)
 
             return {"status": "ok"}
 
-
-                
         app.register_blueprint(bp)
