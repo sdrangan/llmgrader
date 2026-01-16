@@ -97,6 +97,12 @@ def parse_args():
         default="gpt-4.1-mini",
         help="OpenAI model to use (default: gpt-4.1-mini)"
     )
+    parser.add_argument(
+        "--no_openai",
+        action="store_true",
+        default=False,
+        help="Skip OpenAI conversion and use LaTeX text directly (default: False)"
+    )
 
     return parser.parse_args()
 
@@ -140,9 +146,13 @@ def main():
     # Convert latex to plain text with OpenAI
     for qtag  in merged:
         item = merged[qtag]
-        print(f'Converting question (qtag={qtag}) with OpenAI...')
-        converted_text = openai_convert(args.model, item["question_latex"])
-        item["question_text"] = converted_text   
+        if args.no_openai:
+            print(f'Skipping OpenAI conversion for qtag={qtag}, using LaTeX text directly...')
+            item["question_text"] = item["question_latex"]
+        else:
+            print(f'Converting question (qtag={qtag}) with OpenAI...')
+            converted_text = openai_convert(args.model, item["question_latex"])
+            item["question_text"] = converted_text   
 
     # Write output
     print(f'Writing output to {output_path}...')

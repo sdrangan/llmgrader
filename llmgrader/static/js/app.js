@@ -8,6 +8,58 @@ let currentUnitItems = {};          // dict: qtag -> question object
 let currentUnitName = null;         // current unit name
 let currentStudentSolutions = {};   // dict: qtag -> student solution
 
+// sessionState[unitName][qtag] = { student_solution, feedback, explanation, grade_status }
+let sessionState = {};
+
+//
+// ---------------------------
+//  SESSION STATE PERSISTENCE
+// ---------------------------
+function loadSessionState() {
+    const stored = localStorage.getItem("llmgrader_session");
+    if (stored) {
+        try {
+            sessionState = JSON.parse(stored);
+            console.log("Session state loaded from localStorage");
+        } catch (e) {
+            console.error("Failed to parse session state:", e);
+            sessionState = {};
+        }
+    } else {
+        sessionState = {};
+    }
+}
+
+function saveSessionState() {
+    try {
+        localStorage.setItem("llmgrader_session", JSON.stringify(sessionState));
+        console.log("Session state saved to localStorage");
+    } catch (e) {
+        console.error("Failed to save session state:", e);
+    }
+}
+
+function getSessionData(unitName, qtag) {
+    if (!sessionState[unitName]) {
+        sessionState[unitName] = {};
+    }
+    if (!sessionState[unitName][qtag]) {
+        sessionState[unitName][qtag] = {
+            student_solution: "",
+            feedback: "",
+            explanation: "",
+            grade_status: ""
+        };
+    }
+    return sessionState[unitName][qtag];
+}
+
+function updateSessionData(unitName, qtag, updates) {
+    const data = getSessionData(unitName, qtag);
+    Object.assign(data, updates);
+    saveSessionState();
+}
+
 //
 // ---------------------------
 //  LOAD STUDENT SOLUTIONS FILE
@@ -50,6 +102,9 @@ document.getElementById("load-student-file").onclick = function () {
 //  OpenAI KEY MANAGEMENT
 // ---------------------------
 document.addEventListener("DOMContentLoaded", () => {
+    // Load session state from localStorage
+    loadSessionState();
+
     const input = document.getElementById("apiKeyInput");
     const saveBtn = document.getElementById("saveKeyBtn");
 
@@ -126,9 +181,13 @@ function displayQuestion(qtag) {
     document.getElementById("question-text").textContent =
         qdata.question_text || "";
 
-    // Update student solution
+    // Restore session state for this question
+    const sessionData = getSessionData(currentUnitName, qtag);
+
+    // Update student solution - prefer session state, then fall back to loaded file
     const solBox = document.getElementById("student-solution");
-    solBox.value = currentStudentSolutions[qtag]?.solution || "";
+    solBox.value = sessionData.student_solution || 
+                   currentStudentSolutions[qtag]?.solution || "";
 
     // ---------------------------
     // Update PART DROPDOWN
@@ -151,12 +210,51 @@ function displayQuestion(qtag) {
         partSelect.appendChild(opt);
     });
 
-    // Reset grading UI
-    document.getElementById("full-explanation-box").textContent =
-        "Not yet graded. No explanation yet.";
-    document.getElementById("feedback-box").textContent =
-        "Not yet graded. No feedback yet.";
-    document.getElementById("grade-status").className = "status-not-graded";
+    // Restore grading UI from session state
+    const explanationBox = document.getElementById("full-explanation-box");
+    const feedbackBox = document.getElementById("feedback-box");
+    const gradeStatus = document.getElementById("grade-status");
+    const gradePoints = document.getElementById("grade-points");
+
+    if (sessionData.explanation) {
+        explanationBox.textContent = sessionData.explanation;
+    } else {
+        explanationBox.textContent = "Not yet graded. No explanation yet.";
+    }
+
+    if (sessionData.feedback) {
+        feedbackBox.textContent = sessionData.feedback;
+    } else {
+        feedbackBox.textContent = "Not yet graded. No feedback yet.";
+    }
+
+    if (sessionData.grade_status) {
+        gradeStatus.textContent = 
+            sessionData.grade_status === "pass" ? "Correct" :
+            sessionData.grade_status === "fail" ? "Incorrect" :
+            sessionData.grade_status === "error" ? "Error" :
+            sessionData.grade_status;
+        gradeStatus.className = 
+            sessionData.grade_status === "pass" ? "status-correct" :
+            sessionData.grade_status === "fail" ? "status-incorrect" :
+            sessionData.grade_status === "error" ? "status-error" :
+            "status-not-graded";
+    } else {
+        gradeStatus.textContent = "";
+        gradeStatus.className = "status-not-graded";
+    }
+
+    // Update grade points/optional display
+    if (qdata.grade === false) {
+        gradePoints.textContent = "optional";
+    } else if (qdata.grade === true) {
+        const totalPoints = (qdata.parts || []).reduce((sum, part) => {
+            return sum + parseInt(part.points || 0, 10);
+        }, 0);
+        gradePoints.textContent = `${totalPoints} points`;
+    } else {
+        gradePoints.textContent = "";
+    }
 }
 
 
@@ -216,6 +314,17 @@ function populateQuestionDropdown(qtags) {
     dropdown.onchange = () => {
         displayQuestion(dropdown.value);
     };
+
+    // Add event listener to save student solution on input
+    const solBox = document.getElementById("student-solution");
+    solBox.addEventListener("input", () => {
+        const qtag = dropdown.value;
+        if (currentUnitName && qtag) {
+            updateSessionData(currentUnitName, qtag, {
+                student_solution: solBox.value
+            });
+        }
+    });
 }
 
 
@@ -264,19 +373,29 @@ async function gradeCurrentQuestion() {
     gradeBtn.disabled = false;
     gradeBtn.textContent = "Grade";
 
-    document.getElementById("grade-status").textContent =
+    const gradeStatusText = 
         data.result === "pass" ? "Correct" :
         data.result === "fail" ? "Incorrect" :
         "Error";
 
-    document.getElementById("grade-status").className =
+    const gradeStatusClass =
         data.result === "pass" ? "status-correct" :
         data.result === "fail" ? "status-incorrect" :
         "status-error";
 
+    document.getElementById("grade-status").textContent = gradeStatusText;
+    document.getElementById("grade-status").className = gradeStatusClass;
     document.getElementById("feedback-box").textContent = data.feedback;
     document.getElementById("full-explanation-box").textContent =
         data.full_explanation;
+
+    // Save grading results to session state
+    updateSessionData(currentUnitName, qtag, {
+        student_solution: studentSolution,
+        feedback: data.feedback || "",
+        explanation: data.full_explanation || "",
+        grade_status: data.result || ""
+    });
 }
 
 
@@ -301,3 +420,72 @@ async function reloadUnitData() {
         }
     }
 }
+
+
+//
+// ---------------------------
+//  SAVE/LOAD RESULTS
+// ---------------------------
+function saveResultsForUnit() {
+    if (!currentUnitName) {
+        alert("No unit selected.");
+        return;
+    }
+
+    // Get session state for current unit
+    const unitData = sessionState[currentUnitName] || {};
+    const jsonString = JSON.stringify(unitData, null, 2);
+
+    // Create blob and download
+    const blob = new Blob([jsonString], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${currentUnitName}_results.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+
+    console.log(`Saved results for unit: ${currentUnitName}`);
+}
+
+// Set up load results file handler
+document.addEventListener("DOMContentLoaded", () => {
+    const fileInput = document.getElementById("load-results-file");
+    if (fileInput) {
+        fileInput.addEventListener("change", async (event) => {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            if (!currentUnitName) {
+                alert("No unit selected.");
+                return;
+            }
+
+            try {
+                const text = await file.text();
+                const data = JSON.parse(text);
+
+                // Assign loaded data to current unit
+                sessionState[currentUnitName] = data;
+                saveSessionState();
+
+                console.log(`Loaded results for unit: ${currentUnitName}`);
+
+                // Refresh UI with current question
+                const dropdown = document.getElementById("question-number");
+                const currentQtag = dropdown.value;
+                if (currentQtag) {
+                    displayQuestion(currentQtag);
+                }
+
+                alert("Results loaded successfully.");
+            } catch (e) {
+                console.error("Failed to load results:", e);
+                alert("Failed to load results. Please check the file format.");
+            }
+
+            // Reset file input
+            event.target.value = "";
+        });
+    }
+});

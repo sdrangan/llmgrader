@@ -184,11 +184,30 @@ textarea {
    GRADE STATUS
 ------------------------------ */
 
+.grade-status-container {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
 #grade-status {
+    flex: 1;
     padding: 8px;
     border-radius: 4px;
     font-weight: bold;
     text-align: center;
+}
+
+.grade-points {
+    padding: 6px 12px;
+    border-radius: 4px;
+    font-weight: bold;
+    font-size: 0.9em;
+    text-align: right;
+    white-space: nowrap;
+    background: #e8e8e8;
+    color: #333;
+    border: 1px solid #bbb;
 }
 
 .status-not-graded {

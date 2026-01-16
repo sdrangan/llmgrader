@@ -1,4 +1,163 @@
-<form action="/admin/upload" method="post" enctype="multipart/form-data">
-  <input type="file" name="file">
-  <button type="submit">Upload</button>
-</form>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Admin - LLM Grader</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            padding: 20px;
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        h1 {
+            color: #57068c;
+        }
+        .admin-section {
+            margin: 20px 0;
+            padding: 20px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            background: #f9f9f9;
+        }
+        .admin-section h2 {
+            margin-top: 0;
+            color: #333;
+        }
+        button {
+            padding: 8px 16px;
+            margin: 5px;
+            cursor: pointer;
+            background-color: #57068c;
+            color: white;
+            border: none;
+            border-radius: 4px;
+        }
+        button:hover {
+            background-color: #6f2da8;
+        }
+        button:disabled {
+            background-color: #ccc;
+            cursor: not-allowed;
+        }
+        input[type="file"] {
+            margin: 10px 0;
+        }
+        .status-message {
+            margin-top: 10px;
+            padding: 10px;
+            border-radius: 4px;
+        }
+        .status-success {
+            background-color: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        .status-error {
+            background-color: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+    </style>
+</head>
+<body>
+    <h1>Admin Panel - LLM Grader</h1>
+
+    <div class="admin-section">
+        <h2>Upload Solution Repository</h2>
+        <p>Upload a ZIP file containing the solution repository with units.csv and question files.</p>
+        <form id="upload-form" action="/admin/upload" method="post" enctype="multipart/form-data">
+            <input type="file" name="file" id="file-input" accept=".zip">
+            <button type="submit">Upload</button>
+        </form>
+        <div id="upload-status"></div>
+    </div>
+
+    <div class="admin-section">
+        <h2>Reload Units</h2>
+        <p>Reload all question units from the repository. Use this after uploading a new repository or making changes.</p>
+        <button id="reload-button" onclick="reloadUnits()">Reload Units</button>
+        <div id="reload-status"></div>
+    </div>
+
+    <div class="admin-section">
+        <h2>Navigation</h2>
+        <p><a href="/" style="color: #57068c; text-decoration: none;">← Back to Grader</a></p>
+    </div>
+
+    <script>
+        // Reload Units functionality
+        async function reloadUnits() {
+            const button = document.getElementById('reload-button');
+            const statusDiv = document.getElementById('reload-status');
+            
+            button.disabled = true;
+            button.textContent = 'Reloading...';
+            statusDiv.textContent = '';
+            
+            try {
+                const response = await fetch('/reload', { method: 'POST' });
+                const data = await response.json();
+                
+                if (data.status === 'ok') {
+                    statusDiv.className = 'status-message status-success';
+                    statusDiv.textContent = 'Units reloaded successfully!';
+                } else {
+                    statusDiv.className = 'status-message status-error';
+                    statusDiv.textContent = 'Failed to reload units.';
+                }
+            } catch (error) {
+                statusDiv.className = 'status-message status-error';
+                statusDiv.textContent = 'Error: ' + error.message;
+            } finally {
+                button.disabled = false;
+                button.textContent = 'Reload Units';
+            }
+        }
+
+        // Upload form handling
+        document.getElementById('upload-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const fileInput = document.getElementById('file-input');
+            const statusDiv = document.getElementById('upload-status');
+            
+            if (!fileInput.files.length) {
+                statusDiv.className = 'status-message status-error';
+                statusDiv.textContent = 'Please select a file first.';
+                return;
+            }
+            
+            const formData = new FormData();
+            formData.append('file', fileInput.files[0]);
+            
+            statusDiv.textContent = 'Uploading...';
+            statusDiv.className = 'status-message';
+            
+            try {
+                const response = await fetch('/admin/upload', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const data = await response.json();
+                
+                if (data.status === 'ok') {
+                    statusDiv.className = 'status-message status-success';
+                    statusDiv.textContent = 'File uploaded successfully! Remember to reload units.';
+                } else if (data.error) {
+                    statusDiv.className = 'status-message status-error';
+                    statusDiv.textContent = 'Error: ' + data.error;
+                } else {
+                    statusDiv.className = 'status-message status-error';
+                    statusDiv.textContent = 'Upload failed.';
+                }
+            } catch (error) {
+                statusDiv.className = 'status-message status-error';
+                statusDiv.textContent = 'Error: ' + error.message;
+            }
+        });
+    </script>
+</body>
+</html>

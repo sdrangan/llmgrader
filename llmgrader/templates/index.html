@@ -42,7 +42,9 @@
             <div class="control-row">
                 <label for="unit-select">Unit:</label>
                 <select id="unit-select"></select>
-                <button id="reload-unit" type="button" onclick="reloadUnitData()">Reload</button>
+                <button id="save-results" type="button" onclick="saveResultsForUnit()">Save Results</button>
+                <input type="file" id="load-results-file" accept=".json" style="display: none;">
+                <button id="load-results" type="button" onclick="document.getElementById('load-results-file').click()">Load Results</button>
             </div>
 
 
@@ -111,9 +113,12 @@
     <div class="right-column">
 
         <!-- Grade Status -->
-        <div id="grade-status" class="status-not-graded">
-            Not graded
-        </div>  
+        <div class="grade-status-container">
+            <div id="grade-status" class="status-not-graded">
+                Not graded
+            </div>
+            <div id="grade-points" class="grade-points"></div>
+        </div>
 
         <div id="grading-output">
 
