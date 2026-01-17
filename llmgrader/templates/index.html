@@ -13,10 +13,14 @@
     <div class="left">
         <img src="{{ url_for('static', filename='images/nyu-logo.png') }}"
              alt="NYU Logo" class="nyu-logo">
-        <span class="title">OpenAI Grader for NYU Applied Hardware Design</span>
+        <div class="title-section">
+            <div class="title">OpenAI Grader for NYU Applied Hardware Design</div>
+            <div class="professors">Profs. Sundeep Rangan, Siddharth Garg</div>
+        </div>
     </div>
 
     <div class="right">
+        <label for="apiKeyInput" class="api-key-label">OpenAI API Key</label>
         <input id="apiKeyInput" type="password" placeholder="OpenAI API Key" class="key-box">
         <button id="saveKeyBtn" class="save-btn">Save</button>
     </div>

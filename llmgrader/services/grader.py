@@ -135,7 +135,8 @@ class Grader:
         self.units = {}
 
         # Log the search process
-        log = open(os.path.join(self.scratch_dir, "discovery_log.txt"), "w")
+        fn = os.path.join(self.scratch_dir, "discovery_log.txt")
+        log = open(fn, "w", encoding="utf-8")
         
         # Write the time and date
 
@@ -387,7 +388,7 @@ class Grader:
         # 2. Write task prompt to scratch/task.txt
         # ---------------------------------------------------------
         task_path = os.path.join(self.scratch_dir, "task.txt")
-        with open(task_path, "w") as f:
+        with open(task_path, "w", encoding="utf-8") as f:
             f.write(task)
 
         # ---------------------------------------------------------

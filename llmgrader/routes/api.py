@@ -84,7 +84,7 @@ class APIController:
                 f"grade_input_{unit}_{safe_qtag}.txt"
             )
 
-            with open(fn, "w") as f:
+            with open(fn, "w", encoding="utf-8") as f:
                 f.write(f"Unit: {unit}\n")
                 f.write(f"Qtag: {qtag}\n\n")
 
