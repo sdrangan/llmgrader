@@ -58,11 +58,33 @@ def strip_code_fences(text):
             text = text.rsplit("```", 1)[0].strip()
     return text
 
+
+def clean_cdata(text: str) -> str:
+    """
+    Clean CDATA content from XML elements.
+    Removes leading newline, dedents, and strips trailing whitespace.
+    
+    Args:
+        text: Raw CDATA text content
+        
+    Returns:
+        Cleaned and dedented text
+    """
+    if not text:
+        return ""
+    # Remove a single leading newline if present
+    if text.startswith("\n"):
+        text = text[1:]
+    # Dedent and strip trailing whitespace
+    return textwrap.dedent(text).strip()
+
+
 class Grader:
     def __init__(self, 
                  questions_root : str ="questions", 
                  scratch_dir : str ="scratch",
                  remote_repo : str | None = None,
+                 local_repo : str | None = None
                  ):
         """
         Main Grader service class.
@@ -76,11 +98,13 @@ class Grader:
         remote_repo: str | None
             URL of the remote git repository containing questions.
             If None, no repository is loaded.
+        local_repo: str | None
+            Path to a local test repository for questions.
         """
         self.questions_root = questions_root
         self.scratch_dir = scratch_dir
         self.remote_repo = remote_repo
-
+        self.local_repo = local_repo
 
         # Initialize units dictionary
         self.units = {}
@@ -167,8 +191,14 @@ class Grader:
         # Get the parent repo paths
         parent_repo = self.get_local_repo_parent_path()
 
-        # Load the git repo if specified
-        if self.remote_repo is not None:
+        
+        if self.local_repo is not None:
+            # Use the local test repository if specified
+            local_repo = os.path.join(os.getcwd(), self.local_repo)
+            log.write('Using local test repository from: ' + local_repo + '\n')
+
+        elif self.remote_repo is not None:
+            # Load the git repo if specified
             log.write('Loading questions repository from: ' + self.remote_repo + '\n')
             local_repo = os.path.join(parent_repo, "soln_repo")
             try:
@@ -199,17 +229,19 @@ class Grader:
             if os.path.exists(units_csv_path):
                 local_repo = c
                 log.write(f'Found units.csv in candidate directory: {c}\n')
+            else:
+                log.write(f'No units.csv in candidate directory: {c}\n')
                 break
         
         if local_repo is None:
-            log.write('No local repository with units.csv found in ' + parent_repo + '\n')
+            log.write('No local repository with units.csv found  in any candidate directory.\n')
             self.units = {}
             log.close()
             return
         
         # Check if has required columns
         units_df = pd.read_csv(units_csv_path)
-        required = {"unit_name", "json_path"}
+        required = {"unit_name", "xml_path"}
         if not required.issubset(units_df.columns):
             missing = required - set(units_df.columns)
             log.write(f"units.csv is missing required columns: {missing}\n")
@@ -219,50 +251,139 @@ class Grader:
         
         # Get the columns as lists        
         self.units_list = units_df['unit_name'].tolist()
-        self.json_path_list = units_df['json_path'].tolist()
+        self.xml_path_list = units_df['xml_path'].tolist()
 
         units = {}
 
         # Loop over each unit and specified solution file
-        for name, json_path in zip(self.units_list, self.json_path_list):
+        for name, xml_path in zip(self.units_list, self.xml_path_list):
 
 
-            json_path = os.path.normpath(json_path)
-            json_path = os.path.join(local_repo, json_path)
+            xml_path = os.path.normpath(xml_path)
+            xml_path = os.path.join(local_repo, xml_path)
 
             log.write(f'Processing unit: {name}\n')
-            log.write(f'  JSON file: {json_path}\n')
+            log.write(f'  XML file: {xml_path}\n')
 
             # Check that the path exists
-            if not os.path.exists(json_path):
-                log.write(f"Skipping unit {name}: file {json_path} does not exist.\n")
+            if not os.path.exists(xml_path):
+                log.write(f"Skipping unit {name}: file {xml_path} does not exist.\n")
                 continue
 
-            with open(json_path, "r", encoding="utf-8") as f:
-                unit_dict = json.load(f)    
+            # Parse the XML file
+            try:
+                tree = ET.parse(xml_path)
+                root = tree.getroot()
+            except Exception as e:
+                log.write(f"Skipping unit {name}: failed to parse XML: {e}\n")
+                continue
+
+            # Build unit_dict from XML
+            unit_dict = {}
+            
+            for question in root.findall('question'):
+                qtag = question.get('qtag')
+                if not qtag:
+                    log.write(f"Skipping question in unit {name}: missing qtag attribute\n")
+                    continue
+                
+                # Extract preferred_model attribute
+                preferred_model = question.get('preferred_model', '')
+                
+                # Extract question_text element (CDATA)
+                question_text_elem = question.find('question_text')
+                question_text = clean_cdata(question_text_elem.text if question_text_elem is not None else '')
+                
+                # Extract solution element (CDATA)
+                solution_elem = question.find('solution')
+                solution = clean_cdata(solution_elem.text if solution_elem is not None else '')
+                
+                # Extract grading_notes element (CDATA)
+                grading_notes_elem = question.find('grading_notes')
+                grading_notes = clean_cdata(grading_notes_elem.text if grading_notes_elem is not None else '')
+                
+                # Extract grade element (boolean)
+                grade_elem = question.find('grade')
+                if grade_elem is not None and grade_elem.text:
+                    grade = grade_elem.text.strip().lower() == 'true'
+                else:
+                    grade = True  # Default to true if not specified
+                
+                # Extract parts
+                parts = []
+                parts_elem = question.find('parts')
+                if parts_elem is not None:
+                    for part in parts_elem.findall('part'):
+                        part_id = part.get('id')
+                        part_label_elem = part.find('part_label')
+                        points_elem = part.find('points')
+                        
+                        # Use id attribute as part_label if part_label element not found
+                        if part_label_elem is not None and part_label_elem.text:
+                            part_label = part_label_elem.text.strip()
+                        elif part_id:
+                            part_label = part_id
+                        else:
+                            part_label = 'all'
+                        
+                        # Get points
+                        if points_elem is not None and points_elem.text:
+                            try:
+                                points = int(points_elem.text.strip())
+                            except ValueError:
+                                points = 0
+                        elif part.get('points'):
+                            try:
+                                points = int(part.get('points'))
+                            except ValueError:
+                                points = 0
+                        else:
+                            points = 0
+                        
+                        parts.append({
+                            'part_label': part_label,
+                            'points': points
+                        })
+                
+                # Build question dictionary
+                question_dict = {
+                    'qtag': qtag,
+                    'question_text': question_text,
+                    'solution': solution,
+                    'grading_notes': grading_notes,
+                    'parts': parts,
+                    'grade': grade,
+                    'preferred_model': preferred_model
+                }
+                
+                unit_dict[qtag] = question_dict
 
             # Validate the unit_dict has required fields
             required_fields = [
-                "question_latex",
+                "qtag",
                 "question_text",
                 "solution",
                 "grading_notes",
                 "parts",
-                "id",
                 "grade",
             ]
-
-            if not isinstance(unit_dict, dict):
-                log.write(f"Skipping unit {name}: JSON content is not a dictionary.\n")
-                continue
             
             # Check that every question has the required fields
+            valid_questions = {}
             for qtag in unit_dict:
                 qdict = unit_dict[qtag]
                 missing_fields = [field for field in required_fields if field not in qdict]
                 if missing_fields:
-                    log.write(f"Skipping unit {name}, question {qtag}: missing required fields: {missing_fields}\n")
+                    log.write(f"Skipping question {qtag} in unit {name}: missing required fields: {missing_fields}\n")
                     continue
+                valid_questions[qtag] = qdict
+                
+            # Update unit_dict with only valid questions
+            unit_dict = valid_questions
+            
+            if len(unit_dict) == 0:
+                log.write(f"Skipping unit {name}: no valid questions found\n")
+                continue
                 
             # Log questions found
             log.write(f"Unit {name} successfully loaded with questions:\n")
@@ -282,15 +403,18 @@ class Grader:
     
 
     
-    def build_task_prompt(self, question_latex, ref_solution, grading_notes, student_soln, part_label="all"):
+    def build_task_prompt(self, question_text, ref_solution, grading_notes, student_soln, part_label="all"):
 
         if part_label == "all":
             # Whole-question grading
             task_top = textwrap.dedent("""
                 Your task is to grade a student's solution to an engineering problem.
                                        
-                You will be given a Latex-version of the question, a reference solution that is correct,
-                grading notes, and the student solution.  
+                You will be given: 
+                - HTML version of the question, 
+                - HTML version of a reference solution that is correct,
+                - Plain text grading notes, and
+                - Plain text student solution.  
                                        
                 You are to provide the following fields in the response:
                                        
@@ -340,8 +464,8 @@ class Grader:
                 without revealing the reference solution or grading notes.
 
             -------------------------
-            QUESTION (LaTeX):
-            {question_latex}
+            QUESTION (HTML):
+            {question_text}
 
             REFERENCE SOLUTION:
             {ref_solution}
@@ -354,7 +478,7 @@ class Grader:
         """)
 
         task = task_top + task_end.format(
-            question_latex=question_latex,
+            question_text=question_text,
             ref_solution=ref_solution,
             grading_notes=grading_notes,
             student_soln=student_soln
@@ -364,8 +488,8 @@ class Grader:
 
     def grade(
             self, 
-            question_latex: str, 
-            ref_solution : str, 
+            question_text: str, 
+            solution : str, 
             grading_notes: str, 
             student_soln : str, 
             part_label: str="all", 
@@ -377,9 +501,9 @@ class Grader:
         
         Parameters
         ----------
-        question_latex: str
-            The LaTeX text of the question.
-        ref_solution: str
+        question_text: str
+            The HTML question text.
+        solution: str
             The reference solution text.
         grading_notes: str
             The grading notes text.
@@ -403,7 +527,7 @@ class Grader:
         # ---------------------------------------------------------
         # 1. Build the task prompt
         # ---------------------------------------------------------
-        task = self.build_task_prompt(question_latex, ref_solution, grading_notes, student_soln, part_label=part_label)
+        task = self.build_task_prompt(question_text, solution, grading_notes, student_soln, part_label=part_label)
 
         # ---------------------------------------------------------
         # 2. Write task prompt to scratch/task.txt

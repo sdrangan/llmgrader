@@ -293,8 +293,13 @@ function displayQuestion(qtag) {
     const qdata = currentUnitItems[qtag];
 
     // Update question text
-    document.getElementById("question-text").textContent =
+    document.getElementById("question-text").innerHTML =
         qdata.question_text || "";
+    
+    // Trigger MathJax rendering if available
+    if (window.MathJax) {
+        MathJax.typesetPromise();
+    }
 
     // Restore session state for this question
     const sessionData = getSessionData(currentUnitName, qtag);

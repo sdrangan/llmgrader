@@ -77,7 +77,7 @@ class APIController:
 
             qdata = u[qtag]
 
-            ref_problem = qdata["question_latex"]
+            ref_problem = qdata["question_text"]
             ref_solution = qdata["solution"]
             grading_notes = qdata["grading_notes"]
 
@@ -92,10 +92,10 @@ class APIController:
                 f.write(f"Unit: {unit}\n")
                 f.write(f"Qtag: {qtag}\n\n")
 
-                f.write("=== Reference Problem (LaTeX) ===\n")
+                f.write("=== Reference Problem (HTML) ===\n")
                 f.write(ref_problem + "\n\n")
 
-                f.write("=== Reference Solution ===\n")
+                f.write("=== Reference Solution (HTML) ===\n")
                 f.write(ref_solution + "\n\n")
 
                 f.write("=== Grading Notes ===\n")
@@ -114,8 +114,8 @@ class APIController:
 
             # Call the grader
             grade_result = self.grader.grade(
-                question_latex=ref_problem,
-                ref_solution=ref_solution,
+                question_text=ref_problem,
+                solution=ref_solution,
                 grading_notes=grading_notes,
                 student_soln=student_soln,
                 part_label=part_label,
