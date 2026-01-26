@@ -277,7 +277,42 @@ textarea {
 }
 
 /* Question and solution text areas */
-#question-text,
+#question-text {
+    flex: 1;
+    overflow-y: auto;
+    padding: 8px;
+    border: 1px solid #ccc;
+    background: #fff;
+    min-height: 0;
+    font-size: 14px;
+    font-family: Arial, sans-serif;
+}
+
+/* Remove top margin from first element to avoid extra space */
+#question-text > *:first-child {
+    margin-top: 0;
+}
+
+/* Code blocks in question text */
+#question-text pre {
+    background-color: #f7f7f7;
+    padding: 10px;
+    border-radius: 4px;
+    overflow-x: auto;
+    margin: 10px 0;
+}
+
+#question-text code {
+    font-family: Consolas, "Courier New", monospace;
+    font-size: 0.95em;
+}
+
+#question-text pre code {
+    background-color: transparent;
+    padding: 0;
+    display: block;
+}
+
 #student-solution {
     flex: 1;
     overflow-y: auto;

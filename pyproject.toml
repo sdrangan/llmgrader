@@ -19,4 +19,5 @@ include = ["llmgrader*"]
 [project.scripts]
 create_grading_json = "llmgrader.utils.create_grading_json:main"
 build_autograder = "llmgrader.scripts.build_autograder:main"
+create_qfile = "llmgrader.scripts.create_qfile:main"
 

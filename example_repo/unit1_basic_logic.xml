@@ -1,0 +1,599 @@
+<unit id="basic_logic" title="Basic Logic" version="1.0">
+
+    <question qtag="Sequential updates" preferred_model="gpt-4.1-mini">
+
+        <question_text><![CDATA[
+        <p>Consider the following SystemVerilog code:</p>
+
+        <pre><code>
+        always_ff @(posedge clk) begin
+            x <= x + v;
+            if (x > 30) begin
+                v <= -10;
+            end else if (x < 0) begin
+                v <= 10;
+            end
+        end
+        </code></pre>
+
+        <p>
+        Starting from \( (x,v) = (15,10)\), what are the values of 
+        \( (x,v) \) for the next 5 clock cycles?
+        </p>
+        ]]></question_text>
+
+        <solution><![CDATA[
+        <p>The first 5 clock cycles for \( (x,v) \) are:</p>
+
+        <p class="math">
+            \[
+            (15,10) → (25,10) → (35,10) → (45,-10) → (35,-10) → (25,-10)
+            \]
+        </p>
+        ]]></solution>
+
+        <grading_notes><![CDATA[
+        A common mistake is to update v based on the new value of x
+        instead of the old value. In particular when (x,v) = (25,10),
+        the next value is (35,10), not (35,-10).
+
+        Also, students may not write the initial condition (15,10). That is fine.
+        They may also only write four clock cycles, thinking the initial condition
+        is the first cycle. That is fine.
+
+        Other formats are acceptable (tables, separate x/v lists).
+        No explanation is required.
+        ]]>
+        </grading_notes>
+
+        <grade>false</grade>
+        <parts>
+            <part id="all" points="10" />
+        </parts>
+
+    </question>
+
+    <question qtag="Linear system" preferred_model="gpt-4.1-mini">
+        <question_text><![CDATA[
+        <p>Consider the following SystemVerilog code:</p>
+
+        <pre><code>
+        always_ff @(posedge clk) begin
+            x1 <= ((5*x1 + 3*x2)>>3);
+            x2 <= ((4*x1 - 4*x2)>>3);
+        end
+        </code></pre>
+
+        <p>Here <code>&gt;&gt;3</code> denotes a right shift by 3 bits (division by 8), and all values are 32‑bit signed integers.</p>
+
+        <ol type="a">
+            <li>Suppose that \((x_1,x_2) = (8,0)\). What is the value of \((x_1,x_2)\) in the next clock cycle? Remember that assignments (<code>&lt;=</code>) are non‑blocking, so they update in parallel.</li>
+
+            <li>Write a Python function, say <code>sim_lin_sys</code>, that simulates this linear system with initial conditions <code>x1_0</code> and <code>x2_0</code> for <code>nit</code> clock cycles and outputs the values in an array <code>X</code> of shape <code>(nit+1, 2)</code>. The first row of <code>X</code> should be the initial conditions.</li>
+        </ol>
+        ]]></question_text>
+
+        <solution><![CDATA[
+        <p>For part (a), the next value is <code>(x_1,x_2) = ((5*8 + 3*0)>> 3, (4*8 - 4*0)>>3) = (5,4)</code>.</p>
+
+        <p>For part (b), the key idea is to use the old values of <code>x1</code> and <code>x2</code> when computing the new values. Also ensure that the array <code>X</code> has the correct shape and uses <code>np.int32</code> for the data type.</p>
+
+        <pre><code>
+        def sim_lin_sys(x1_0, x2_0, nit):
+            X = np.zeros((nit+1, 2), dtype=np.int32)
+            X[0,0] = x1_0
+            X[0,1] = x2_0
+            for i in range(nit):
+                X[i+1,0] = ((5*X[i,0] + 3*X[i,1])>>3)
+                X[i+1,1] = ((4*X[i,0] - 4*X[i,1])>>3)
+            return X
+        </code></pre>
+        ]]></solution>
+
+        <grading_notes><![CDATA[
+        - Students may forget that the updates to x1 and x2 occur in parallel due to non‑blocking assignments (<=).
+        - It is acceptable if the implementation does not import numpy.
+        - It is acceptable if the implementation is a code snippet, and not a function.
+        - It is acceptable if the nit is hardcoded to 5 or specified.
+        - Some students may create an array with nit rows instead of nit+1 rows; this is fine.
+        - If students forget to specify the data type of X, the feedback should remind them to use np.int32 for correctness.
+        - No explanation is required.
+        ]]></grading_notes>
+
+        <grade>false</grade>
+
+        <parts>
+            <part>
+                <part_label>a</part_label>
+                <points>5</points>
+            </part>
+            <part>
+                <part_label>b</part_label>
+                <points>5</points>
+            </part>
+        </parts>
+    </question>
+
+    <question qtag="ReLU function" preferred_model="gpt-4.1-mini">
+
+        <question_text><![CDATA[
+            <p><strong>ReLU function:</strong> We wish to implement the function</p>
+
+            <p style="text-align:center;">
+                \( y = a x^2 + \max\{ b x, 0 \} + c \)
+            </p>
+
+            <p>
+                for an input <code>x</code> and constants <code>a</code>, <code>b</code>, and <code>c</code>.
+                Write the SystemVerilog code to implement this function over two clock cycles.
+                Specifically, the input <code>x</code> should be registered in the first clock cycle,
+                and the output <code>y</code> should be produced in the second clock cycle.
+                Make sure that no clock cycle requires two or more multiplications that cannot be parallelized.
+            </p>
+        ]]></question_text>
+
+        <solution><![CDATA[
+            <p>
+                One possible solution is shown below. The key idea is to register the input
+                <code>x</code> in the first clock cycle, compute the square and ReLU in the
+                second clock cycle, and then produce the output <code>y</code> combinationally
+                from these registered values.
+            </p>
+
+            <pre><code>
+            always_comb begin
+                relu_in   = b * xreg;
+                relu_next = (relu_in > 0) ? relu_in : 0;
+                y         = a * xsq + relu + c;
+            end
+
+            always_ff @(posedge clk) begin
+                xreg <= x;          // clock cycle 1
+                xsq  <= xreg*xreg;  // clock cycle 2
+                relu <= relu_next;  // clock cycle 2
+            end
+            </code></pre>
+        ]]></solution>
+
+        <grading_notes><![CDATA[
+            Students may implement the function using either a two‑process 
+            (always_comb + always_ff) structure or a single always_ff block with 
+            temporary variables. Both are acceptable as long as the behavior is correct.
+
+            It is acceptable if students register the output y instead of computing it 
+            purely combinationally. Either approach is fine as long as the pipeline 
+            timing is correct and only one multiplication is required per cycle.
+
+            A common mistake is failing to respect the resource constraint: no clock 
+            cycle may require two multiplications unless they are parallelizable. 
+            For example, computing x*x and b*x in the same cycle is allowed only if 
+            they are in separate parallel multipliers; otherwise the student must 
+            schedule them in different cycles.
+
+            Another common mistake is using a value such as x across multiple cycles 
+            without storing the delayed version. If a signal is needed in a later 
+            cycle, it must be registered (e.g., xreg <= x).
+
+            Students may compute the ReLU using a conditional operator or an if/else. 
+            Any equivalent formulation is acceptable.
+
+            Minor stylistic differences (naming, temporary variables, ordering of 
+            assignments) are acceptable as long as the semantics match the intended 
+            two‑cycle behavior.
+
+            No explanation is required.
+        ]]></grading_notes>
+        <grade>false</grade>
+        <parts>
+            <part>
+                <part_label>all</part_label>
+                <points>10</points>
+            </part>
+        </parts>
+
+    </question>
+
+    <question qtag="ReLU+quadratic" preferred_model="gpt-4.1-mini">
+
+        <question_text><![CDATA[
+            <p>Consider the following SystemVerilog code:</p>
+
+            <pre><code>
+            always_comb begin
+                act_in = w1*xreg + b1;
+                if (act_in > 0) begin
+                    a = act_in;
+                end else begin
+                    a = 0;
+                end
+                xsq = ((xreg*xreg) >> 2);
+                y = xsq + w2*a + b2;
+            end
+
+            always_ff @(posedge clk) begin
+                xreg <= x;
+            end
+            </code></pre>
+
+            <p>
+                Here, <code>&gt;&gt; 2</code> denotes a right shift by 2 bits (division by 4).
+                The code registers the input <code>x</code> into <code>xreg</code> on each clock cycle
+                and produces the output <code>y</code> in a single clock cycle based on the registered value.
+            </p>
+
+            <p>
+                Assume that <code>w1</code>, <code>b1</code>, <code>w2</code>, and <code>b2</code> are constants.
+                Rewrite the code so that it operates over <strong>two clock cycles</strong>.
+                Specifically, register the input <code>x</code> on the first clock cycle,
+                and compute the output <code>y</code> two clock cycles later.
+                This requires introducing additional registers to store intermediate values.
+            </p>
+        ]]></question_text>
+
+        <solution><![CDATA[
+            <p>One possible solution is shown below:</p>
+
+            <pre><code>
+            always_comb begin
+                act_in = w1*xreg + b1;
+                if (act_in > 0) begin
+                    a = act_in;
+                end else begin
+                    a = 0;
+                end
+                y = xsq_b2 + w2*areg;
+            end
+
+            always_ff @(posedge clk) begin
+                xreg   <= x;
+                xsq_b2 <= ((xreg*xreg) >> 2) + b2;
+                areg   <= a;
+            end
+            </code></pre>
+        ]]></solution>
+
+        <grading_notes><![CDATA[
+            Students may implement the two‑cycle version using either a two‑process
+            (always_comb + always_ff) structure or a single always_ff block with
+            temporary variables. Both are acceptable as long as the behavior is correct.
+
+            A common mistake is failing to introduce the necessary registers for
+            intermediate values. For example, if a value such as a or x^2 is needed
+            in the second cycle, it must be stored in a register (e.g., areg or xsq_b2).
+
+            Students may incorrectly compute y using values from the wrong cycle.
+            The output y must be computed two cycles after the input x is sampled.
+
+            It is acceptable if students register y instead of computing it purely
+            combinationally, as long as the timing is correct.
+
+            Another common mistake is recomputing act_in or x^2 in the wrong cycle,
+            or using x instead of xreg in the second cycle.
+
+            Minor stylistic differences (naming, ordering, temporary variables) are
+            acceptable as long as the semantics match the intended two‑cycle behavior.
+
+            No explanation is required.
+        ]]></grading_notes>
+        <grade>true</grade>
+        <parts>
+            <part>
+                <part_label>all</part_label>
+                <points>10</points>
+            </part>
+        </parts>
+
+    </question>
+
+    <question qtag="Bouncing ball" preferred_model="gpt-4.1-mini">
+
+        <question_text><![CDATA[
+            <p>
+                We simulate a ball moving in one-dimensional space between two walls at
+                positions <code>0</code> and <code>100</code>. The ball has a position
+                <code>x</code> and a velocity <code>v</code>. At each time step, the ball
+                first moves according to its velocity:
+            </p>
+
+            <p style="text-align:center;">
+                \( x \gets x + v \)
+            </p>
+
+            <p>
+                If this motion causes the ball to go past a wall, the ball “bounces” and
+                reverses direction. The bounce should behave the same way a real ball would:
+                the ball cannot pass through the wall, and the rebound distance should be
+                consistent with how far it would have travelled past the wall.
+            </p>
+
+            <p>For example:</p>
+
+            <ul>
+                <li>
+                    If \((x,v) = (40,10)\), then the ball moves to \(50\), which is inside
+                    the interval, so the next state is \((50,10)\).
+                </li>
+
+                <li>
+                    If \((x,v) = (96,10)\), then the ball would move to \(106\), which is
+                    past the right wall at \(100\). After bouncing, the ball ends up at
+                    position \(94\) with velocity \(-10\).
+                </li>
+
+                <li>
+                    If \((x,v) = (3,-10)\), then the ball would move to \(-7\), which is
+                    past the left wall at \(0\). After bouncing, the ball ends up at
+                    position \(7\) with velocity \(10\).
+                </li>
+            </ul>
+
+            <p>
+                Write the SystemVerilog code for the updates for <code>x</code> and <code>v</code>.
+                You do not need to include the module declaration, just the
+                <code>always_ff</code> and <code>always_comb</code> blocks.
+            </p>
+        ]]></question_text>
+
+        <solution><![CDATA[
+            <p>
+                One possible solution is shown below. The key idea is to implement the
+                reflections correctly using sequential operations in the combinational
+                next‑state logic.
+            </p>
+
+            <pre><code>
+            // Combinational next-state logic
+            always_comb begin
+                // default: no bounce
+                x_next = x + v;
+                v_next = v;
+
+                // bounce off right wall
+                if (x_next > 100) begin
+                    x_next = 200 - x_next;   // reflect back inside
+                    v_next = -v;
+                end
+
+                // bounce off left wall
+                else if (x_next < 0) begin
+                    x_next = -x_next;        // reflect back inside
+                    v_next = -v;
+                end
+            end
+
+            // Sequential state update
+            always_ff @(posedge clk) begin
+                x <= x_next;
+                v <= v_next;
+            end
+            </code></pre>
+        ]]></solution>
+
+        <grading_notes><![CDATA[
+            Students may not implement the reflection rule correctly. 
+            You must set the "result" field to "pass" if and only if the student's
+            implementation is functionally equivalent to the reference behavior. 
+            If the implementation is equivalent, "result" must be exactly "pass". 
+            If the implementation is not equivalent, "result" must be exactly "fail".
+            Do not use any other values.
+
+            Common mistakes include failing to reflect the position, only reversing velocity,
+            or clamping the position to 0 or 100 instead of reflecting it.
+
+            When the ball exactly hits a wall (i.e., x+v=0 or 100), it is still acceptable
+            to reverse v or keep v the same, since both behaviors are functionally equivalent.
+            If v is not reversed in this case, the next update will reflect
+            the position correctly.
+
+            Students may place all logic inside an always_ff block. 
+            This is acceptable as long as the functionality is correct, 
+            and the behavior matches the examples.  
+
+            Students may also use the two‑process (always_comb + always_ff) pattern. 
+            Either structure is acceptable as long as the semantics are correct.
+            If the functionality is correct in either pattern, you must mark 'result' as 'pass'.
+
+            The key requirement is that the update rule matches the physical behavior and 
+            the examples such as: (40,10) -> (50,10), (96,10) -> (94,-10), (3,-10) -> (7,10).
+            For any functionally equivalent implementation, you must mark 'result' as 'pass'. 
+
+            No explanation is required.
+        ]]></grading_notes>
+        <grade>true</grade>
+        <parts>
+            <part>
+                <part_label>all</part_label>
+                <points>10</points>
+            </part>
+        </parts>
+
+    </question>
+    <question qtag="Exponent" preferred_model="gpt-5-mini">
+
+        <question_text><![CDATA[
+             <p>
+                Suppose we wish to implement the function
+            </p>
+
+            <p style="text-align:center;">
+                \( y = x^i \)
+            </p>
+
+            <p>
+                where the exponent \(i\) is an integer in the set \(\{0,1,2,3\}\).
+                The input <code>x</code> and output <code>y</code> are signed short integers
+                (you do not need to worry about overflow).
+            </p>
+
+            <p>
+                Write a SystemVerilog module that computes <code>y</code>.
+                The output should always be produced exactly <strong>two cycles</strong> after the input,
+                even when \(i = 0\), \(1\), or \(2\).
+                You must use only <strong>one multiplication per clock cycle</strong>.
+            </p>
+
+            <p>
+                <strong>Hint:</strong> You will need to use delay lines to store the input
+                <code>x</code> and exponent <code>i</code>. This problem requires pipelining,
+                which we will discuss in more detail in later units.
+            </p>
+        ]]></question_text>
+
+        <solution><![CDATA[
+            <p>One possible solution is shown below:</p>
+
+            <pre><code>
+            module exponent  (
+                input  logic clk,
+                input  logic shortint x,
+                input  logic int i,
+                output logic shortint y
+            );
+
+                logic shortint x_reg;
+                logic shortint x2;
+                logic int ireg, ireg1;
+
+                always_ff @(posedge clk) begin
+                    // Delay line for the exponent
+                    ireg <= i;
+                    idly <= ireg;
+
+                    // Delay line for the input x and its square
+                    x_reg   <= x;
+                    xsq_dly <= xreg * xreg;
+                    x_dly   <= xreg;
+                end
+
+                always_comb begin
+                    // Select the correct output based on the delayed exponent
+                    if (idly == 0) begin
+                        y = 1;
+                    end else if (idly == 1) begin
+                        y = x_dly;        // pass through for i=1
+                    end else if (idly == 2) begin
+                        y = xsq_dly;      // pass through for i=2
+                    end else begin
+                        y = xsq_dly * x_dly;  // compute x^3
+                    end
+                end
+
+            endmodule
+            </code></pre>
+        ]]></solution>
+
+        <grading_notes><![CDATA[
+            The most common errors include:
+            - Forgetting to delay the inputs `x` and `i` so that all signals align at the output.
+            - Computing `x^2` or `x^3` in the wrong cycle.
+            - Violating the “one multiply per cycle” constraint.
+            - Using the wrong version of `i` (current vs delayed).
+            - Producing an output that is not exactly 2 cycles after the input.
+        ]]></grading_notes>
+        <grade>false</grade>
+        <parts>
+            <part>
+                <part_label>all</part_label>
+                <points>10</points>
+            </part>
+        </parts>
+
+    </question>
+
+    <question qtag="Testbench code" preferred_model="gpt-5-mini">
+
+        <question_text><![CDATA[
+            <p>
+                A SystemVerilog testbench instantiates an instance <code>dut</code>,
+                of the module <code>my_func</code>, to compute a function
+                \( y = f(x) \):
+            </p>
+
+            <pre><code>
+            // Testbench signals
+            logic signed [31:0] x;
+            logic signed [31:0] y;
+            logic clk;
+
+            // Instantiate the device under test (dut)
+            my_func dut (
+                .clk(clk),
+                .rst(rst),
+                .x(x),
+                .y(y)
+            );
+
+            // Test vectors
+            logic signed [31:0] xtest [0:3] = '{10, 20, -5, 7};
+            </code></pre>
+
+            <p>Write an <code>initial</code> block that:</p>
+
+            <ul>
+                <li>On cycle 0, sets <code>rst = 1</code>, then de‑asserts it on the next cycle.</li>
+                <li>Starting on cycle 4, sets <code>x = xtest[0]</code> and prints the output <code>y</code> on cycle 8.</li>
+                <li>On cycle 9, sets <code>x = xtest[1]</code> and prints <code>y</code> on cycle 12.</li>
+                <li>Continue similarly for the remaining test inputs.</li>
+            </ul>
+
+            <p>To display a number, you may use:</p>
+
+            <pre><code>
+            $display("x = %0d", x);
+            </code></pre>
+        ]]></question_text>
+
+        <solution><![CDATA[
+            <p>One possible solution is shown below:</p>
+
+            <pre><code>
+            // Reset and test sequence
+            initial begin
+                // cycle 0: assert reset
+                rst = 1;
+                clk = 0;
+
+                // cycle 1: deassert reset
+                @(posedge clk);
+                rst = 0;
+
+                // Wait until cycle 4
+                repeat (3) @(posedge clk);
+
+                // Loop over test inputs
+                for (int i = 0; i < xtest.size(); i++) begin
+
+                    // Apply input on cycle 4 + 5*i
+                    x = xtest[i];
+                    $display("Applied x = %0d at time %0t", x, $time);
+
+                    // Wait 4 cycles, then print y
+                    repeat (4) @(posedge clk);
+                    $display("Output y = %0d at time %0t", y, $time);
+
+                    // Advance one more cycle before next input
+                    @(posedge clk);
+                end
+
+                $finish;
+            end
+            </code></pre>
+        ]]></solution>
+
+        <grading_notes><![CDATA[
+            - Any form of $display is acceptable; it is also fine if the student does not print x.
+            - It is acceptable if the loop length over xtest is hard coded.
+            - If the number of wait cycles is incorrect, provide precise feedback about where the missing
+            or extra wait cycles should be inserted (e.g., before applying x, before printing y, or
+            between iterations).
+        ]]></grading_notes>
+        <grade>true</grade> 
+        <parts>
+            <part>
+                <part_label>all</part_label>
+                <points>10</points>
+            </part>
+        </parts>
+
+    </question>
+</unit> 

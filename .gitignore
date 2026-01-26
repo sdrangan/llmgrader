@@ -168,3 +168,9 @@ local_test/
 # Allow test fixtures even though *.json and *.xml are ignored
 !tests/fixtures/*.json
 !tests/fixtures/*.xml
+
+# Remove the HTML and PDF files generated from the example files
+example_repo/**/*.html
+example_repo/**/*.pdf
+# BUT allow XML files inside example_repo
+!example_repo/**/*.xml
