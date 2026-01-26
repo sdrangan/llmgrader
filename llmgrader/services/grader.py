@@ -8,6 +8,7 @@ import pandas as pd
 from openai import OpenAI, APITimeoutError
 import xml.etree.ElementTree as ET
 import zipfile
+import re
 from datetime import datetime
 from concurrent.futures import TimeoutError as ThreadTimeoutError
 from openai import APITimeoutError
@@ -59,10 +60,35 @@ def strip_code_fences(text):
     return text
 
 
+def strip_code_block_leading_newlines(html_text):
+    """
+    Find <pre><code>...</code></pre> blocks and strip leading newlines from the code content.
+    
+    Args:
+        html_text: HTML text that may contain code blocks
+        
+    Returns:
+        HTML text with leading newlines removed from code blocks
+    """
+    def strip_newlines_match(match):
+        """Strip leading newlines from the code content in a regex match."""
+        code_content = match.group(1)
+        # Remove leading newlines (but preserve internal formatting)
+        stripped_code = code_content.lstrip('\n')
+        return f'<pre><code>{stripped_code}</code></pre>'
+    
+    # Pattern to match <pre><code>...</code></pre> blocks
+    # Uses non-greedy matching and DOTALL flag to handle multiline code
+    pattern = r'<pre><code>(.*?)</code></pre>'
+    result = re.sub(pattern, strip_newlines_match, html_text, flags=re.DOTALL)
+    
+    return result
+
+
 def clean_cdata(text: str) -> str:
     """
     Clean CDATA content from XML elements.
-    Removes leading newline, dedents, and strips trailing whitespace.
+    Removes leading newline, dedents, strips trailing whitespace, and cleans code blocks.
     
     Args:
         text: Raw CDATA text content
@@ -76,7 +102,10 @@ def clean_cdata(text: str) -> str:
     if text.startswith("\n"):
         text = text[1:]
     # Dedent and strip trailing whitespace
-    return textwrap.dedent(text).strip()
+    text = textwrap.dedent(text).strip()
+    # Strip leading newlines from code blocks
+    text = strip_code_block_leading_newlines(text)
+    return text
 
 
 class Grader:

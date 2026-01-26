@@ -46,6 +46,7 @@
         ]]>
         </grading_notes>
 
+        <grade>false</grade>
         <parts>
             <part id="all" points="10" />
         </parts>
@@ -182,7 +183,7 @@
 
             No explanation is required.
         ]]></grading_notes>
-
+        <grade>false</grade>
         <parts>
             <part>
                 <part_label>all</part_label>
@@ -274,7 +275,7 @@
 
             No explanation is required.
         ]]></grading_notes>
-
+        <grade>true</grade>
         <parts>
             <part>
                 <part_label>all</part_label>
@@ -398,7 +399,7 @@
 
             No explanation is required.
         ]]></grading_notes>
-
+        <grade>true</grade>
         <parts>
             <part>
                 <part_label>all</part_label>
@@ -489,7 +490,7 @@
             - Using the wrong version of `i` (current vs delayed).
             - Producing an output that is not exactly 2 cycles after the input.
         ]]></grading_notes>
-
+        <grade>false</grade>
         <parts>
             <part>
                 <part_label>all</part_label>
@@ -586,7 +587,7 @@
             or extra wait cycles should be inserted (e.g., before applying x, before printing y, or
             between iterations).
         ]]></grading_notes>
-
+        <grade>true</grade> 
         <parts>
             <part>
                 <part_label>all</part_label>
