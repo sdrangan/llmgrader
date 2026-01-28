@@ -9,6 +9,7 @@ from openai import OpenAI, APITimeoutError
 import xml.etree.ElementTree as ET
 import zipfile
 import re
+import sqlite3
 from datetime import datetime
 from concurrent.futures import TimeoutError as ThreadTimeoutError
 from openai import APITimeoutError
@@ -109,6 +110,31 @@ def clean_cdata(text: str) -> str:
 
 
 class Grader:
+    # Database schema definition for submissions table
+    DB_SCHEMA = {
+        "timestamp": "TEXT NOT NULL",
+        "client_id": "TEXT",
+        "user_email": "TEXT",
+        "unit_name": "TEXT",
+        "qtag": "TEXT",
+        "part_label": "TEXT",
+        "question_text": "TEXT",
+        "ref_soln": "TEXT",
+        "grading_notes": "TEXT",
+        "student_soln": "TEXT",
+        "model": "TEXT",
+        "timeout": "REAL",
+        "latency_ms": "INTEGER",
+        "timed_out": "INTEGER",
+        "tokens_in": "INTEGER",
+        "tokens_out": "INTEGER",
+        "raw_prompt": "TEXT",
+        "result": "TEXT",
+        "full_explanation": "TEXT",
+        "feedback": "TEXT"
+    }
+
+    
     def __init__(self, 
                  scratch_dir : str ="scratch",
                  local_repo : str | None = None
@@ -126,6 +152,12 @@ class Grader:
         self.scratch_dir = scratch_dir
         self.local_repo = local_repo
 
+        # Get teh database path
+        self.db_path = self.get_db_path()
+        
+        # Initialize the database
+        self.init_db()
+
         # Initialize units dictionary
         self.units = {}
 
@@ -138,6 +170,82 @@ class Grader:
 
         # Discover units
         self.discover_units() 
+
+    def init_db(self):
+        """
+        Initialize the SQLite database for storing submission data.
+        Creates the submissions table if it does not already exist.
+        
+        The schema is defined by the DB_SCHEMA class attribute, ensuring
+        a single canonical definition of the database structure.
+        
+        This function is idempotent and safe to call multiple times.
+        """
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        # Build column definitions from DB_SCHEMA
+        column_defs = ["id INTEGER PRIMARY KEY AUTOINCREMENT"]
+        for col_name, col_type in self.DB_SCHEMA.items():
+            column_defs.append(f"{col_name} {col_type}")
+        
+        # Construct the CREATE TABLE statement
+        columns_sql = ",\n                ".join(column_defs)
+        create_table_sql = f'''
+            CREATE TABLE IF NOT EXISTS submissions (
+                {columns_sql}
+            )
+        '''
+        
+        cursor.execute(create_table_sql)
+        conn.commit()
+        conn.close()
+
+    def insert_submission(self, **kwargs):
+        """
+        Insert a submission record into the SQLite database.
+        
+        This method is schema-driven: it dynamically reads column names from
+        the DB_SCHEMA class attribute, making it future-proof against schema changes.
+        
+        Parameters
+        ----------
+        **kwargs : dict
+            Keyword arguments matching column names in DB_SCHEMA.
+            Any columns not provided will default to None.
+            Extra keywords not in DB_SCHEMA are silently ignored.
+        
+        Examples
+        --------
+        grader.insert_submission(
+            timestamp="2026-01-28 12:34:56",
+            user_email="student@example.com",
+            unit_name="unit1",
+            qtag="basic_logic",
+            student_soln="My answer...",
+            model="gpt-4.1-mini"
+        )
+        """
+        # Build record dictionary from DB_SCHEMA columns
+        record = {}
+        for col_name in self.DB_SCHEMA.keys():
+            record[col_name] = kwargs.get(col_name)
+        
+        # Construct dynamic INSERT statement
+        columns = ", ".join(self.DB_SCHEMA.keys())
+        placeholders = ", ".join(f":{col}" for col in self.DB_SCHEMA.keys())
+        
+        insert_sql = f'''
+            INSERT INTO submissions ({columns})
+            VALUES ({placeholders})
+        '''
+        
+        # Execute the insert
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        cursor.execute(insert_sql, record)
+        conn.commit()
+        conn.close()
 
     def get_local_repo_parent_path(self) -> str:
         """
@@ -556,7 +664,9 @@ class Grader:
             solution : str, 
             grading_notes: str, 
             student_soln : str, 
-            part_label: str="all", 
+            part_label: str="all",
+            unit_name: str = "",
+            qtag: str = "",
             model: str="gpt-4.1-mini",
             api_key: str | None = None,
             timeout: float = 20.) -> GradeResult:
@@ -575,6 +685,10 @@ class Grader:
             The student's solution text.
         part_label: str
             The part label to grade (or "all" for whole question).
+        unit_name: str
+            The unit name for the question.
+        qtag: str
+            The question tag identifier.
         model: str
             The OpenAI model to use for grading.
         api_key: str | None
@@ -603,6 +717,8 @@ class Grader:
         # ---------------------------------------------------------
         # 3. Call OpenAI
         # ---------------------------------------------------------
+        timed_out = False
+        
         if model.startswith("gpt-5-mini"):
             temperature = 1  # gpt-5-mini only allow temperature = 1
         else:
@@ -648,6 +764,7 @@ class Grader:
 
         except ThreadTimeoutError:
             # Thread timed out
+            timed_out = True
             log_error(f"Thread timed out after {total_timeout} seconds.")
             explanation = (
                 f"OpenAI API did not respond within {total_timeout} seconds. "
@@ -660,6 +777,7 @@ class Grader:
             }
 
         except APITimeoutError:
+            timed_out = True
             log_error("OpenAI API call timed out at the SDK level.")
             # SDK-level timeout
             explanation = (
@@ -688,6 +806,28 @@ class Grader:
         resp_path = os.path.join(self.scratch_dir, "resp.json")
         with open(resp_path, "w", encoding="utf-8") as f:
             f.write(json.dumps(grade, indent=2))
+        
+        # ---------------------------------------------------------
+        # 5. Log submission to database
+        # ---------------------------------------------------------
+        self.insert_submission(
+            timestamp=datetime.now(timezone.utc).isoformat(),
+            question_text=question_text,
+            ref_soln=solution,
+            grading_notes=grading_notes,
+            student_soln=student_soln,
+            part_label=part_label,
+            unit_name=unit_name,
+            qtag=qtag,
+            model=model,
+            timeout=timeout,
+            raw_prompt=task,
+            result=grade.get("result", "error"),
+            full_explanation=grade.get("full_explanation", ""),
+            feedback=grade.get("feedback", ""),
+            timed_out=1 if timed_out else 0
+        )
+        
         return grade
         
     
@@ -714,4 +854,27 @@ class Grader:
 
         print(f"Loaded solution file with {len(resp)} qtags.")
         return resp
+    
+    def get_db_path(self) -> str:
+        """
+        Returns the full path to the SQLite database file.
+        Uses the environment variable LLMGRADER_DB_PATH if set.
+        Otherwise defaults to a local 'local_data/llmgrader.db' file.
+
+        Returns
+        -------
+        str
+            Full path to the SQLite database file.
+        """
+        # Check environment variable (Render)
+        env_path = os.environ.get("LLMGRADER_DB_PATH")
+        if env_path:
+            db_path = env_path
+        else:
+            # Local development fallback
+            local_dir = os.path.join(os.getcwd(), "local_data")
+            os.makedirs(local_dir, exist_ok=True)
+            db_path = os.path.join(local_dir, "llmgrader.db")
+
+        return db_path
     

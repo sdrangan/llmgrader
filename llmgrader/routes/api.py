@@ -150,6 +150,8 @@ class APIController:
                 grading_notes=grading_notes,
                 student_soln=student_soln,
                 part_label=part_label,
+                unit_name=unit,
+                qtag=qtag,
                 model=model,
                 api_key=api_key,
                 timeout=timeout
