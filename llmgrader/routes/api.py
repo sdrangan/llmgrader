@@ -1,13 +1,44 @@
 print("LOADING api.py FROM:", __file__)
 
 import os
-from flask import Blueprint, request, jsonify
+from functools import wraps
+from flask import Blueprint, request, jsonify, make_response
 from flask import render_template
 
 
 class APIController:
     def __init__(self, grader):
         self.grader = grader
+
+    def require_admin(self, f):
+        """
+        Decorator to protect admin routes with HTTP Basic Authentication.
+        
+        If LLMGRADER_ADMIN_PASSWORD environment variable is not set, allows all requests (dev mode).
+        Otherwise, validates password using HTTP Basic Auth (username is ignored).
+        """
+        @wraps(f)
+        def decorated_function(*args, **kwargs):
+            admin_password = os.environ.get('LLMGRADER_ADMIN_PASSWORD')
+            
+            # Development mode: no password required
+            if admin_password is None:
+                return f(*args, **kwargs)
+            
+            # Check HTTP Basic Authentication
+            auth = request.authorization
+            
+            # Validate password (ignore username)
+            if not auth or auth.password != admin_password:
+                response = make_response(
+                    jsonify({"error": "Unauthorized - authentication required"}),
+                    401
+                )
+                response.headers['WWW-Authenticate'] = 'Basic realm="LLM Grader Admin"'
+                return response
+            
+            return f(*args, **kwargs)
+        return decorated_function
 
     def register(self, app):
         bp = Blueprint("api", __name__)
@@ -133,10 +164,12 @@ class APIController:
             return jsonify({"status": "ok"})
 
         @app.route("/admin")
+        @self.require_admin
         def admin_page():
             return render_template("admin.html")
 
         @app.route("/admin/upload", methods=["POST"])
+        @self.require_admin
         def upload():
             if "file" not in request.files:
                 return {"error": "no file"}, 400
