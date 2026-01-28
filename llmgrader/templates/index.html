@@ -29,8 +29,15 @@
     </div>
 
     <div class="right">
-        <label for="apiKeyInput" class="api-key-label">OpenAI API Key</label>
-        <input id="apiKeyInput" type="password" placeholder="OpenAI API Key" class="key-box">
+        <label for="providerSelect" class="provider-label">Provider</label>
+        <select id="providerSelect" class="provider-select">
+            <option value="openai">OpenAI</option>
+            <option value="huggingface">HuggingFace</option>
+            <option value="generic">Generic</option>
+        </select>
+
+        <label for="apiKeyInput" class="api-key-label">API Key</label>
+        <input id="apiKeyInput" type="password" placeholder="API Key" class="key-box">
         <button id="saveKeyBtn" class="save-btn">Save</button>
     </div>
 </div>
@@ -98,13 +105,20 @@
                 <option value="all">All</option>
             </select>
 
-            <label for="model-select" class="model-label">Model:</label>
-            <select id="model-select">
-                <option value="gpt-4.1-mini">gpt‑4.1‑mini</option>
-                <option value="gpt-5-mini">gpt‑5‑mini</option>
-                <option value="gpt-5.1">gpt‑5.1</option>
-                <option value="gpt-5.2">gpt‑5.2</option>
-            </select>
+            <span id="model-select-container">
+                <label for="model-select" class="model-label">Model:</label>
+                <select id="model-select">
+                    <option value="gpt-4.1-mini">gpt‑4.1‑mini</option>
+                    <option value="gpt-5-mini">gpt‑5‑mini</option>
+                    <option value="gpt-5.1">gpt‑5.1</option>
+                    <option value="gpt-5.2">gpt‑5.2</option>
+                </select>
+            </span>
+
+            <span id="model-input-container" style="display:none;">
+                <label for="model-input" class="model-input-label">Model (custom):</label>
+                <input id="model-input" type="text" placeholder="Enter model id or deployment" class="model-input" />
+            </span>
 
             <label for="timeout-input" class="timeout-label">Timeout (s):</label>
             <input

@@ -154,20 +154,100 @@ document.addEventListener("DOMContentLoaded", () => {
     const input = document.getElementById("apiKeyInput");
     const saveBtn = document.getElementById("saveKeyBtn");
 
-    const saved = localStorage.getItem("openai_api_key");
-    if (saved) input.value = saved;
+    const providerSelect = document.getElementById("providerSelect");
+
+    const modelSelect = document.getElementById("model-select");
+    const modelInput = document.getElementById("model-input");
+    const modelSelectContainer = document.getElementById("model-select-container");
+    const modelInputContainer = document.getElementById("model-input-container");
+
+    // Load saved provider and key
+    const savedProvider = localStorage.getItem("llm_provider");
+    if (savedProvider) providerSelect.value = savedProvider;
+
+    const savedKey = localStorage.getItem("llm_api_key");
+    if (savedKey) input.value = savedKey;
+
+    // Load saved model (either from select or custom input)
+    const savedModel = localStorage.getItem("llm_model");
+    if (savedModel) {
+        // If savedModel matches one of the options, select it, else populate custom input
+        let matched = false;
+        if (modelSelect) {
+            for (let i = 0; i < modelSelect.options.length; i++) {
+                if (modelSelect.options[i].value === savedModel) {
+                    modelSelect.value = savedModel;
+                    matched = true;
+                    break;
+                }
+            }
+        }
+        if (!matched && modelInput) {
+            modelInput.value = savedModel;
+        }
+    }
+
+    // Initialize model input/select visibility based on provider
+    function updateModelVisibility(provider) {
+        if (provider === 'openai') {
+            if (modelSelectContainer) modelSelectContainer.style.display = '';
+            if (modelInputContainer) modelInputContainer.style.display = '';
+        } else {
+            // For non-OpenAI providers hide GPT dropdown and show custom input
+            if (modelSelectContainer) modelSelectContainer.style.display = 'none';
+            if (modelInputContainer) modelInputContainer.style.display = '';
+        }
+    }
+
+    updateModelVisibility(providerSelect.value);
+
+    // When provider changes, persist and update visibility
+    providerSelect.addEventListener('change', (e) => {
+        const prov = e.target.value;
+        localStorage.setItem("llm_provider", prov);
+        updateModelVisibility(prov);
+    });
+
+    // Sync model select -> custom input and persist
+    if (modelSelect) {
+        modelSelect.addEventListener('change', (e) => {
+            const v = e.target.value;
+            if (modelInput) modelInput.value = v;
+            localStorage.setItem("llm_model", v);
+        });
+    }
+
+    // Persist custom model input
+    if (modelInput) {
+        modelInput.addEventListener('input', (e) => {
+            localStorage.setItem("llm_model", e.target.value.trim());
+        });
+    }
 
     saveBtn.addEventListener("click", () => {
         const key = input.value.trim();
+        const prov = providerSelect.value;
+        if (prov) {
+            localStorage.setItem("llm_provider", prov);
+        }
         if (key) {
-            localStorage.setItem("openai_api_key", key);
-            alert("API key saved in your browser.");
+            localStorage.setItem("llm_api_key", key);
+            alert("API key and provider saved in your browser.");
+        } else {
+            alert("Provider saved.");
         }
     });
 });
 
 function getApiKey() {
-    return localStorage.getItem("openai_api_key") || "";
+    return localStorage.getItem("llm_api_key") || "";
+}
+
+function getProvider() {
+    // prefer session selection in UI, else stored provider
+    const provEl = document.getElementById("providerSelect");
+    if (provEl && provEl.value) return provEl.value;
+    return localStorage.getItem("llm_provider") || "openai";
 }
 
 
@@ -437,8 +517,9 @@ async function gradeCurrentQuestion() {
     const selectedPart = partSelect.value;
 
     const apiKey = getApiKey();
+    const provider = getProvider();
     if (!apiKey) {
-        alert("Please set your OpenAI API key first.");
+        alert("Please set your API key first.");
         return;
     }
 
@@ -448,7 +529,10 @@ async function gradeCurrentQuestion() {
     gradeBtn.disabled = true;
     gradeBtn.textContent = "Grading...";
 
-    const model = document.getElementById("model-select").value;
+    // prefer custom model input if populated, else selected model
+    const modelInputVal = (document.getElementById("model-input") || {}).value || "";
+    const modelSelectVal = (document.getElementById("model-select") || {}).value || "";
+    const model = modelInputVal.trim() || modelSelectVal;
 
     const resp = await fetch("/grade", {
         method: "POST",
@@ -460,6 +544,7 @@ async function gradeCurrentQuestion() {
             part_label: selectedPart,
             model: model,
             api_key: apiKey,
+            provider: provider,
             timeout: timeout
         })
     });

@@ -6,3 +6,4 @@ requests
 openai
 pydantic>=2,<3
 pandas
+huggingface_hub

@@ -5,23 +5,19 @@ from pathlib import Path
 import json
 import os
 import pandas as pd
-from openai import OpenAI, APITimeoutError
 import xml.etree.ElementTree as ET
 import zipfile
 import re
 from datetime import datetime
 from concurrent.futures import TimeoutError as ThreadTimeoutError
-from openai import APITimeoutError
 
 from concurrent.futures import ThreadPoolExecutor
 
 from typing import Literal
 from llmgrader.services.parselatex import parse_latex_soln
+from llmgrader.services.llm_client import LLMClient, GradeResult, APITimeoutError
 
 from llmgrader.services.repo import load_from_repo
-import sys
-
-
 import sys
 from datetime import datetime, timezone
 
@@ -37,15 +33,7 @@ def log_std(msg: str):
 
 
 
-from pydantic import BaseModel
-
-class GradeResult(BaseModel):
-    """
-    Data model for the grading result.
-    """
-    result: Literal["pass", "fail", "error"]
-    full_explanation: str   
-    feedback: str
+# GradeResult is now imported from llm_client
 
 
 
@@ -516,15 +504,16 @@ class Grader:
         return task
 
     def grade(
-            self, 
-            question_text: str, 
-            solution : str, 
-            grading_notes: str, 
-            student_soln : str, 
-            part_label: str="all", 
-            model: str="gpt-4.1-mini",
-            api_key: str | None = None,
-            timeout: float = 20.) -> GradeResult:
+        self, 
+        question_text: str, 
+        solution : str, 
+        grading_notes: str, 
+        student_soln : str, 
+        part_label: str="all", 
+        model: str="gpt-4.1-mini",
+        api_key: str | None = None,
+        provider: str | None = None,
+        timeout: float = 20.) -> GradeResult:
         """
         Grades a student's solution using the OpenAI API.
         
@@ -574,7 +563,8 @@ class Grader:
             temperature = 0
         
 
-        # Create the OpenAI LLM client
+        # Create the LLM client
+        # Provider can be passed per-request (preferred) or will fall back to config.PROVIDER
         if api_key is None:
             grade = {
                 'result': 'error', 
@@ -582,53 +572,51 @@ class Grader:
                 'feedback': 'Cannot grade without an API key.'}
             return grade 
         try:
-            client = OpenAI(api_key=api_key)
+            client = LLMClient(api_key=api_key, provider=provider)
         except Exception as e:
             grade = {
                 'result': 'error', 
-                'full_explanation': f'Failed to create OpenAI client: {str(e)}', 
+                'full_explanation': f'Failed to create LLM client: {str(e)}', 
                 'feedback': 'Cannot grade without a valid API key.'}
             return grade
 
-        log_std('Calling OpenAI for grading...')
+        log_std(f'Calling {client.provider} LLM for grading...')
         
-        # Define a function to call the OpenAI API
-        def call_openai_api():
-            return client.responses.parse(
+        # Define a function to call the LLM API
+        def call_llm_api():
+            return client.call(
+                task=task,
                 model=model,
-                input=task,
-                text_format=GradeResult,
                 temperature=temperature,
                 timeout=timeout
             )
         executor = ThreadPoolExecutor(max_workers=1)
-        future = executor.submit(call_openai_api)
+        future = executor.submit(call_llm_api)
         
         try:
             additional_timeout = 5.0  # seconds
             total_timeout = timeout + additional_timeout
-            response = future.result(timeout=total_timeout)
-            grade = response.output_parsed.model_dump()
-            log_std("Received response from OpenAI.")
+            grade = future.result(timeout=total_timeout)
+            log_std(f"Received response from {client.provider}.")
 
         except ThreadTimeoutError:
             # Thread timed out
             log_error(f"Thread timed out after {total_timeout} seconds.")
             explanation = (
-                f"OpenAI API did not respond within {total_timeout} seconds. "
+                f"LLM API did not respond within {total_timeout} seconds. "
                 f"(timeout={timeout}, extra={additional_timeout})."
             )
             grade = {
                 "result": "error",
                 "full_explanation": explanation,
-                "feedback": "OpenAI server not responding in time. Try again."
+                "feedback": "LLM server not responding in time. Try again."
             }
 
         except APITimeoutError:
-            log_error("OpenAI API call timed out at the SDK level.")
+            log_error("LLM API call timed out at the SDK level.")
             # SDK-level timeout
             explanation = (
-                f"OpenAI API responded with a timeout after {timeout} seconds."
+                f"LLM API responded with a timeout after {timeout} seconds."
             )
             grade = {
                 "result": "error",
@@ -637,10 +625,10 @@ class Grader:
             }
         
         except Exception as e:
-            log_error(f"OpenAI API call failed: {str(e)}")
+            log_error(f"LLM API call failed: {str(e)}")
             grade = {
                 'result': 'error', 
-                'full_explanation': f'OpenAI API call failed: {str(e)}', 
+                'full_explanation': f'LLM API call failed: {str(e)}', 
                 'feedback': 'There was an error while trying to grade the solution.'}
         finally:
             # IMPORTANT: do NOT overwrite grade here
