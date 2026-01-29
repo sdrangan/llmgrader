@@ -1,3 +1,10 @@
+---
+title: Database viewer
+parent: Analytics
+nav_order: 1
+has_children: false
+---
+
 # Database Viewer (DB Viewer)
 
 ## Overview
