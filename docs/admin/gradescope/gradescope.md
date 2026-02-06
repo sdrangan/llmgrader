@@ -1,20 +1,11 @@
-# Building an Autograder for Gradescope
+---
+title: Building an Autograded Assignment
+parent: Gradescope Integration
+nav_order: 1
+has_children: false
+---
 
-## Grading procedure 
-
-The LLM grader application also provides a simple method to build autograders for Gradesccope.
-The general flow is:
-
-- Students answer questions on LLM grader portal for a particular unit
-- Students are allowed an infinite number of tries until they get all questions correct
-- Students then go to the Dashboard and then select **Download Submission**.  This
-selection will create a JSON file submission.
-- Students go to Gradescope and upload the submission.
-- The autograder app will verify that the questions are correct.
-
-Importantly, the autograder app on Gradescope.  It simply reads the results from the LLM grader.
-It makes no calls to OpenAI or perform any processing.
-
+# Building an Auto
 ## Building the Gradescope Autograder
 
 To build the Gradescope autograder:
@@ -33,7 +24,7 @@ or whatever your unit name is.
 
 ## Creating the Gradescope assignment
 
-Now go to Gradescope
+Now go to Gradescope:
 
 - Select your course and go to **Assignments**
 - Select **Create Assignment** (bottom right)
@@ -46,7 +37,16 @@ Now go to Gradescope
    - Select the autograder file, `autograder.zip` created in the previous step
    - Select **Update Autograder**.  
    - The Autograder will now take a minute or two to build
-   - If you have a JSON file submission, you can test it now.  Otherwise, go to the next step
+   - If you have a JSON file submission, you can test it now.  Otherwise, go to the next section to create a JSON file to test the autograder.
+
+Your assignment is now ready for students to start uploading solutions.
+In general, you want to be able to have the students see the grades as soon as they submit.  To enable this setting:
+
+- On gradescope, select **Assignments** and then select the assignment you created
+- On the left panel, select **Review Grades**
+- This will give you a page where you can see all the student submissions. Even though there will initially be
+no submissions, on the bottom right, select **Publish Grades**.  This way students can see the grades as soon as the students submit
+
 
 ## Testing the Autograder
 

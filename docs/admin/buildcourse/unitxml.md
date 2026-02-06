@@ -1,7 +1,7 @@
 ---
-title:  Unit XML Format
-parent: Administrator Guide
-nav_order: 3
+title:  Creating a Unit
+parent: Building a Course Package
+nav_order: 2
 has_children: false
 ---
 

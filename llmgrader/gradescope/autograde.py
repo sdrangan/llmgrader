@@ -1,3 +1,4 @@
+import argparse
 import json
 import os
 import re
@@ -18,7 +19,7 @@ else:
     RESULTS_PATH = Path.cwd() / "results" / "results.json"
     SCHEMA_PATH = Path.cwd() / "grade_schema.xml"
 
-def find_submission_json() -> Path:
+def find_submission_json(submission_dir: Path, verbose: bool = False) -> Path:
     """
     Locate submission_<unit>.json.
     Supports:
@@ -26,9 +27,11 @@ def find_submission_json() -> Path:
       - a raw submission_*.json file
     """
     # Look for a zip file
-    zips = list(SUBMISSION_DIR.glob("*.zip"))
+    zips = list(submission_dir.glob("*.zip"))
     if zips:
         zip_path = zips[0]
+        if verbose:
+            print(f"[debug] Found zip submission: {zip_path}")
         with zipfile.ZipFile(zip_path, "r") as zf:
             candidates = [
                 name for name in zf.namelist()
@@ -37,13 +40,17 @@ def find_submission_json() -> Path:
             if not candidates:
                 raise FileNotFoundError("No submission_*.json found inside zip.")
             target = candidates[0]
-            zf.extract(target, SUBMISSION_DIR)
-            return SUBMISSION_DIR / target
+            zf.extract(target, submission_dir)
+            if verbose:
+                print(f"[debug] Extracted submission JSON: {submission_dir / target}")
+            return submission_dir / target
 
     # Otherwise look directly
-    json_files = list(SUBMISSION_DIR.glob("submission_*.json"))
+    json_files = list(submission_dir.glob("submission_*.json"))
     if not json_files:
         raise FileNotFoundError("No submission_*.json found in submission directory.")
+    if verbose:
+        print(f"[debug] Found submission JSON: {json_files[0]}")
     return json_files[0]
 
 
@@ -137,7 +144,7 @@ def load_grade_schema(schema_path: Path):
     return questions
 
 
-def compute_scores(schema_questions, submission_json):
+def compute_scores(schema_questions, submission_json, verbose: bool = False):
     """
     Compute total score and per-question breakdown.
     JSON structure:
@@ -155,6 +162,8 @@ def compute_scores(schema_questions, submission_json):
 
     # Set the unit data
     unit_data = submission_json
+    if verbose:
+        print(f"[debug] Loaded submission with {len(unit_data)} top-level question entries.")
 
 
     total_score = 0.0
@@ -172,10 +181,14 @@ def compute_scores(schema_questions, submission_json):
         q_max = sum(p["points"] for p in parts)
         max_score += q_max
 
-        q_score = 0.0
-        q_feedback = []
+        score_all = 0.0
+        score_parts = 0.0
+        q_feedback_parts = []
+        q_feedback_all = []
 
         q_json = unit_data.get(qtag)
+        if verbose:
+            print(f"[debug] Parsing question '{qtag}': parts={len(parts)} present={'yes' if q_json is not None else 'no'}")
 
         if q_json is None:
             tests.append({
@@ -187,34 +200,53 @@ def compute_scores(schema_questions, submission_json):
             continue
 
         q_parts_json = q_json.get("parts", {})
+        if verbose:
+            print(f"[debug] Found parts in submission: {list(q_parts_json.keys())}")
 
-        for p in parts:
-            label = p["label"]
-            points = p["points"]
-            p_json = q_parts_json.get(label)
+        part_points = {p["label"]: p["points"] for p in parts}
 
-            if p_json is None:
-                p_score = 0.0
-                p_output = f"Missing part '{label}'."
-            else:
-                status = (p_json.get("grade_status") or "").strip().lower()
-                feedback = p_json.get("feedback") or ""
-                explanation = p_json.get("explanation") or ""
+        # Loop over submitted parts to compute scores and gather feedback
+        for label, p_json in q_parts_json.items():
+            status = (p_json.get("grade_status") or "").strip().lower()
+            feedback = p_json.get("feedback") or ""
+            explanation = p_json.get("explanation") or ""
 
-                if status == "pass":
-                    p_score = points
-                    p_output = "Pass."
-                else:
-                    p_score = 0.0
-                    p_output = "Fail."
+            if label == "all":
+                score_all = q_max if status == "pass" else 0.0
+                if verbose:
+                    print(f"[debug] Part '{label}' status='{status}' score={score_all}/{q_max}.")
 
                 if feedback:
-                    q_feedback.append(f"[{label}] Feedback: {feedback}")
+                    q_feedback_all.append(f"[{label}] Feedback: {feedback}")
                 if explanation:
-                    q_feedback.append(f"[{label}] Explanation: {explanation}")
+                    q_feedback_all.append(f"[{label}] Explanation: {explanation}")
+                continue
 
-            q_score += p_score
+            points = part_points.get(label, 0.0)
+            p_score = points if status == "pass" else 0.0
+            score_parts += p_score
 
+            if verbose:
+                print(f"[debug] Part '{label}' status='{status}' score={p_score}/{points}.")
+
+            if feedback:
+                q_feedback_parts.append(f"[{label}] Feedback: {feedback}")
+            if explanation:
+                q_feedback_parts.append(f"[{label}] Explanation: {explanation}")
+
+        if score_all > score_parts:
+            if verbose:
+                print(f"[debug] Using 'all' part score {score_all} over parts score {score_parts}.")
+            q_feedback = q_feedback_all
+            q_score = score_all
+        else:
+            if verbose:
+                print(f"[debug] Using parts score {score_parts} over 'all' part score {score_all}.")
+            q_feedback = q_feedback_parts
+            q_score = score_parts
+
+            
+        # Accumulate total score
         total_score += q_score
 
         tests.append({
@@ -223,6 +255,9 @@ def compute_scores(schema_questions, submission_json):
             "max_score": q_max,
             "output": "\n".join(q_feedback) if q_feedback else ""
         })
+
+        if verbose:
+            print(f"[debug] Question '{qtag}' score: {q_score}/{q_max}")
 
         if q_feedback:
             overall_feedback.append(f"Question: {qtag}\n" + "\n".join(q_feedback))
@@ -247,16 +282,37 @@ def write_results(results):
 
 
 def main():
+    parser = argparse.ArgumentParser(description="Autograde submission JSON against schema.")
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        default=False,
+        help="Print debugging output during grading.",
+    )
+    parser.add_argument(
+        "--submission",
+        default=None,
+        help="Submission directory (defaults to environment-based SUBMISSION_DIR).",
+    )
+    args = parser.parse_args()
+
     try:
-        submission_json_path = find_submission_json()
+        submission_dir = Path(args.submission) if args.submission else SUBMISSION_DIR
+        submission_json_path = find_submission_json(submission_dir, verbose=args.verbose)
         with open(submission_json_path, "r") as f:
             submission_json = json.load(f)
 
+        if args.verbose:
+            print(f"[debug] Using submission file: {submission_json_path}")
+            print(f"[debug] Using schema file: {SCHEMA_PATH}")
+
         schema_questions = load_grade_schema(SCHEMA_PATH)
-        results = compute_scores(schema_questions, submission_json)
+        results = compute_scores(schema_questions, submission_json, verbose=args.verbose)
         write_results(results)
 
     except Exception as e:
+        if "args" in locals() and args.verbose:
+            print(f"[debug] Autograder error: {e}")
         RESULTS_PATH.parent.mkdir(parents=True, exist_ok=True)
         with open(RESULTS_PATH, "w") as f:
             json.dump(

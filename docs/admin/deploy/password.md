@@ -1,7 +1,7 @@
 ---
-title:  Setting the Password
-parent: Administrator Guide
-nav_order: 1
+title: Creating and deploying
+parent: Deploying on Render
+nav_order: 2
 has_children: false
 ---
 

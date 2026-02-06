@@ -1,7 +1,7 @@
 ---
-title:  Generating HTML Files
-parent: Administrator Guide
-nav_order: 4
+title:  Creating HTML Files
+parent: Building a Course Package
+nav_order: 3
 has_children: false
 ---
 

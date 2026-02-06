@@ -1,13 +1,15 @@
 ---
 title:  Uploading the Package
-parent: Administrator Guide
-nav_order: 6
+parent: Building a Course Package
+nav_order: 4
 has_children: false
 ---
 
 # Uploading a Solution Package 
 
-Now that the Render service is running, we next show how to create a solution package ZIP file and upload it to the LLM grader’s admin interface.  The upload process installs the course configuration and all unit XML files into the grader’s persistent storage.
+If the service is running on Render or on your local machine,
+we next show how to create a solution package ZIP file and upload it to the LLM grader’s admin interface.
+The upload process installs the course configuration and all unit XML files into the grader’s persistent storage.
 
 ---
 

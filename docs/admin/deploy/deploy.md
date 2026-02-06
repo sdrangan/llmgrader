@@ -1,10 +1,9 @@
 ---
-title:  Deploying to Render
-parent: Administrator Guide
-nav_order: 5
+title: Creating and deploying
+parent: Deploying on Render
+nav_order: 1
 has_children: false
 ---
-
 
 # Deploying the LLM Grader on Render 
 
