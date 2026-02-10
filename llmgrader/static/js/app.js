@@ -106,66 +106,11 @@ function pruneSessionState(unitName, currentQtags) {
     }
 }
 
-//
-// ---------------------------
-//  LOAD STUDENT SOLUTIONS FILE
-// ---------------------------
-document.getElementById("load-student-file").onclick = function () {
-    const fileInput = document.getElementById("student-file");
-    if (!fileInput.files.length) {
-        console.log("No file selected");
-        return;
-    }
-
-    const formData = new FormData();
-    formData.append("file", fileInput.files[0]);
-
-    fetch("/load_file", {
-        method: "POST",
-        body: formData
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data.error) {
-            console.error("Server error:", data.error);
-            return;
-        }
-
-        // Student solutions now keyed by qtag
-        currentStudentSolutions = data || {};
-
-        // Update student solution box if a question is selected
-        const dropdown = document.getElementById("question-number");
-        const qtag = dropdown.value;
-        document.getElementById("student-solution").value =
-            currentStudentSolutions[qtag]?.solution || "";
-    });
-};
-
 
 //
 // ---------------------------
 //  OpenAI KEY MANAGEMENT
 // ---------------------------
-document.addEventListener("DOMContentLoaded", () => {
-    // Load session state from localStorage
-    loadSessionState();
-
-    const input = document.getElementById("apiKeyInput");
-    const saveBtn = document.getElementById("saveKeyBtn");
-
-    const saved = localStorage.getItem("openai_api_key");
-    if (saved) input.value = saved;
-
-    saveBtn.addEventListener("click", () => {
-        const key = input.value.trim();
-        if (key) {
-            localStorage.setItem("openai_api_key", key);
-            alert("API key saved in your browser.");
-        }
-    });
-});
-
 function getApiKey() {
     return localStorage.getItem("openai_api_key") || "";
 }
@@ -176,6 +121,7 @@ function getApiKey() {
 //  UNIT LOADING
 // ---------------------------
 document.addEventListener("DOMContentLoaded", () => {
+    loadSessionState();
     loadUnits();
 });
 
@@ -357,13 +303,13 @@ function displayQuestion(qtag) {
 // ---------------------------
 //  DIVIDER DRAGGING
 // ---------------------------
-const divider = document.querySelector(".divider");
+const grade_hdivider = document.querySelector(".divider");
 const topPanel = document.getElementById("question-panel");
 const bottomPanel = document.getElementById("solution-panel");
 
 let dragging = false;
 
-divider.addEventListener("mousedown", () => {
+grade_hdivider.addEventListener("mousedown", () => {
     dragging = true;
     document.body.style.userSelect = "none";
 });
@@ -376,8 +322,8 @@ document.addEventListener("mouseup", () => {
 document.addEventListener("mousemove", (e) => {
     if (!dragging) return;
 
-    const containerHeight = divider.parentElement.offsetHeight;
-    const newTopHeight = e.clientY - divider.parentElement.offsetTop;
+    const containerHeight = grade_hdivider.parentElement.offsetHeight;
+    const newTopHeight = e.clientY - grade_hdivider.parentElement.offsetTop;
 
     if (newTopHeight < 100 || newTopHeight > containerHeight - 100) return;
 
@@ -410,6 +356,7 @@ function populateQuestionDropdown(qtags) {
         displayQuestion(dropdown.value);
     };
 
+    // sessionState save/restore wiring restored after UI refactor
     // Add event listener to save student solution on input
     const solBox = document.getElementById("student-solution");
     solBox.addEventListener("input", () => {
@@ -592,3 +539,33 @@ document.addEventListener("DOMContentLoaded", () => {
         });
     }
 });
+
+//
+// ---------------------------
+//  VERTICAL SPLITTER FOR GRADE VIEW
+// ---------------------------
+// grade_vdivider controls left/right split in Grade view
+const grade_vdivider = document.getElementById("grade-vertical-divider");
+const leftCol = document.querySelector("#grade-view .grade-left-column");
+const rightCol = document.querySelector("#grade-view .grade-right-column");
+
+if (grade_vdivider && leftCol && rightCol) {
+    let isDragging = false;
+
+    grade_vdivider.addEventListener("mousedown", () => { isDragging = true; });
+    document.addEventListener("mouseup", () => { isDragging = false; });
+
+    document.addEventListener("mousemove", (e) => {
+        if (!isDragging) return;
+        const container = document.getElementById("grade-view");
+        const rect = container.getBoundingClientRect();
+        const offset = e.clientX - rect.left;
+
+        // Prevent extreme collapse
+        const min = 200;
+        const max = rect.width - 200;
+
+        const clamped = Math.max(min, Math.min(max, offset));
+        leftCol.style.flex = `0 0 ${clamped}px`;
+    });
+}
