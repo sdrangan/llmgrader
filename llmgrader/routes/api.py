@@ -53,7 +53,7 @@ class APIController:
 
         @bp.get("/dashboard")
         def dashboard():
-            return render_template("dashboard.html")
+            return render_template("index.html")
 
         @bp.post("/chat")
         def chat():
@@ -172,7 +172,7 @@ class APIController:
         @app.route("/admin")
         @self.require_admin
         def admin_page():
-            return render_template("admin.html")
+            return render_template("index.html")
 
         @app.route("/admin/upload", methods=["POST"])
         @self.require_admin

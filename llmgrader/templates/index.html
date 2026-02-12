@@ -1,4 +1,5 @@
 <!DOCTYPE html>
+<!-- Old template-based views removed; app now uses /views/*.html exclusively -->
 <html lang="en">
 <head><meta charset="UTF-8">
 
@@ -116,10 +117,10 @@
 <body>
     <div class="top-controls">
         <label for="unit-select" class="unit-dropdown">Unit:</label>
-        <select id="unit-select" class="unit-dropdown"></select>
+        <select id="unit-select" class="unit-dropdown grade-dropdown"></select>
 
         <label for="question-number" class="grade-only">Question:</label>
-        <select id="question-number" class="grade-only"></select>
+        <select id="question-number" class="grade-only grade-dropdown"></select>
 
         <span class="part-label grade-only">Part</span>
         <select id="part-select" class="grade-only">
@@ -149,72 +150,8 @@
         <input type="file" id="load-results-file" accept=".json" style="display: none;">
     </div>
 
-<!-- legacy panels-container removed — ready for new view containers -->
-<!-- Grade view DOM restored for JS wiring -->
-<div id="grade-view" class="app-view">
-    <div class="grade-layout">
-        <div class="grade-left-column">
-            <div class="resizable-container">
-
-                <div id="grade-question-panel" class="grade-panel">
-                    <h3>Question</h3>
-                    <div id="question-text" class="panel">
-                        <!-- question text will be injected here -->
-                    </div>
-                </div>
-
-                <div class="divider"></div>
-
-                <div id="grade-solution-panel" class="grade-panel">
-                    <h3>Your Solution</h3>
-                    <textarea id="student-solution" class="solution-textarea"></textarea>
-                </div>
-
-            </div>
-        </div>
-
-        <!-- Added vertical splitter between left and right columns in Grade view -->
-        <div id="grade-vertical-divider" class="vertical-divider"></div>
-
-        <div class="grade-right-column">
-            <div id="grade-output-panel">
-                <div class="grade-status-container">
-                    <div id="grade-status" class="status-not-graded">Not graded</div>
-                    <div id="grade-points" class="grade-points"></div>
-                </div>
-
-                <div id="grading-output">
-                    <h3>Feedback</h3>
-                    <div id="feedback-box" class="panel">No feedback yet.</div>
-
-                    <h3>Full Explanation</h3>
-                    <div id="full-explanation-box" class="panel">No explanation yet.</div>
-                </div>
-            </div>
-        </div>
-    </div>
-</div>
-
-<div id="dashboard-view" class="app-view">
-    <div class="view-placeholder">
-        <h2>Dashboard View</h2>
-        <p>Dashboard content will be implemented here.</p>
-    </div>
-</div>
-
-<div id="admin-view" class="app-view">
-    <div class="view-placeholder">
-        <h2>Admin View</h2>
-        <p>Admin content will be implemented here.</p>
-    </div>
-</div>
-
-<div id="analytics-view" class="app-view">
-    <div class="view-placeholder">
-        <h2>Analytics View</h2>
-        <p>Analytics content will be implemented here.</p>
-    </div>
-</div>
+<!-- Views split into separate HTML fragments and loaded dynamically -->
+<div id="view-container"></div>
 
 <!-- Preferences Modal -->
 <div id="preferences-modal" class="modal-overlay" style="display: none;">

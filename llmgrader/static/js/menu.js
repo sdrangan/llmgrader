@@ -32,6 +32,9 @@
         }
     }
 
+    // Expose setActiveView globally so it can be called from loadView
+    window.setActiveView = setActiveView;
+
     function closeMenus() {
         if (!menuBar) {
             return;
@@ -48,7 +51,12 @@
 
     viewButtons.forEach(function (button) {
         button.addEventListener('click', function () {
-            setActiveView(button.getAttribute('data-view'));
+            var viewName = button.getAttribute('data-view');
+            setActiveView(viewName);
+            // Load the view dynamically
+            if (typeof loadView === 'function') {
+                loadView(viewName);
+            }
             closeMenus();
         });
     });
@@ -246,6 +254,4 @@
             }
         });
     }
-
-    setActiveView('grade');
 })();

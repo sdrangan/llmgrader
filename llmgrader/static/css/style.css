@@ -262,30 +262,6 @@ body[data-active-view="analytics"] #analytics-view {
     min-height: 0;    /* REQUIRED */
 }
 
-/* legacy panel CSS removed — ready for new view containers */
-
-.grade-left-column,
-.grade-right-column {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-    height: 100%;
-    min-height: 0;
-}
-
-.resizable-container {
-    flex: 1 1 auto;
-    display: flex;
-    flex-direction: column;
-    min-height: 0;
-}
-
-.grade-panel {
-    flex: 1 1 auto;
-    min-height: 0;
-    display: flex;
-    flex-direction: column;
-}
 
 .divider {
     height: 6px;
@@ -521,8 +497,8 @@ textarea {
     overflow: hidden;   /* panel can shrink */
 }
 
-/* Question and solution text areas */
-#question-text {
+/* Shared HTML-rendering box for question/solution panels */
+.html-box {
     flex: 1;
     overflow-y: auto;
     padding: 8px;
@@ -533,31 +509,33 @@ textarea {
     font-family: Arial, sans-serif;
 }
 
-/* Remove top margin from first element to avoid extra space */
-#question-text > *:first-child {
+/* Remove top margin from first element */
+.html-box > *:first-child {
     margin-top: 0;
 }
 
-/* Code blocks in question text */
-#question-text pre {
+/* Code blocks should expand naturally and wrap long lines */
+.html-box pre {
     background-color: #f7f7f7;
     padding: 10px;
     border-radius: 4px;
-    overflow-x: auto;
+    overflow: visible;          /* no internal scrollbars */
+    white-space: pre-wrap;      /* wrap long lines */
+    word-break: break-word;     /* prevent layout blowout */
     margin: 10px 0;
 }
 
-#question-text code {
+
+.html-box code {
     font-family: Consolas, "Courier New", monospace;
     font-size: 0.95em;
 }
 
-#question-text pre code {
+.html-box pre code {
     background-color: transparent;
     padding: 0;
     display: block;
 }
-
 #student-solution {
     flex: 1;
     overflow-y: auto;
@@ -568,23 +546,6 @@ textarea {
     min-height: 0;
     font-size: 14px;
     font-family: monospace;
-}
-
-/* Explanation box scrolls independently */
-#full-explanation-box {
-    flex: 1;
-    overflow-y: auto;
-    padding: 8px;
-    border: 1px solid #ccc;
-    background: #fafafa;
-    white-space: pre-wrap;
-    min-height: 0;
-}
-
-/* Feedback and status */
-#feedback-box, #grade-status {
-    padding: 6px;
-    margin-bottom: 6px;
 }
 
 
@@ -621,55 +582,66 @@ textarea {
     margin-left: 4px;
 }
 
-.grade-layout {
+/* A full-height horizontal flex row shared by Grade and Admin views */
+.layout-row {
     display: flex;
     flex-direction: row;
     height: calc(100vh - 100px);
     width: 100%;
     min-height: 0;
+    min-width: 0;
     gap: 10px;
 }
 
-.grade-left-column {
+
+/* A vertical flex column that fills available height */
+.column {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-height: 0;
+    min-width: 0;
+    gap: 10px;
+}
+
+
+
+
+/* A flex child inside a column that participates in vertical resizing */
+.resizable-container {
+    flex: 1 1 auto;
     display: flex;
     flex-direction: column;
     min-height: 0;
+    min-width: 0;       /* REQUIRED for horizontal shrinking + divider drag */
 }
 
-.grade-left-column {
-    flex: 1 1 auto;
-}
 
-.grade-right-column {
+
+/* A flexible, scrollable panel wrapper that grows/shrinks inside a column */
+.panel-container {
     display: flex;
     flex-direction: column;
-    flex: 1 1 auto;
-    min-width: 0;
-}
-
-#grade-vertical-divider.vertical-divider {
-    width: 6px;
-    cursor: col-resize;
-    background-color: #ddd;
-}
-
-/* Right-column panels now expand with vertical splitter */
-#grade-status,
-#feedback-box,
-#full-explanation-box {
-    width: 100%;
-    max-width: none;
-    flex: 1 1 auto;
-    min-width: 0;
-}
-
-
-#grade-question-panel,
-#grade-solution-panel {
     min-height: 0;
     overflow: auto;
     flex: 1 1 auto;
 }
+
+/* A panel that contains a heading and HTML-rendered content */
+.html-panel {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-height: 0;   /* REQUIRED so the html-box can scroll */
+}
+
+
+/* A flex child that grows/shrinks and respects min-width: 0 */
+.flex-content {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
 
 .top-controls {
     display: flex;
@@ -698,4 +670,36 @@ textarea {
     font-weight: bold;
 }
 
+/* Dropdowns now have max-width with ellipsis truncation */
+.top-controls select.grade-dropdown {
+    width: 150px !important;
+    max-width: 150px !important;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
 /* moved top-controls styles from index.html */
+
+/* ------------------------------
+   ADMIN VIEW
+------------------------------ */
+
+
+.admin-top-bar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px;
+    border-bottom: 1px solid #ccc;
+    min-width: 0;
+}
+
+
+.vertical-divider {
+    width: 6px;
+    cursor: col-resize;
+    background-color: #ddd;
+}
+
+

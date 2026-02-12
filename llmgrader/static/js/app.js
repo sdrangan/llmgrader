@@ -1,3 +1,4 @@
+// Grade/Admin selection sync implemented
 console.log("UI loaded.");
 
 //
@@ -7,6 +8,7 @@ let currentUnitQtags = [];          // list of qtags
 let currentUnitItems = {};          // dict: qtag -> question object
 let currentUnitName = null;         // current unit name
 let currentStudentSolutions = {};   // dict: qtag -> student solution
+let currentQtagName = null;
 
 // sessionState[unitName][qtag] = {
 //     student_solution: "...",
@@ -118,11 +120,277 @@ function getApiKey() {
 
 //
 // ---------------------------
+//  VIEW LOADING
+// ---------------------------
+async function loadView(name) {
+    try {
+        const response = await fetch(`/static/views/${name}.html`);
+        const html = await response.text();
+        document.getElementById("view-container").innerHTML = html;
+        
+        // Set the active view state (updates body attribute and dropdown visibility)
+        if (typeof setActiveView === 'function') {
+            setActiveView(name);
+        }
+        
+        initializeView(name);
+    } catch (error) {
+        console.error(`Failed to load view: ${name}`, error);
+    }
+}
+
+function initializeView(name) {
+    if (name === "grade") {
+        // Reattach grade view event listeners, splitters, dropdowns
+        initializeGradeView();
+    } else if (name === "admin") {
+        // Reattach admin view dropdowns and splitters
+        initializeAdminView();
+    } else if (name === "dashboard") {
+        // Initialize dashboard view
+    } else if (name === "analytics") {
+        // Initialize analytics view
+    }
+}
+
+function initializeGradeView() {
+    // Reattach horizontal divider (question/solution splitter)
+    const grade_hdivider = document.querySelector(".divider");
+    const topPanel = document.getElementById("grade-question-panel");
+    const bottomPanel = document.getElementById("grade-solution-panel");
+
+    if (grade_hdivider && topPanel && bottomPanel) {
+        let dragging = false;
+
+        grade_hdivider.addEventListener("mousedown", () => {
+            dragging = true;
+            document.body.style.userSelect = "none";
+        });
+
+        document.addEventListener("mouseup", () => {
+            dragging = false;
+            document.body.style.userSelect = "";
+        });
+
+        document.addEventListener("mousemove", (e) => {
+            if (!dragging) return;
+
+            const containerHeight = grade_hdivider.parentElement.offsetHeight;
+            const newTopHeight = e.clientY - grade_hdivider.parentElement.offsetTop;
+
+            if (newTopHeight < 100 || newTopHeight > containerHeight - 100) return;
+
+            topPanel.style.flex = `0 0 ${newTopHeight}px`;
+            bottomPanel.style.flex = `1`;
+        });
+    }
+
+    
+    // Reattach grade_vdivider controls left/right split in Grade view
+    const grade_vdivider = document.getElementById("grade-vertical-divider");
+    const columns = document.querySelectorAll("#grade-view .layout-row > .column");
+    const leftCol = columns[0];
+    const rightCol = columns[1];
+
+    if (grade_vdivider && leftCol && rightCol) {
+        let isDragging = false;
+
+        grade_vdivider.addEventListener("mousedown", () => { isDragging = true; });
+        document.addEventListener("mouseup", () => { isDragging = false; });
+
+        document.addEventListener("mousemove", (e) => {
+            if (!isDragging) return;
+            const container = document.getElementById("grade-view");
+            const rect = container.getBoundingClientRect();
+            const offset = e.clientX - rect.left;
+
+            // Prevent extreme collapse
+            const min = 200;
+            const max = rect.width - 200;
+
+            const clamped = Math.max(min, Math.min(max, offset));
+            leftCol.style.flex = `0 0 ${clamped}px`;
+        });
+    }
+
+    if (currentUnitName && currentUnitQtags.length > 0) {
+        populateQuestionDropdown(currentUnitQtags, currentQtagName);
+
+        // After populating, restore the correct question from global state
+        const qSelect = document.getElementById("question-number");
+        if (qSelect && currentQtagName && currentUnitQtags.includes(currentQtagName)) {
+            qSelect.value = currentQtagName;
+            displayQuestion(currentQtagName);
+        }
+    }
+
+
+    // Initialize global selection state from Grade View dropdowns
+    const unitSelect = document.getElementById("unit-select");
+    const questionSelect = document.getElementById("question-number");
+
+    if (unitSelect && questionSelect) {
+        currentUnitName = unitSelect.value;
+        currentQtagName = questionSelect.value;
+    }
+
+}
+
+// Admin View now matches Grade View layout and splitter behavior
+function initializeAdminView() {
+    setupAdminDropdowns();
+    setupAdminSplitters();
+}
+
+function setupAdminDropdowns() {
+    const unitSelect = document.getElementById("admin-unit-select");
+    const qSelect = document.getElementById("admin-question-select");
+
+    if (!unitSelect || !qSelect) return;
+
+    // Populate units from currentUnitQtags data
+    // We'll need to fetch units first
+    fetch("/units").then(r => r.json()).then(units => {
+        unitSelect.innerHTML = units.map(u => `<option value="${u}">${u}</option>`).join("");
+        
+        const firstUnit = units[0];
+        unitSelect.value = currentUnitName;
+
+        unitSelect.addEventListener("change", () => {
+            currentUnitName = unitSelect.value;
+            populateAdminQuestions();
+            displayAdminCurrent();
+        });
+
+        qSelect.addEventListener("change", () => {
+            currentQtagName = qSelect.value;
+            displayAdminCurrent();
+        });
+
+        if (units.length > 0) {
+            populateAdminQuestions();
+        }
+    });
+}
+
+function populateAdminQuestions() {
+    const unit = document.getElementById("admin-unit-select").value;
+    const qSelect = document.getElementById("admin-question-select");
+
+    if (!unit) return;
+
+    // Fetch unit data
+    fetch(`/unit/${unit}`).then(r => r.json()).then(data => {
+        qSelect.innerHTML = data.qtags.map(qtag => `<option value="${qtag}">${qtag}</option>`).join("");
+
+        // ⭐ ADD THESE TWO LINES
+        currentUnitQtags = data.qtags;
+        currentUnitItems = data.items;
+
+        // If the currentQtagName is not in this unit, fall back to the first qtag
+        if (!data.qtags.includes(currentQtagName)) {
+            qSelect.value = data.qtags[0];
+            currentQtagName = data.qtags[0];   // <-- CRITICAL FIX
+        } else {
+            qSelect.value = currentQtagName;
+        }
+
+        // <-- REQUIRED to sync Admin → Grade
+        displayAdminCurrent();
+    });
+}
+
+function displayAdminCurrent() {
+    displayAdminQuestion(currentUnitName, currentQtagName);
+}
+
+// Admin View: Display selected question with reference solution and grading notes
+// Fixed: Uses q.solution_text (reference solution, not student solution)
+// Fixed: Grading notes formatting preserved via CSS white-space: pre-wrap
+function displayAdminQuestion(unit, qtag) {
+    // Fetch unit data to get question details
+    fetch(`/unit/${unit}`).then(r => r.json()).then(data => {
+        const q = data.items[qtag];
+        if (!q) return;
+
+        document.getElementById("admin-question-text").innerHTML = q.question_text || "";
+        document.getElementById("admin-solution-text").innerHTML = q.solution || "";
+        document.getElementById("admin-grading-notes").textContent = q.grading_notes || "";
+
+        if (window.MathJax) MathJax.typesetPromise();
+    });
+}
+
+function setupAdminSplitters() {
+    // Horizontal divider (question/solution splitter)
+    const hdivider = document.querySelector("#admin-view .divider");
+    const topPanel = document.getElementById("admin-question-panel");
+    const bottomPanel = document.getElementById("admin-solution-panel");
+
+    if (hdivider && topPanel && bottomPanel) {
+        let dragging = false;
+
+        hdivider.addEventListener("mousedown", () => {
+            dragging = true;
+            document.body.style.userSelect = "none";
+        });
+
+        document.addEventListener("mouseup", () => {
+            dragging = false;
+            document.body.style.userSelect = "";
+        });
+
+        document.addEventListener("mousemove", (e) => {
+            if (!dragging) return;
+
+            const containerHeight = hdivider.parentElement.offsetHeight;
+            const newTopHeight = e.clientY - hdivider.parentElement.offsetTop;
+
+            if (newTopHeight < 100 || newTopHeight > containerHeight - 100) return;
+
+            topPanel.style.flex = `0 0 ${newTopHeight}px`;
+            bottomPanel.style.flex = `1`;
+        });
+    }
+
+    // Vertical divider (left/right column splitter)
+    const vdivider = document.getElementById("admin-vertical-divider");
+    const columns = document.querySelectorAll("#admin-view .layout-row > .column");
+    const leftCol = columns[0];
+    const rightCol = columns[1];
+    
+    if (vdivider && leftCol && rightCol) {
+        let isDragging = false;
+
+        vdivider.addEventListener("mousedown", () => { isDragging = true; });
+        document.addEventListener("mouseup", () => { isDragging = false; });
+
+        document.addEventListener("mousemove", (e) => {
+            if (!isDragging) return;
+            const container = document.getElementById("admin-view");
+            if (!container) return;
+            const rect = container.getBoundingClientRect();
+            const offset = e.clientX - rect.left;
+
+            const min = 200;
+            const max = rect.width - 200;
+
+            const clamped = Math.max(min, Math.min(max, offset));
+            leftCol.style.flex = `0 0 ${clamped}px`;
+        });
+    }
+}
+
+
+//
+// ---------------------------
 //  UNIT LOADING
 // ---------------------------
 document.addEventListener("DOMContentLoaded", () => {
     loadSessionState();
-    loadUnits();
+    loadView("grade").then(() => {
+        loadUnits();
+    });
 });
 
 async function loadUnits() {
@@ -140,19 +408,29 @@ async function loadUnits() {
     });
 
     if (units.length > 0) {
-        // Check if there's a saved unit selection
         const savedUnit = sessionStorage.getItem("selectedUnit");
         if (savedUnit && units.includes(savedUnit)) {
             dropdown.value = savedUnit;
-            loadUnit(savedUnit);
+            await loadUnit(savedUnit);   // <-- IMPORTANT
         } else {
             dropdown.value = units[0];
-            loadUnit(units[0]);
+            await loadUnit(units[0]);    // <-- IMPORTANT
+        }
+
+        // NOW the Grade View dropdowns exist and are populated
+        const unitSelect = document.getElementById("unit-select");
+        const questionSelect = document.getElementById("question-number");
+
+        if (unitSelect && questionSelect) {
+            currentUnitName = unitSelect.value;
+            currentQtagName = questionSelect.value;
         }
     }
 
+    const unitSelect = dropdown;
     dropdown.onchange = () => {
         sessionStorage.setItem("selectedUnit", dropdown.value);
+        currentUnitName = unitSelect.value;
         loadUnit(dropdown.value);
     };
 }
@@ -301,42 +579,9 @@ function displayQuestion(qtag) {
 
 //
 // ---------------------------
-//  DIVIDER DRAGGING
-// ---------------------------
-const grade_hdivider = document.querySelector(".divider");
-const topPanel = document.getElementById("question-panel");
-const bottomPanel = document.getElementById("solution-panel");
-
-let dragging = false;
-
-grade_hdivider.addEventListener("mousedown", () => {
-    dragging = true;
-    document.body.style.userSelect = "none";
-});
-
-document.addEventListener("mouseup", () => {
-    dragging = false;
-    document.body.style.userSelect = "";
-});
-
-document.addEventListener("mousemove", (e) => {
-    if (!dragging) return;
-
-    const containerHeight = grade_hdivider.parentElement.offsetHeight;
-    const newTopHeight = e.clientY - grade_hdivider.parentElement.offsetTop;
-
-    if (newTopHeight < 100 || newTopHeight > containerHeight - 100) return;
-
-    topPanel.style.flex = `0 0 ${newTopHeight}px`;
-    bottomPanel.style.flex = `1`;
-});
-
-
-//
-// ---------------------------
 //  QUESTION DROPDOWN
 // ---------------------------
-function populateQuestionDropdown(qtags) {
+function populateQuestionDropdown(qtags, selectedQtag = null) {
     const dropdown = document.getElementById("question-number");
     dropdown.innerHTML = "";
 
@@ -348,12 +593,20 @@ function populateQuestionDropdown(qtags) {
     });
 
     if (qtags.length > 0) {
-        dropdown.value = qtags[0];
-        displayQuestion(qtags[0]);
+        let qtagToUse = qtags[0];
+
+        if (selectedQtag && qtags.includes(selectedQtag)) {
+            qtagToUse = selectedQtag;
+        }
+
+        dropdown.value = qtagToUse;
+        displayQuestion(qtagToUse);
+        currentQtagName = qtagToUse;   // keep global in sync
     }
 
     dropdown.onchange = () => {
         displayQuestion(dropdown.value);
+        currentQtagName = dropdown.value;
     };
 
     // sessionState save/restore wiring restored after UI refactor
@@ -540,32 +793,3 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 });
 
-//
-// ---------------------------
-//  VERTICAL SPLITTER FOR GRADE VIEW
-// ---------------------------
-// grade_vdivider controls left/right split in Grade view
-const grade_vdivider = document.getElementById("grade-vertical-divider");
-const leftCol = document.querySelector("#grade-view .grade-left-column");
-const rightCol = document.querySelector("#grade-view .grade-right-column");
-
-if (grade_vdivider && leftCol && rightCol) {
-    let isDragging = false;
-
-    grade_vdivider.addEventListener("mousedown", () => { isDragging = true; });
-    document.addEventListener("mouseup", () => { isDragging = false; });
-
-    document.addEventListener("mousemove", (e) => {
-        if (!isDragging) return;
-        const container = document.getElementById("grade-view");
-        const rect = container.getBoundingClientRect();
-        const offset = e.clientX - rect.left;
-
-        // Prevent extreme collapse
-        const min = 200;
-        const max = rect.width - 200;
-
-        const clamped = Math.max(min, Math.min(max, offset));
-        leftCol.style.flex = `0 0 ${clamped}px`;
-    });
-}
