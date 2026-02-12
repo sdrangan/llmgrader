@@ -7,6 +7,8 @@
 <head>
     <title>AI-Auto Grader</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/analytics.css') }}">
     <script>
     window.MathJax = {
       tex: {
@@ -17,6 +19,7 @@
     </script>
     <!-- Menu styles moved to style.css -->
     <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 </head>
 
 <!-- Top Banner -->
@@ -148,6 +151,12 @@
         />
 
         <input type="file" id="load-results-file" accept=".json" style="display: none;">
+        
+        <!-- Download button only shown in Dashboard view, but we add event listener here since the button element is not present until Dashboard view is loaded -->
+        <button id="download-submission-btn" class="dashboard-only dashboard-download-btn">
+            Download Submission
+        </button>
+
     </div>
 
 <!-- Views split into separate HTML fragments and loaded dynamically -->
@@ -183,6 +192,8 @@
     </div>
 </div>
 
+<script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
+<script src="{{ url_for('static', filename='js/analytics.js') }}"></script>
 <script src="{{ url_for('static', filename='js/app.js') }}"></script>
 <!-- Menu JS moved to menu.js -->
 <script src="{{ url_for('static', filename='js/menu.js') }}"></script>

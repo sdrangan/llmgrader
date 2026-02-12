@@ -1,22 +1,19 @@
 // Dashboard JavaScript
-let dashboardSessionState = {};
+function initializeDashboardView() {
+    const downloadBtn = document.getElementById("download-submission-btn");
+    if (downloadBtn) {
+        downloadBtn.addEventListener("click", downloadSubmission);
+    }
 
-// Load session state from localStorage
-function loadDashboardSessionState() {
-    const stored = localStorage.getItem("llmgrader_session");
-    if (stored) {
-        try {
-            dashboardSessionState = JSON.parse(stored);
-        } catch (e) {
-            console.error("Failed to parse session state:", e);
-            dashboardSessionState = {};
-        }
+    const unitName = document.getElementById("unit-select").value;
+    if (unitName) {
+        loadDashboardUnit(unitName);
     }
 }
 
 // Calculate points and completed parts for a question
 function calculateQuestionStatus(unitName, qtag, questionData) {
-    const sessionData = dashboardSessionState[unitName]?.[qtag];
+    const sessionData = sessionState[unitName]?.[qtag];
     const parts = questionData.parts || [];
     
     // Calculate total points
@@ -73,6 +70,8 @@ function calculateQuestionStatus(unitName, qtag, questionData) {
     } else {
         completedPartsDisplay = correctParts;
     }
+
+    console.log(`Status for ${qtag}: earned ${earnedPoints}/${totalPoints} points, completed parts: ${completedPartsDisplay.join(", ")}, has attempts: ${hasAttempts}`);
     
     return {
         completedParts: completedPartsDisplay,
@@ -294,23 +293,19 @@ function generateSubmissionText(unitName, unitData, questionDataMap) {
 
 // Download submission as zip
 async function downloadSubmission() {
-    const unitName = document.getElementById('dashboard-unit-select').value;
+    const unitName = document.getElementById('unit-select').value;
     
     if (!unitName) {
         alert('Please select a unit first.');
         return;
     }
     
-    // Load session state
-    loadDashboardSessionState();
-    
-    const unitData = dashboardSessionState[unitName] || {};
-    
+    const unitData = sessionState[unitName] || {};
+     
     // Fetch unit data to get question metadata
     try {
         const response = await fetch(`/unit/${unitName}`);
-        const data = await response.json();
-        
+        const data = await response.json(); 
         if (!data.items) {
             alert('No question data found for this unit.');
             return;
@@ -323,7 +318,9 @@ async function downloadSubmission() {
         });
         
         if (requiredQtags.length === 0) {
-            alert('No required questions found in this unit.');
+            alert(
+                'You must answer at least one required question before downloading a submission.'
+            );
             return;
         }
         
@@ -362,56 +359,3 @@ async function downloadSubmission() {
     }
 }
 
-document.addEventListener('DOMContentLoaded', async function() {
-    const unitSelect = document.getElementById('dashboard-unit-select');
-    
-    // Load session state
-    loadDashboardSessionState();
-    
-    // Fetch units from the server
-    try {
-        const response = await fetch('/units');
-        const units = await response.json();
-        
-        // Clear existing options
-        unitSelect.innerHTML = '';
-        
-        // Populate dropdown with units
-        units.forEach(unit => {
-            const option = document.createElement('option');
-            option.value = unit;
-            option.textContent = unit;
-            unitSelect.appendChild(option);
-        });
-        
-        // Set selected unit from sessionStorage
-        const savedUnit = sessionStorage.getItem('selectedUnit');
-        if (savedUnit && units.includes(savedUnit)) {
-            unitSelect.value = savedUnit;
-        } else if (units.length > 0) {
-            // Default to first unit if no saved value
-            unitSelect.value = units[0];
-        }
-        
-        // Load the selected unit's data
-        if (unitSelect.value) {
-            await loadDashboardUnit(unitSelect.value);
-        }
-        
-        // Handle unit dropdown changes
-        unitSelect.addEventListener('change', async function() {
-            sessionStorage.setItem('selectedUnit', unitSelect.value);
-            await loadDashboardUnit(unitSelect.value);
-        });
-        
-        // Handle download submission button
-        const downloadBtn = document.getElementById('download-submission-btn');
-        if (downloadBtn) {
-            downloadBtn.addEventListener('click', downloadSubmission);
-        }
-        
-        console.log('Dashboard loaded');
-    } catch (error) {
-        console.error('Failed to load units:', error);
-    }
-});

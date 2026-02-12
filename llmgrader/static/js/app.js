@@ -9,6 +9,7 @@ let currentUnitItems = {};          // dict: qtag -> question object
 let currentUnitName = null;         // current unit name
 let currentStudentSolutions = {};   // dict: qtag -> student solution
 let currentQtagName = null;
+let currentActiveView = null;
 
 // sessionState[unitName][qtag] = {
 //     student_solution: "...",
@@ -127,6 +128,9 @@ async function loadView(name) {
         const response = await fetch(`/static/views/${name}.html`);
         const html = await response.text();
         document.getElementById("view-container").innerHTML = html;
+
+        // Update global active view state
+        currentActiveView = name;
         
         // Set the active view state (updates body attribute and dropdown visibility)
         if (typeof setActiveView === 'function') {
@@ -148,9 +152,60 @@ function initializeView(name) {
         initializeAdminView();
     } else if (name === "dashboard") {
         // Initialize dashboard view
+        initializeDashboardView();
     } else if (name === "analytics") {
         // Initialize analytics view
+        initializeAnalyticsView();
     }
+}
+
+
+function initVerticalDivider(dividerId) {
+    const divider = document.getElementById(dividerId);
+    if (!divider) return;
+
+    const row = divider.closest(".layout-row");
+    if (!row) return;
+
+    const columns = row.querySelectorAll(":scope > .column");
+    const leftCol = columns[0];
+    const rightCol = columns[1];
+    if (!leftCol || !rightCol) return;
+
+    const storageKey = `llmgrader:divider:${dividerId}:leftWidth`;
+    const storedWidth = Number(localStorage.getItem(storageKey));
+
+    const applyWidth = (width) => {
+        const rect = row.getBoundingClientRect();
+        const min = 200;
+        const max = rect.width - 200;
+        const clamped = Math.max(min, Math.min(max, width));
+        leftCol.style.flex = `0 0 ${clamped}px`;
+    };
+
+    if (Number.isFinite(storedWidth)) {
+        applyWidth(storedWidth);
+    }
+
+    let isDragging = false;
+
+    divider.addEventListener("mousedown", () => {
+        isDragging = true;
+    });
+
+    document.addEventListener("mouseup", () => {
+        if (!isDragging) return;
+        isDragging = false;
+        const leftWidth = leftCol.getBoundingClientRect().width;
+        localStorage.setItem(storageKey, String(leftWidth));
+    });
+
+    document.addEventListener("mousemove", (e) => {
+        if (!isDragging) return;
+        const rect = row.getBoundingClientRect();
+        const offset = e.clientX - rect.left;
+        applyWidth(offset);
+    });
 }
 
 function initializeGradeView() {
@@ -187,31 +242,7 @@ function initializeGradeView() {
 
     
     // Reattach grade_vdivider controls left/right split in Grade view
-    const grade_vdivider = document.getElementById("grade-vertical-divider");
-    const columns = document.querySelectorAll("#grade-view .layout-row > .column");
-    const leftCol = columns[0];
-    const rightCol = columns[1];
-
-    if (grade_vdivider && leftCol && rightCol) {
-        let isDragging = false;
-
-        grade_vdivider.addEventListener("mousedown", () => { isDragging = true; });
-        document.addEventListener("mouseup", () => { isDragging = false; });
-
-        document.addEventListener("mousemove", (e) => {
-            if (!isDragging) return;
-            const container = document.getElementById("grade-view");
-            const rect = container.getBoundingClientRect();
-            const offset = e.clientX - rect.left;
-
-            // Prevent extreme collapse
-            const min = 200;
-            const max = rect.width - 200;
-
-            const clamped = Math.max(min, Math.min(max, offset));
-            leftCol.style.flex = `0 0 ${clamped}px`;
-        });
-    }
+    initVerticalDivider("grade-vertical-divider");
 
     if (currentUnitName && currentUnitQtags.length > 0) {
         populateQuestionDropdown(currentUnitQtags, currentQtagName);
@@ -354,33 +385,8 @@ function setupAdminSplitters() {
     }
 
     // Vertical divider (left/right column splitter)
-    const vdivider = document.getElementById("admin-vertical-divider");
-    const columns = document.querySelectorAll("#admin-view .layout-row > .column");
-    const leftCol = columns[0];
-    const rightCol = columns[1];
-    
-    if (vdivider && leftCol && rightCol) {
-        let isDragging = false;
-
-        vdivider.addEventListener("mousedown", () => { isDragging = true; });
-        document.addEventListener("mouseup", () => { isDragging = false; });
-
-        document.addEventListener("mousemove", (e) => {
-            if (!isDragging) return;
-            const container = document.getElementById("admin-view");
-            if (!container) return;
-            const rect = container.getBoundingClientRect();
-            const offset = e.clientX - rect.left;
-
-            const min = 200;
-            const max = rect.width - 200;
-
-            const clamped = Math.max(min, Math.min(max, offset));
-            leftCol.style.flex = `0 0 ${clamped}px`;
-        });
-    }
+    initVerticalDivider("admin-vertical-divider");
 }
-
 
 //
 // ---------------------------
@@ -446,7 +452,14 @@ async function loadUnit(unitName) {
     // Prune stale qtags from session state
     pruneSessionState(unitName, data.qtags);
 
+    // Update the question dropdown.  This will be ignored if
+    // we are in a view with no question dropdown (e.g., Dashboard)
     populateQuestionDropdown(currentUnitQtags);
+
+    if (currentActiveView === "dashboard") {
+        loadDashboardUnit(unitName);
+    }
+    
 }
 
 
@@ -513,12 +526,22 @@ function restorePartUI(qtag, partLabel) {
 //  DISPLAY QUESTION
 // ---------------------------
 function displayQuestion(qtag) {
+    const questionBox = document.getElementById("question-text");
+    if (!questionBox) {
+        // We are not a view with a question box — abort cleanly
+        return;
+    }
+
     console.log("Displaying question:", qtag);
     const qdata = currentUnitItems[qtag];
+    if (!qdata) {
+        // Abort cleanly if qtag not found (e.g., due to stale session state)
+        console.warn(`Question data not found for qtag: ${qtag}`);
+        return;
+    }
 
     // Update question text
-    document.getElementById("question-text").innerHTML =
-        qdata.question_text || "";
+    questionBox.innerHTML = qdata.question_text || "";
     
     // Trigger MathJax rendering if available
     if (window.MathJax) {
@@ -583,6 +606,11 @@ function displayQuestion(qtag) {
 // ---------------------------
 function populateQuestionDropdown(qtags, selectedQtag = null) {
     const dropdown = document.getElementById("question-number");
+    if (!dropdown) {
+        // We are in a view with no question dropdown — abort cleanly
+        return;
+    }
+
     dropdown.innerHTML = "";
 
     qtags.forEach(qtag => {
@@ -611,16 +639,19 @@ function populateQuestionDropdown(qtags, selectedQtag = null) {
 
     // sessionState save/restore wiring restored after UI refactor
     // Add event listener to save student solution on input
+    // This code only runs if the student-solution textarea exists
     const solBox = document.getElementById("student-solution");
-    solBox.addEventListener("input", () => {
-        const qtag = dropdown.value;
-        if (currentUnitName && qtag) {
-            // Save student solution at qtag level (not per-part)
-            updateSessionData(currentUnitName, qtag, {
-                student_solution: solBox.value
-            }, null);
-        }
-    });
+    if (solBox) {
+        solBox.addEventListener("input", () => {
+            const qtag = dropdown.value;
+            if (currentUnitName && qtag) {
+                // Save student solution at qtag level (not per-part)
+                updateSessionData(currentUnitName, qtag, {
+                    student_solution: solBox.value
+                }, null);
+            }
+        });
+    }
 }
 
 

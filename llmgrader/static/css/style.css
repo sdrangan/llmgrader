@@ -549,6 +549,19 @@ textarea {
 }
 
 
+.text-box {
+    flex: 1;
+    overflow-y: auto;
+    padding: 8px;
+    border: 1px solid #ccc;
+    background: #fff;
+    min-height: 0;
+    font-size: 14px;
+    font-family: Arial, sans-serif;
+    white-space: pre-line;   /* preserve newlines, collapse other whitespace */
+}
+
+
 .grade-row {
     display: flex;
     flex-direction: row;
@@ -627,6 +640,21 @@ textarea {
     flex: 1 1 auto;
 }
 
+.panel {
+    background: white;
+    padding: 8px 10px;
+    border: 1px solid #ccc;
+    border-radius: 6px;
+    /* NOT flex */
+}
+
+.html-box {
+    white-space: normal;
+}
+
+.text-box {
+    white-space: pre-line;
+}
 /* A panel that contains a heading and HTML-rendered content */
 .html-panel {
     display: flex;

@@ -16,19 +16,25 @@
         // dropdown visibility updated per view
         var unitDropdowns = Array.prototype.slice.call(document.querySelectorAll('.unit-dropdown'));
         var gradeOnlyDropdowns = Array.prototype.slice.call(document.querySelectorAll('.grade-only'));
-        
+        var dashboardOnly = Array.prototype.slice.call(
+            document.querySelectorAll('.dashboard-only')
+        );
+
         if (viewName === 'dashboard') {
             // Dashboard: show unit dropdown only
             unitDropdowns.forEach(function (el) { el.style.display = ''; });
             gradeOnlyDropdowns.forEach(function (el) { el.style.display = 'none'; });
+            dashboardOnly.forEach(function (el) { el.style.display = ''; });
         } else if (viewName === 'grade') {
             // Grade: show unit dropdown and all grade-only dropdowns
             unitDropdowns.forEach(function (el) { el.style.display = ''; });
             gradeOnlyDropdowns.forEach(function (el) { el.style.display = ''; });
+            dashboardOnly.forEach(function (el) { el.style.display = 'none'; });
         } else {
             // Admin and Analytics: hide all dropdowns
             unitDropdowns.forEach(function (el) { el.style.display = 'none'; });
             gradeOnlyDropdowns.forEach(function (el) { el.style.display = 'none'; });
+            dashboardOnly.forEach(function (el) { el.style.display = 'none'; });
         }
     }
 
