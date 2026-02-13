@@ -55,9 +55,22 @@ function initializeMenuSystem() {
         menuBar.classList.remove('menu-closed');
     }
 
+    function isAdminView(viewName) {
+        return viewName === 'admin' || viewName === 'analytics';
+    }
+
+    function isAdminLoggedIn() {
+        return sessionStorage.getItem('isAdmin') === 'true';
+    }
+
     viewButtons.forEach(function (button) {
         button.addEventListener('click', function () {
             var viewName = button.getAttribute('data-view');
+            if (isAdminView(viewName) && !isAdminLoggedIn()) {
+                alert('Admin login required');
+                closeMenus();
+                return;
+            }
             setActiveView(viewName);
             // Load the view dynamically
             if (typeof loadView === 'function') {
@@ -237,6 +250,141 @@ function initializeMenuSystem() {
                 closePreferencesModal();
             }
         });
+    }
+
+    var adminLoginMenuItem = document.getElementById('admin-login-menu-item');
+    var adminLoginModal = document.getElementById('admin-login-modal');
+    var adminLoginPassword = document.getElementById('admin-login-password');
+    var adminLoginSubmit = document.getElementById('admin-login-submit');
+    var adminLoginCancel = document.getElementById('admin-login-cancel');
+    var adminMenuButton = document.querySelector('.menu-group[data-view="admin"] .menu-button');
+    var analyticsMenuButton = document.querySelector('.menu-group[data-view="analytics"] .menu-button');
+    var adminViewButtons = Array.prototype.slice.call(document.querySelectorAll('[data-view="admin"]'));
+    var analyticsViewButtons = Array.prototype.slice.call(document.querySelectorAll('[data-view="analytics"]'));
+
+    function showAdminLoginDialog() {
+        if (!adminLoginModal) {
+            return;
+        }
+        if (adminLoginPassword) {
+            adminLoginPassword.value = '';
+            adminLoginPassword.focus();
+        }
+        adminLoginModal.style.display = 'flex';
+        closeMenus();
+    }
+
+    function hideAdminLoginDialog() {
+        if (!adminLoginModal) {
+            return;
+        }
+        adminLoginModal.style.display = 'none';
+    }
+
+    function enableAdminMenuItems() {
+        if (adminMenuButton) {
+            adminMenuButton.disabled = false;
+            adminMenuButton.setAttribute('aria-disabled', 'false');
+        }
+        if (analyticsMenuButton) {
+            analyticsMenuButton.disabled = false;
+            analyticsMenuButton.setAttribute('aria-disabled', 'false');
+        }
+        adminViewButtons.forEach(function (button) {
+            button.disabled = false;
+            button.setAttribute('aria-disabled', 'false');
+        });
+        analyticsViewButtons.forEach(function (button) {
+            button.disabled = false;
+            button.setAttribute('aria-disabled', 'false');
+        });
+    }
+
+    function disableAdminMenuItems() {
+        if (adminMenuButton) {
+            adminMenuButton.disabled = true;
+            adminMenuButton.setAttribute('aria-disabled', 'true');
+        }
+        if (analyticsMenuButton) {
+            analyticsMenuButton.disabled = true;
+            analyticsMenuButton.setAttribute('aria-disabled', 'true');
+        }
+        adminViewButtons.forEach(function (button) {
+            button.disabled = true;
+            button.setAttribute('aria-disabled', 'true');
+        });
+        analyticsViewButtons.forEach(function (button) {
+            button.disabled = true;
+            button.setAttribute('aria-disabled', 'true');
+        });
+    }
+
+    async function adminLogin(password) {
+        try {
+            var response = await fetch('/api/admin-login', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ password: password })
+            });
+
+            if (!response.ok) {
+                return false;
+            }
+
+            sessionStorage.setItem('isAdmin', 'true');
+            return true;
+        } catch (error) {
+            return false;
+        }
+    }
+
+    window.showAdminLoginDialog = showAdminLoginDialog;
+    window.hideAdminLoginDialog = hideAdminLoginDialog;
+    window.enableAdminMenuItems = enableAdminMenuItems;
+    window.disableAdminMenuItems = disableAdminMenuItems;
+    window.adminLogin = adminLogin;
+
+    if (adminLoginMenuItem) {
+        adminLoginMenuItem.addEventListener('click', function () {
+            showAdminLoginDialog();
+        });
+    }
+
+    if (adminLoginCancel) {
+        adminLoginCancel.addEventListener('click', function () {
+            hideAdminLoginDialog();
+        });
+    }
+
+    if (adminLoginModal) {
+        adminLoginModal.addEventListener('click', function (e) {
+            if (e.target === adminLoginModal) {
+                hideAdminLoginDialog();
+            }
+        });
+    }
+
+    if (adminLoginSubmit) {
+        adminLoginSubmit.addEventListener('click', async function () {
+            if (!adminLoginPassword) {
+                return;
+            }
+            var success = await adminLogin(adminLoginPassword.value);
+            if (success) {
+                enableAdminMenuItems();
+                hideAdminLoginDialog();
+            } else {
+                alert('Admin login failed');
+            }
+        });
+    }
+
+    if (isAdminLoggedIn()) {
+        enableAdminMenuItems();
+    } else {
+        disableAdminMenuItems();
     }
 
     // Load Course Package modal and upload workflow added

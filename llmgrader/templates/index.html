@@ -9,6 +9,32 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/analytics.css') }}">
+    <style>
+        .admin-login-modal {
+            position: fixed;
+            inset: 0;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            background: rgba(0, 0, 0, 0.4);
+            z-index: 1000;
+        }
+
+        .admin-login-dialog {
+            background: #ffffff;
+            padding: 16px;
+            border-radius: 8px;
+            min-width: 280px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+        }
+
+        .admin-login-actions {
+            display: flex;
+            gap: 8px;
+            justify-content: flex-end;
+            margin-top: 12px;
+        }
+    </style>
     <script>
     window.MathJax = {
       tex: {
@@ -43,11 +69,12 @@
                 <button class="submenu-trigger" role="menuitem" aria-haspopup="true" aria-expanded="false">Switch View</button>
                 <div class="submenu-menu" role="menu">
                     <button class="menu-item" role="menuitem" type="button" data-view="grade">Grade</button>
+                    <button class="menu-item" role="menuitem" type="button" data-view="dashboard">Dashboard</button>
                     <button class="menu-item" role="menuitem" type="button" data-view="admin">Admin</button>
                     <button class="menu-item" role="menuitem" type="button" data-view="analytics">Analytics</button>
-                    <button class="menu-item" role="menuitem" type="button" data-view="dashboard">Dashboard</button>
                 </div>
             </div>
+            <button class="menu-item" role="menuitem" type="button" id="admin-login-menu-item">Admin Login...</button>
             <button class="menu-item" role="menuitem" type="button" id="preferences-menu-item">Preferences…</button>
         </div>
     </div>
@@ -192,6 +219,21 @@
         <div class="modal-buttons">
             <button id="load-course-btn" class="modal-btn modal-btn-primary">Load</button>
             <button id="load-course-cancel-btn" class="modal-btn">Cancel</button>
+        </div>
+    </div>
+</div>
+
+<!-- Admin Login Modal -->
+<div id="admin-login-modal" class="admin-login-modal">
+    <div class="admin-login-dialog">
+        <h2>Admin Login</h2>
+        <div class="modal-content">
+            <label for="admin-login-password">Password</label>
+            <input id="admin-login-password" type="password" placeholder="Enter password">
+        </div>
+        <div class="admin-login-actions">
+            <button id="admin-login-submit" class="modal-btn modal-btn-primary">Login</button>
+            <button id="admin-login-cancel" class="modal-btn">Cancel</button>
         </div>
     </div>
 </div>

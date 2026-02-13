@@ -13,6 +13,8 @@ from datetime import datetime
 class APIController:
     def __init__(self, grader):
         self.grader = grader
+    
+    
 
     def require_admin(self, f):
         """
@@ -324,5 +326,18 @@ class APIController:
                 
             except Exception as e:
                 return {"error": f"Error loading submission: {str(e)}"}, 500
+            
+        @app.post("/api/admin-login")
+        def api_admin_login():
+            admin_password = os.environ.get("LLMGRADER_ADMIN_PASSWORD")
+            data = request.json or {}
+
+            if admin_password is None:
+                return {"ok": True}
+
+            if data.get("password") == admin_password:
+                return {"ok": True}
+
+            return {"ok": False}, 401
 
         app.register_blueprint(bp)
