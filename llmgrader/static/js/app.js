@@ -19,6 +19,12 @@ let currentActiveView = null;
 // }
 let sessionState = {};
 
+// Create menu system on page load
+document.addEventListener("DOMContentLoaded", () => {
+    initializeMenuSystem();
+    loadView("grade");   // or whatever your default view is
+});
+
 //
 // ---------------------------
 //  SESSION STATE PERSISTENCE
@@ -823,4 +829,21 @@ document.addEventListener("DOMContentLoaded", () => {
         });
     }
 });
+
+function updateEditMenuState() {
+    const active = document.activeElement;
+
+    const isEditable =
+        active &&
+        (active.tagName === "INPUT" ||
+         active.tagName === "TEXTAREA" ||
+         active.isContentEditable);
+
+    document.getElementById("menu-cut").disabled = !isEditable;
+    document.getElementById("menu-copy").disabled = !isEditable;
+    document.getElementById("menu-delete").disabled = !isEditable;
+
+    // Paste is always enabled — browser will handle permission
+    document.getElementById("menu-paste").disabled = false;
+}
 

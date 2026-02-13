@@ -48,9 +48,6 @@
                     <button class="menu-item" role="menuitem" type="button" data-view="dashboard">Dashboard</button>
                 </div>
             </div>
-            <button class="menu-item" role="menuitem" type="button" disabled>New...</button>
-            <button class="menu-item" role="menuitem" type="button" disabled>Open...</button>
-            <button class="menu-item" role="menuitem" type="button" disabled>Close</button>
             <button class="menu-item" role="menuitem" type="button" id="preferences-menu-item">Preferences…</button>
         </div>
     </div>
@@ -58,8 +55,10 @@
     <div class="menu-group" role="none">
         <button class="menu-button" role="menuitem" aria-haspopup="true" aria-expanded="false">Edit</button>
         <div class="menu-dropdown" role="menu">
-            <button class="menu-item" role="menuitem" type="button" disabled>Undo</button>
-            <button class="menu-item" role="menuitem" type="button" disabled>Redo</button>
+            <button class="menu-item" role="menuitem" type="button" id="edit-cut-menu-item" onclick="editCut()">Cut</button>
+            <button class="menu-item" role="menuitem" type="button" id="edit-copy-menu-item" onclick="editCopy()">Copy</button>
+            <button class="menu-item" role="menuitem" type="button" id="edit-paste-menu-item" onclick="editPaste()">Paste</button>
+            <button class="menu-item" role="menuitem" type="button" id="edit-delete-menu-item" onclick="editDelete()">Delete</button>
         </div>
     </div>
 
@@ -69,7 +68,6 @@
         <button class="menu-button" role="menuitem" aria-haspopup="true" aria-expanded="false">Help</button>
         <div class="menu-dropdown" role="menu">
             <a class="menu-item" role="menuitem" href="https://sdrangan.github.io/hwdesign/docs/aiautograder/" target="_blank" rel="noopener noreferrer">Documentation</a>
-            <button class="menu-item" role="menuitem" type="button" disabled>About</button>
         </div>
     </div>
 

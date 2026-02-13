@@ -1,4 +1,4 @@
-(function () {
+function initializeMenuSystem() {
     var menuBar = document.querySelector('.top-menu-bar');
     var viewMenus = Array.prototype.slice.call(document.querySelectorAll('.view-menu'));
     var viewButtons = Array.prototype.slice.call(document.querySelectorAll('[data-view]'));
@@ -71,6 +71,72 @@
         button.addEventListener('mouseenter', openMenus);
         button.addEventListener('focus', openMenus);
     });
+
+    var editCutMenuItem = document.getElementById('edit-cut-menu-item');
+    var editCopyMenuItem = document.getElementById('edit-copy-menu-item');
+    var editPasteMenuItem = document.getElementById('edit-paste-menu-item');
+    var editDeleteMenuItem = document.getElementById('edit-delete-menu-item');
+
+    function getActiveEditableElement() {
+        var el = document.activeElement;
+        if (!el) {
+            return null;
+        }
+        if (el.isContentEditable) {
+            return el;
+        }
+        var tag = el.tagName;
+        if (tag === 'INPUT' || tag === 'TEXTAREA') {
+            return el;
+        }
+        return null;
+    }
+
+    function updateEditMenuState() {
+        var hasEditable = Boolean(getActiveEditableElement());
+
+        if (editCutMenuItem) {
+            editCutMenuItem.disabled = !hasEditable;
+        }
+        if (editCopyMenuItem) {
+            editCopyMenuItem.disabled = !hasEditable;
+        }
+        if (editDeleteMenuItem) {
+            editDeleteMenuItem.disabled = !hasEditable;
+        }
+        if (editPasteMenuItem) {
+            editPasteMenuItem.disabled = false;
+        }
+    }
+
+    window.editCut = function () {
+        if (!getActiveEditableElement()) {
+            return;
+        }
+        document.execCommand('cut');
+    };
+
+    window.editCopy = function () {
+        if (!getActiveEditableElement()) {
+            return;
+        }
+        document.execCommand('copy');
+    };
+
+    window.editPaste = function () {
+        document.execCommand('paste');
+    };
+
+    window.editDelete = function () {
+        if (!getActiveEditableElement()) {
+            return;
+        }
+        document.execCommand('delete');
+    };
+
+    document.addEventListener('focusin', updateEditMenuState);
+    document.addEventListener('selectionchange', updateEditMenuState);
+    updateEditMenuState();
 
     (function setupGradeDivider() {
         var divider = document.querySelector('.grade-layout .divider');
@@ -260,4 +326,4 @@
             }
         });
     }
-})();
+}
