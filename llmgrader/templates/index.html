@@ -76,14 +76,14 @@
     <div class="menu-group view-menu is-active" role="none" data-view="grade">
         <button class="menu-button" role="menuitem" aria-haspopup="true" aria-expanded="false">Grade</button>
         <div class="menu-dropdown" role="menu">
-            <button class="menu-item" role="menuitem" type="button" disabled>Unit...</button>
-            <button class="menu-item" role="menuitem" type="button" disabled>Question...</button>
-            <button class="menu-item" role="menuitem" type="button" disabled>Part...</button>
-            <button class="menu-item" role="menuitem" type="button" disabled>Model...</button>
+            <button class="menu-item" role="menuitem" type="button" onclick="openUnitDropdown()">Unit...</button>
+            <button class="menu-item" role="menuitem" type="button" onclick="openQuestionDropdown()">Question...</button>
+            <button class="menu-item" role="menuitem" type="button" onclick="openPartDropdown()">Part...</button>
+            <button class="menu-item" role="menuitem" type="button" onclick="openModelDropdown()">Model...</button>
             <div class="menu-separator" role="separator"></div>
             <button class="menu-item" role="menuitem" type="button" onclick="document.getElementById('load-results-file').click()">Load Results...</button>
             <button class="menu-item" role="menuitem" type="button" onclick="saveResultsForUnit()">Save Results...</button>
-            <button class="menu-item" role="menuitem" type="button" disabled>Grade</button>
+            <button class="menu-item" role="menuitem" type="button" onclick="gradeCurrentQuestion()">Grade</button>
         </div>
     </div>
 
@@ -91,20 +91,26 @@
         <button class="menu-button" role="menuitem" aria-haspopup="true" aria-expanded="false">Admin</button>
         <div class="menu-dropdown" role="menu">
             <button class="menu-item" role="menuitem" type="button" id="load-course-menu-item">Load Course Package…</button>
-            <button class="menu-item" role="menuitem" type="button" disabled>Save Unit Package...</button>
-            <button class="menu-item" role="menuitem" type="button" disabled>Edit Questions...</button>
-            <button class="menu-item" role="menuitem" type="button" disabled>Edit Notes...</button>
-            <button class="menu-item" role="menuitem" type="button" disabled>Validate Unit...</button>
+            <button class="menu-item" role="menuitem" type="button" disabled>Save Unit Package... (future)</button>
+            <button class="menu-item" role="menuitem" type="button" disabled>Edit Questions... (future)</button>
+            <button class="menu-item" role="menuitem" type="button" disabled>Edit Notes... (future)</button>
         </div>
     </div>
 
     <div class="menu-group view-menu" role="none" data-view="analytics">
         <button class="menu-button" role="menuitem" aria-haspopup="true" aria-expanded="false">Analytics</button>
         <div class="menu-dropdown" role="menu">
-            <button class="menu-item" role="menuitem" type="button" disabled>Load Dataset...</button>
-            <button class="menu-item" role="menuitem" type="button" disabled>Export Results...</button>
-            <button class="menu-item" role="menuitem" type="button" disabled>Filter...</button>
-            <button class="menu-item" role="menuitem" type="button" disabled>Refresh Data...</button>
+            <button class="menu-item" role="menuitem" type="button"
+                    onclick="runAnalyticsQuery()">
+                Run Query
+            </button>
+
+            <button class="menu-item" role="menuitem" type="button"
+                    id="analytics-download-menu-item"
+                    disabled
+                    onclick="downloadAnalyticsCSV()">
+                Download CSV
+            </button>
         </div>
     </div>
 
@@ -197,5 +203,6 @@
 <script src="{{ url_for('static', filename='js/app.js') }}"></script>
 <!-- Menu JS moved to menu.js -->
 <script src="{{ url_for('static', filename='js/menu.js') }}"></script>
+<script src="{{ url_for('static', filename='js/ui-controls.js') }}"></script>
 </body>
 </html>
