@@ -1,3 +1,4 @@
+// Grade/Admin selection sync implemented
 console.log("UI loaded.");
 
 //
@@ -7,6 +8,8 @@ let currentUnitQtags = [];          // list of qtags
 let currentUnitItems = {};          // dict: qtag -> question object
 let currentUnitName = null;         // current unit name
 let currentStudentSolutions = {};   // dict: qtag -> student solution
+let currentQtagName = null;
+let currentActiveView = null;
 
 // sessionState[unitName][qtag] = {
 //     student_solution: "...",
@@ -15,6 +18,12 @@ let currentStudentSolutions = {};   // dict: qtag -> student solution
 //     }
 // }
 let sessionState = {};
+
+// Create menu system on page load
+document.addEventListener("DOMContentLoaded", () => {
+    initializeMenuSystem();
+    loadView("grade");   // or whatever your default view is
+});
 
 //
 // ---------------------------
@@ -106,66 +115,11 @@ function pruneSessionState(unitName, currentQtags) {
     }
 }
 
-//
-// ---------------------------
-//  LOAD STUDENT SOLUTIONS FILE
-// ---------------------------
-document.getElementById("load-student-file").onclick = function () {
-    const fileInput = document.getElementById("student-file");
-    if (!fileInput.files.length) {
-        console.log("No file selected");
-        return;
-    }
-
-    const formData = new FormData();
-    formData.append("file", fileInput.files[0]);
-
-    fetch("/load_file", {
-        method: "POST",
-        body: formData
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data.error) {
-            console.error("Server error:", data.error);
-            return;
-        }
-
-        // Student solutions now keyed by qtag
-        currentStudentSolutions = data || {};
-
-        // Update student solution box if a question is selected
-        const dropdown = document.getElementById("question-number");
-        const qtag = dropdown.value;
-        document.getElementById("student-solution").value =
-            currentStudentSolutions[qtag]?.solution || "";
-    });
-};
-
 
 //
 // ---------------------------
 //  OpenAI KEY MANAGEMENT
 // ---------------------------
-document.addEventListener("DOMContentLoaded", () => {
-    // Load session state from localStorage
-    loadSessionState();
-
-    const input = document.getElementById("apiKeyInput");
-    const saveBtn = document.getElementById("saveKeyBtn");
-
-    const saved = localStorage.getItem("openai_api_key");
-    if (saved) input.value = saved;
-
-    saveBtn.addEventListener("click", () => {
-        const key = input.value.trim();
-        if (key) {
-            localStorage.setItem("openai_api_key", key);
-            alert("API key saved in your browser.");
-        }
-    });
-});
-
 function getApiKey() {
     return localStorage.getItem("openai_api_key") || "";
 }
@@ -173,10 +127,282 @@ function getApiKey() {
 
 //
 // ---------------------------
+//  VIEW LOADING
+// ---------------------------
+async function loadView(name) {
+    try {
+        const response = await fetch(`/static/views/${name}.html`);
+        const html = await response.text();
+        document.getElementById("view-container").innerHTML = html;
+
+        // Update global active view state
+        currentActiveView = name;
+        
+        // Set the active view state (updates body attribute and dropdown visibility)
+        if (typeof setActiveView === 'function') {
+            setActiveView(name);
+        }
+        
+        initializeView(name);
+    } catch (error) {
+        console.error(`Failed to load view: ${name}`, error);
+    }
+}
+
+function initializeView(name) {
+    if (name === "grade") {
+        // Reattach grade view event listeners, splitters, dropdowns
+        initializeGradeView();
+    } else if (name === "admin") {
+        // Reattach admin view dropdowns and splitters
+        initializeAdminView();
+    } else if (name === "dashboard") {
+        // Initialize dashboard view
+        initializeDashboardView();
+    } else if (name === "analytics") {
+        // Initialize analytics view
+        initializeAnalyticsView();
+    }
+}
+
+
+function initVerticalDivider(dividerId) {
+    const divider = document.getElementById(dividerId);
+    if (!divider) return;
+
+    const row = divider.closest(".layout-row");
+    if (!row) return;
+
+    const columns = row.querySelectorAll(":scope > .column");
+    const leftCol = columns[0];
+    const rightCol = columns[1];
+    if (!leftCol || !rightCol) return;
+
+    const storageKey = `llmgrader:divider:${dividerId}:leftWidth`;
+    const storedWidth = Number(localStorage.getItem(storageKey));
+
+    const applyWidth = (width) => {
+        const rect = row.getBoundingClientRect();
+        const min = 200;
+        const max = rect.width - 200;
+        const clamped = Math.max(min, Math.min(max, width));
+        leftCol.style.flex = `0 0 ${clamped}px`;
+    };
+
+    if (Number.isFinite(storedWidth)) {
+        applyWidth(storedWidth);
+    }
+
+    let isDragging = false;
+
+    divider.addEventListener("mousedown", () => {
+        isDragging = true;
+    });
+
+    document.addEventListener("mouseup", () => {
+        if (!isDragging) return;
+        isDragging = false;
+        const leftWidth = leftCol.getBoundingClientRect().width;
+        localStorage.setItem(storageKey, String(leftWidth));
+    });
+
+    document.addEventListener("mousemove", (e) => {
+        if (!isDragging) return;
+        const rect = row.getBoundingClientRect();
+        const offset = e.clientX - rect.left;
+        applyWidth(offset);
+    });
+}
+
+function initializeGradeView() {
+    // Reattach horizontal divider (question/solution splitter)
+    const grade_hdivider = document.querySelector(".divider");
+    const topPanel = document.getElementById("grade-question-panel");
+    const bottomPanel = document.getElementById("grade-solution-panel");
+
+    if (grade_hdivider && topPanel && bottomPanel) {
+        let dragging = false;
+
+        grade_hdivider.addEventListener("mousedown", () => {
+            dragging = true;
+            document.body.style.userSelect = "none";
+        });
+
+        document.addEventListener("mouseup", () => {
+            dragging = false;
+            document.body.style.userSelect = "";
+        });
+
+        document.addEventListener("mousemove", (e) => {
+            if (!dragging) return;
+
+            const containerHeight = grade_hdivider.parentElement.offsetHeight;
+            const newTopHeight = e.clientY - grade_hdivider.parentElement.offsetTop;
+
+            if (newTopHeight < 100 || newTopHeight > containerHeight - 100) return;
+
+            topPanel.style.flex = `0 0 ${newTopHeight}px`;
+            bottomPanel.style.flex = `1`;
+        });
+    }
+
+    
+    // Reattach grade_vdivider controls left/right split in Grade view
+    initVerticalDivider("grade-vertical-divider");
+
+    if (currentUnitName && currentUnitQtags.length > 0) {
+        populateQuestionDropdown(currentUnitQtags, currentQtagName);
+
+        // After populating, restore the correct question from global state
+        const qSelect = document.getElementById("question-number");
+        if (qSelect && currentQtagName && currentUnitQtags.includes(currentQtagName)) {
+            qSelect.value = currentQtagName;
+            displayQuestion(currentQtagName);
+        }
+    }
+
+
+    // Initialize global selection state from Grade View dropdowns
+    const unitSelect = document.getElementById("unit-select");
+    const questionSelect = document.getElementById("question-number");
+
+    if (unitSelect && questionSelect) {
+        currentUnitName = unitSelect.value;
+        currentQtagName = questionSelect.value;
+    }
+
+}
+
+// Admin View now matches Grade View layout and splitter behavior
+function initializeAdminView() {
+    setupAdminDropdowns();
+    setupAdminSplitters();
+}
+
+function setupAdminDropdowns() {
+    const unitSelect = document.getElementById("admin-unit-select");
+    const qSelect = document.getElementById("admin-question-select");
+
+    if (!unitSelect || !qSelect) return;
+
+    // Populate units from currentUnitQtags data
+    // We'll need to fetch units first
+    fetch("/units").then(r => r.json()).then(units => {
+        unitSelect.innerHTML = units.map(u => `<option value="${u}">${u}</option>`).join("");
+        
+        const firstUnit = units[0];
+        unitSelect.value = currentUnitName;
+
+        unitSelect.addEventListener("change", () => {
+            currentUnitName = unitSelect.value;
+            populateAdminQuestions();
+            displayAdminCurrent();
+        });
+
+        qSelect.addEventListener("change", () => {
+            currentQtagName = qSelect.value;
+            displayAdminCurrent();
+        });
+
+        if (units.length > 0) {
+            populateAdminQuestions();
+        }
+    });
+}
+
+function populateAdminQuestions() {
+    const unit = document.getElementById("admin-unit-select").value;
+    const qSelect = document.getElementById("admin-question-select");
+
+    if (!unit) return;
+
+    // Fetch unit data
+    fetch(`/unit/${unit}`).then(r => r.json()).then(data => {
+        qSelect.innerHTML = data.qtags.map(qtag => `<option value="${qtag}">${qtag}</option>`).join("");
+
+        // ⭐ ADD THESE TWO LINES
+        currentUnitQtags = data.qtags;
+        currentUnitItems = data.items;
+
+        // If the currentQtagName is not in this unit, fall back to the first qtag
+        if (!data.qtags.includes(currentQtagName)) {
+            qSelect.value = data.qtags[0];
+            currentQtagName = data.qtags[0];   // <-- CRITICAL FIX
+        } else {
+            qSelect.value = currentQtagName;
+        }
+
+        // <-- REQUIRED to sync Admin → Grade
+        displayAdminCurrent();
+    });
+}
+
+function displayAdminCurrent() {
+    displayAdminQuestion(currentUnitName, currentQtagName);
+}
+
+// Admin View: Display selected question with reference solution and grading notes
+// Fixed: Uses q.solution_text (reference solution, not student solution)
+// Fixed: Grading notes formatting preserved via CSS white-space: pre-wrap
+function displayAdminQuestion(unit, qtag) {
+    // Fetch unit data to get question details
+    fetch(`/unit/${unit}`).then(r => r.json()).then(data => {
+        const q = data.items[qtag];
+        if (!q) return;
+
+        document.getElementById("admin-question-text").innerHTML = q.question_text || "";
+        document.getElementById("admin-solution-text").innerHTML = q.solution || "";
+        document.getElementById("admin-grading-notes").textContent = q.grading_notes || "";
+
+        if (window.MathJax) MathJax.typesetPromise();
+    });
+}
+
+function setupAdminSplitters() {
+    // Horizontal divider (question/solution splitter)
+    const hdivider = document.querySelector("#admin-view .divider");
+    const topPanel = document.getElementById("admin-question-panel");
+    const bottomPanel = document.getElementById("admin-solution-panel");
+
+    if (hdivider && topPanel && bottomPanel) {
+        let dragging = false;
+
+        hdivider.addEventListener("mousedown", () => {
+            dragging = true;
+            document.body.style.userSelect = "none";
+        });
+
+        document.addEventListener("mouseup", () => {
+            dragging = false;
+            document.body.style.userSelect = "";
+        });
+
+        document.addEventListener("mousemove", (e) => {
+            if (!dragging) return;
+
+            const containerHeight = hdivider.parentElement.offsetHeight;
+            const newTopHeight = e.clientY - hdivider.parentElement.offsetTop;
+
+            if (newTopHeight < 100 || newTopHeight > containerHeight - 100) return;
+
+            topPanel.style.flex = `0 0 ${newTopHeight}px`;
+            bottomPanel.style.flex = `1`;
+        });
+    }
+
+    // Vertical divider (left/right column splitter)
+    initVerticalDivider("admin-vertical-divider");
+}
+
+//
+// ---------------------------
 //  UNIT LOADING
 // ---------------------------
 document.addEventListener("DOMContentLoaded", () => {
-    loadUnits();
+    loadSessionState();
+    loadView("grade").then(() => {
+        loadUnits();
+    });
 });
 
 async function loadUnits() {
@@ -194,19 +420,29 @@ async function loadUnits() {
     });
 
     if (units.length > 0) {
-        // Check if there's a saved unit selection
         const savedUnit = sessionStorage.getItem("selectedUnit");
         if (savedUnit && units.includes(savedUnit)) {
             dropdown.value = savedUnit;
-            loadUnit(savedUnit);
+            await loadUnit(savedUnit);   // <-- IMPORTANT
         } else {
             dropdown.value = units[0];
-            loadUnit(units[0]);
+            await loadUnit(units[0]);    // <-- IMPORTANT
+        }
+
+        // NOW the Grade View dropdowns exist and are populated
+        const unitSelect = document.getElementById("unit-select");
+        const questionSelect = document.getElementById("question-number");
+
+        if (unitSelect && questionSelect) {
+            currentUnitName = unitSelect.value;
+            currentQtagName = questionSelect.value;
         }
     }
 
+    const unitSelect = dropdown;
     dropdown.onchange = () => {
         sessionStorage.setItem("selectedUnit", dropdown.value);
+        currentUnitName = unitSelect.value;
         loadUnit(dropdown.value);
     };
 }
@@ -222,7 +458,14 @@ async function loadUnit(unitName) {
     // Prune stale qtags from session state
     pruneSessionState(unitName, data.qtags);
 
+    // Update the question dropdown.  This will be ignored if
+    // we are in a view with no question dropdown (e.g., Dashboard)
     populateQuestionDropdown(currentUnitQtags);
+
+    if (currentActiveView === "dashboard") {
+        loadDashboardUnit(unitName);
+    }
+    
 }
 
 
@@ -289,12 +532,22 @@ function restorePartUI(qtag, partLabel) {
 //  DISPLAY QUESTION
 // ---------------------------
 function displayQuestion(qtag) {
+    const questionBox = document.getElementById("question-text");
+    if (!questionBox) {
+        // We are not a view with a question box — abort cleanly
+        return;
+    }
+
     console.log("Displaying question:", qtag);
     const qdata = currentUnitItems[qtag];
+    if (!qdata) {
+        // Abort cleanly if qtag not found (e.g., due to stale session state)
+        console.warn(`Question data not found for qtag: ${qtag}`);
+        return;
+    }
 
     // Update question text
-    document.getElementById("question-text").innerHTML =
-        qdata.question_text || "";
+    questionBox.innerHTML = qdata.question_text || "";
     
     // Trigger MathJax rendering if available
     if (window.MathJax) {
@@ -355,43 +608,15 @@ function displayQuestion(qtag) {
 
 //
 // ---------------------------
-//  DIVIDER DRAGGING
-// ---------------------------
-const divider = document.querySelector(".divider");
-const topPanel = document.getElementById("question-panel");
-const bottomPanel = document.getElementById("solution-panel");
-
-let dragging = false;
-
-divider.addEventListener("mousedown", () => {
-    dragging = true;
-    document.body.style.userSelect = "none";
-});
-
-document.addEventListener("mouseup", () => {
-    dragging = false;
-    document.body.style.userSelect = "";
-});
-
-document.addEventListener("mousemove", (e) => {
-    if (!dragging) return;
-
-    const containerHeight = divider.parentElement.offsetHeight;
-    const newTopHeight = e.clientY - divider.parentElement.offsetTop;
-
-    if (newTopHeight < 100 || newTopHeight > containerHeight - 100) return;
-
-    topPanel.style.flex = `0 0 ${newTopHeight}px`;
-    bottomPanel.style.flex = `1`;
-});
-
-
-//
-// ---------------------------
 //  QUESTION DROPDOWN
 // ---------------------------
-function populateQuestionDropdown(qtags) {
+function populateQuestionDropdown(qtags, selectedQtag = null) {
     const dropdown = document.getElementById("question-number");
+    if (!dropdown) {
+        // We are in a view with no question dropdown — abort cleanly
+        return;
+    }
+
     dropdown.innerHTML = "";
 
     qtags.forEach(qtag => {
@@ -402,25 +627,37 @@ function populateQuestionDropdown(qtags) {
     });
 
     if (qtags.length > 0) {
-        dropdown.value = qtags[0];
-        displayQuestion(qtags[0]);
+        let qtagToUse = qtags[0];
+
+        if (selectedQtag && qtags.includes(selectedQtag)) {
+            qtagToUse = selectedQtag;
+        }
+
+        dropdown.value = qtagToUse;
+        displayQuestion(qtagToUse);
+        currentQtagName = qtagToUse;   // keep global in sync
     }
 
     dropdown.onchange = () => {
         displayQuestion(dropdown.value);
+        currentQtagName = dropdown.value;
     };
 
+    // sessionState save/restore wiring restored after UI refactor
     // Add event listener to save student solution on input
+    // This code only runs if the student-solution textarea exists
     const solBox = document.getElementById("student-solution");
-    solBox.addEventListener("input", () => {
-        const qtag = dropdown.value;
-        if (currentUnitName && qtag) {
-            // Save student solution at qtag level (not per-part)
-            updateSessionData(currentUnitName, qtag, {
-                student_solution: solBox.value
-            }, null);
-        }
-    });
+    if (solBox) {
+        solBox.addEventListener("input", () => {
+            const qtag = dropdown.value;
+            if (currentUnitName && qtag) {
+                // Save student solution at qtag level (not per-part)
+                updateSessionData(currentUnitName, qtag, {
+                    student_solution: solBox.value
+                }, null);
+            }
+        });
+    }
 }
 
 
@@ -592,3 +829,21 @@ document.addEventListener("DOMContentLoaded", () => {
         });
     }
 });
+
+function updateEditMenuState() {
+    const active = document.activeElement;
+
+    const isEditable =
+        active &&
+        (active.tagName === "INPUT" ||
+         active.tagName === "TEXTAREA" ||
+         active.isContentEditable);
+
+    document.getElementById("menu-cut").disabled = !isEditable;
+    document.getElementById("menu-copy").disabled = !isEditable;
+    document.getElementById("menu-delete").disabled = !isEditable;
+
+    // Paste is always enabled — browser will handle permission
+    document.getElementById("menu-paste").disabled = false;
+}
+

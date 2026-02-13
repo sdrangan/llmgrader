@@ -1,0 +1,40 @@
+<div id="dashboard-view" class="app-view">
+    <div class="column">
+        <div class="resizable-container">
+
+            <div class="panel-container">
+                <h3>Dashboard</h3>
+                <div class="panel">
+                    <table class="dashboard-table">
+                        <thead>
+                            <tr>
+                                <th>Question</th>
+                                <th>Required</th>
+                                <th>Completed Parts</th>
+                                <th>Points</th>
+                            </tr>
+                        </thead>
+                        <tbody id="dashboard-table-body">
+                            <tr>
+                                <td colspan="4" style="text-align: center; color: #888;">
+                                    No data loaded. Select a unit to view results.
+                                </td>
+                            </tr>
+                        </tbody>
+                        <tfoot id="dashboard-table-footer">
+                            <tr class="total-row">
+                                <td colspan="3" style="text-align: right; font-weight: bold;">Total:</td>
+                                <td id="total-all-points" style="font-weight: bold;">0/0</td>
+                            </tr>
+                            <tr class="total-row">
+                                <td colspan="3" style="text-align: right; font-weight: bold;">Total (required):</td>
+                                <td id="total-required-points" style="font-weight: bold;">0/0</td>
+                            </tr>
+                        </tfoot>
+                    </table>
+                </div>
+            </div>
+
+        </div>
+    </div>
+</div>

@@ -1,0 +1,45 @@
+<div id="grade-view" class="app-view">
+    <div class="layout-row">
+        <div class="column">
+            <div class="resizable-container">`
+
+                <div id="grade-question-panel" class="panel-container">
+                    <h3>Question</h3>
+                    <div id="question-text" class="panel html-box">
+                        <!-- question text will be injected here -->
+                    </div>
+                </div>
+
+                <div class="divider"></div>
+
+                <div id="grade-solution-panel" class="panel-container">
+                    <h3>Your Solution</h3>
+                    <textarea id="student-solution" class="solution-textarea"></textarea>
+                </div>
+
+            </div>
+        </div>
+
+        <!-- Added vertical splitter between left and right columns in Grade view -->
+        <div id="grade-vertical-divider" class="vertical-divider"></div>
+
+        <div class="column">
+            <div class="resizable-container">
+                <div id="grade-output-panel" class="panel-container">
+                    <div class="grade-status-container">
+                        <div id="grade-status" class="status-not-graded flex-content">Not graded</div>
+                        <div id="grade-points" class="grade-points"></div>
+                    </div>
+
+                    <div id="grading-output">
+                        <h3>Feedback</h3>
+                        <div id="feedback-box" class="panel html-box flex-content">No feedback yet.</div>
+
+                        <h3>Full Explanation</h3>
+                        <div id="full-explanation-box" class="panel html-box flex-content">No explanation yet.</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>

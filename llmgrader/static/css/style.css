@@ -6,11 +6,250 @@ body {
     font-family: Arial, sans-serif;
     margin: 0;
     background: #f5f5f5;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
     
 }
 html, body {
     height: 100%;
     margin: 0;
+}
+
+/* ------------------------------
+   MODAL SYSTEM
+------------------------------ */
+
+.modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 9999;
+}
+
+.modal-dialog {
+    background: white;
+    border-radius: 8px;
+    padding: 24px;
+    min-width: 400px;
+    max-width: 90%;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.modal-dialog h2 {
+    margin-top: 0;
+    margin-bottom: 16px;
+    color: #57068c;
+    font-size: 1.4rem;
+}
+
+.modal-content {
+    margin-bottom: 20px;
+}
+
+.modal-content label {
+    display: block;
+    margin-bottom: 8px;
+    font-weight: bold;
+    color: #333;
+}
+
+.modal-content input[type="password"] {
+    width: 100%;
+    padding: 8px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    font-size: 1rem;
+    box-sizing: border-box;
+}
+
+.modal-content input[type="file"] {
+    width: 100%;
+    padding: 8px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    font-size: 1rem;
+    box-sizing: border-box;
+}
+
+.modal-buttons {
+    display: flex;
+    gap: 10px;
+    justify-content: flex-end;
+}
+
+.modal-btn {
+    padding: 8px 16px;
+    border: 1px solid #ccc;
+    background: white;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.9rem;
+}
+
+.modal-btn:hover {
+    background: #f0f0f0;
+}
+
+.modal-btn-primary {
+    background: #57068c;
+    color: white;
+    border-color: #57068c;
+}
+
+.modal-btn-primary:hover {
+    background: #6a0fa5;
+}
+
+/* ------------------------------
+   VIEW VISIBILITY SYSTEM
+------------------------------ */
+
+/* view-per-container visibility rules added */
+.app-view {
+    display: none;
+}
+
+body[data-active-view="grade"] #grade-view {
+    display: block;
+}
+
+body[data-active-view="dashboard"] #dashboard-view {
+    display: block;
+}
+
+body[data-active-view="admin"] #admin-view {
+    display: block;
+}
+
+body[data-active-view="analytics"] #analytics-view {
+    display: block;
+}
+
+/* ------------------------------
+   MENU SYSTEM
+------------------------------ */
+
+.top-menu-bar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 8px;
+    background: #f7f2fb;
+    border-bottom: 2px solid #57068c;
+    font-size: 0.9rem;
+}
+
+.menu-group {
+    position: relative;
+    display: inline-block;
+}
+
+.menu-button {
+    background: transparent;
+    border: none;
+    padding: 6px 10px;
+    cursor: pointer;
+    font: inherit;
+    color: #57068c;
+    font-weight: 600;
+    border-radius: 4px;
+}
+
+.menu-button:hover {
+    background: #ede3f7;
+}
+
+.menu-button:focus {
+    outline: 2px solid #57068c;
+    outline-offset: 2px;
+}
+
+.menu-dropdown {
+    display: none;
+    position: absolute;
+    top: 100%;
+    left: 0;
+    min-width: 200px;
+    background: #ffffff;
+    border: 1px solid #c7b5dd;
+    box-shadow: 0 10px 22px rgba(87, 6, 140, 0.18);
+    padding: 6px 0;
+    z-index: 10;
+}
+
+.menu-group:hover .menu-dropdown,
+.menu-group:focus-within .menu-dropdown {
+    display: block;
+}
+
+.menu-item,
+.submenu-trigger {
+    display: flex;
+    width: 100%;
+    align-items: center;
+    padding: 6px 14px;
+    background: transparent;
+    border: none;
+    text-align: left;
+    font: inherit;
+    color: #2d2a3a;
+    border-radius: 4px;
+}
+
+.menu-item:not([disabled]):hover,
+.submenu-trigger:hover {
+    background: #f2e9fa;
+}
+
+.menu-item[disabled] {
+    color: #b3a5c9;
+    cursor: not-allowed;
+}
+
+.menu-separator {
+    height: 1px;
+    margin: 6px 10px;
+    background: #e3d7f2;
+}
+
+.submenu {
+    position: relative;
+}
+
+.submenu-menu {
+    display: none;
+    position: absolute;
+    top: 0;
+    left: 100%;
+    min-width: 190px;
+    background: #ffffff;
+    border: 1px solid #c7b5dd;
+    box-shadow: 0 10px 22px rgba(87, 6, 140, 0.18);
+    padding: 6px 0;
+}
+
+.submenu:hover .submenu-menu,
+.submenu:focus-within .submenu-menu {
+    display: block;
+}
+
+.view-menu {
+    display: none;
+}
+
+.view-menu.is-active {
+    display: inline-block;
+}
+
+.top-menu-bar.menu-closed .menu-dropdown {
+    display: none !important;
 }
 
 
@@ -23,37 +262,19 @@ html, body {
     min-height: 0;    /* REQUIRED */
 }
 
-.left-column,
-.right-column {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-
-    height: 100%;     /* REQUIRED */
-    min-height: 0;    /* REQUIRED */
-}
-
-
-
-.resizable-container {
-    display: flex;
-    flex-direction: column;
-    width: 100%;
-    height: 100%;
-    flex: 1;
-    min-height: 0;    /* NEW — prevents collapsing */
-}
 
 .divider {
     height: 6px;
     background: #ccc;
     cursor: row-resize;
-    margin: 4px 0;
+    flex: 0 0 auto;
 }
 
 .divider:hover {
     background: #bbb;
 }
+
+/* consolidated resizable container and divider styles */
 
 /* ------------------------------
    HEADINGS
@@ -276,8 +497,8 @@ textarea {
     overflow: hidden;   /* panel can shrink */
 }
 
-/* Question and solution text areas */
-#question-text {
+/* Shared HTML-rendering box for question/solution panels */
+.html-box {
     flex: 1;
     overflow-y: auto;
     padding: 8px;
@@ -288,31 +509,33 @@ textarea {
     font-family: Arial, sans-serif;
 }
 
-/* Remove top margin from first element to avoid extra space */
-#question-text > *:first-child {
+/* Remove top margin from first element */
+.html-box > *:first-child {
     margin-top: 0;
 }
 
-/* Code blocks in question text */
-#question-text pre {
+/* Code blocks should expand naturally and wrap long lines */
+.html-box pre {
     background-color: #f7f7f7;
     padding: 10px;
     border-radius: 4px;
-    overflow-x: auto;
+    overflow: visible;          /* no internal scrollbars */
+    white-space: pre-wrap;      /* wrap long lines */
+    word-break: break-word;     /* prevent layout blowout */
     margin: 10px 0;
 }
 
-#question-text code {
+
+.html-box code {
     font-family: Consolas, "Courier New", monospace;
     font-size: 0.95em;
 }
 
-#question-text pre code {
+.html-box pre code {
     background-color: transparent;
     padding: 0;
     display: block;
 }
-
 #student-solution {
     flex: 1;
     overflow-y: auto;
@@ -325,21 +548,17 @@ textarea {
     font-family: monospace;
 }
 
-/* Explanation box scrolls independently */
-#full-explanation-box {
+
+.text-box {
     flex: 1;
     overflow-y: auto;
     padding: 8px;
     border: 1px solid #ccc;
-    background: #fafafa;
-    white-space: pre-wrap;
+    background: #fff;
     min-height: 0;
-}
-
-/* Feedback and status */
-#feedback-box, #grade-status {
-    padding: 6px;
-    margin-bottom: 6px;
+    font-size: 14px;
+    font-family: Arial, sans-serif;
+    white-space: pre-line;   /* preserve newlines, collapse other whitespace */
 }
 
 
@@ -375,4 +594,140 @@ textarea {
     width: 60px;
     margin-left: 4px;
 }
+
+/* A full-height horizontal flex row shared by Grade and Admin views */
+.layout-row {
+    display: flex;
+    flex-direction: row;
+    height: calc(100vh - 100px);
+    width: 100%;
+    min-height: 0;
+    min-width: 0;
+    gap: 10px;
+}
+
+
+/* A vertical flex column that fills available height */
+.column {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-height: 0;
+    min-width: 0;
+    gap: 10px;
+}
+
+
+
+
+/* A flex child inside a column that participates in vertical resizing */
+.resizable-container {
+    flex: 1 1 auto;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    min-width: 0;       /* REQUIRED for horizontal shrinking + divider drag */
+}
+
+
+
+/* A flexible, scrollable panel wrapper that grows/shrinks inside a column */
+.panel-container {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    overflow: auto;
+    flex: 1 1 auto;
+}
+
+.panel {
+    background: white;
+    padding: 8px 10px;
+    border: 1px solid #ccc;
+    border-radius: 6px;
+    /* NOT flex */
+}
+
+.html-box {
+    white-space: normal;
+}
+
+.text-box {
+    white-space: pre-line;
+}
+/* A panel that contains a heading and HTML-rendered content */
+.html-panel {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-height: 0;   /* REQUIRED so the html-box can scroll */
+}
+
+
+/* A flex child that grows/shrinks and respects min-width: 0 */
+.flex-content {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+
+.top-controls {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+    padding: 6px 12px;
+    background: #f7f2fb;
+    border-bottom: 1px solid #e3d7f2;
+}
+
+.top-controls select,
+.top-controls button {
+    width: auto;
+    flex: 0 0 auto;
+    height: 28px;
+    line-height: 1;
+    padding: 2px 6px;
+    font-size: 0.9em;
+    box-sizing: border-box;
+}
+
+.top-controls label,
+.top-controls .part-label {
+    font-size: 0.9em;
+    font-weight: bold;
+}
+
+/* Dropdowns now have max-width with ellipsis truncation */
+.top-controls select.grade-dropdown {
+    width: 150px !important;
+    max-width: 150px !important;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* moved top-controls styles from index.html */
+
+/* ------------------------------
+   ADMIN VIEW
+------------------------------ */
+
+
+.admin-top-bar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px;
+    border-bottom: 1px solid #ccc;
+    min-width: 0;
+}
+
+
+.vertical-divider {
+    width: 6px;
+    cursor: col-resize;
+    background-color: #ddd;
+}
+
 

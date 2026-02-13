@@ -53,7 +53,7 @@ class APIController:
 
         @bp.get("/dashboard")
         def dashboard():
-            return render_template("dashboard.html")
+            return render_template("index.html")
 
         @bp.post("/chat")
         def chat():
@@ -172,7 +172,7 @@ class APIController:
         @app.route("/admin")
         @self.require_admin
         def admin_page():
-            return render_template("admin.html")
+            return render_template("index.html")
 
         @app.route("/admin/upload", methods=["POST"])
         @self.require_admin
@@ -184,125 +184,69 @@ class APIController:
             self.grader.save_uploaded_file(f)
 
             return {"status": "ok"}
-
-        @app.route("/admin/dbviewer", methods=["GET", "POST"])
+        
+        @app.route("/admin/dbviewer", methods=["POST"])
         @self.require_admin
-        def dbviewer():
+        def dbviewer_api():
             """
-            Database viewer page for viewing submissions and running SQL queries.
-            GET: Shows default query results
-            POST: Executes custom SQL query
+            JSON API for Analytics view.
+            Accepts: { "sql_query": "SELECT ..." }
+            Returns: { "columns": [...], "rows": [...], "error": null }
             """
-            if request.method == "POST":
-                # Execute custom SQL query
-                sql_query = request.form.get("sql_query", "").strip()
-                
-                if not sql_query:
-                    return render_template(
-                        "admin_dbviewer.html",
-                        error="Please enter a SQL query",
-                        rows=[],
-                        columns=[],
-                        sql_query=""
-                    )
-                
-                try:
-                    conn = sqlite3.connect(self.grader.db_path)
-                    cursor = conn.cursor()
-                    cursor.execute(sql_query)
-                    
-                    # Get column names
-                    columns = [desc[0] for desc in cursor.description] if cursor.description else []
-                    
-                    # Get first 20 rows
-                    rows = cursor.fetchmany(20)
-                    conn.close()
-                    
-                    # Format timestamps if 'timestamp' column exists
-                    if 'timestamp' in columns:
-                        timestamp_idx = columns.index('timestamp')
-                        formatted_rows = []
-                        for row in rows:
-                            row_list = list(row)
-                            if row_list[timestamp_idx]:
-                                try:
-                                    ts = row_list[timestamp_idx]
-                                    row_list[timestamp_idx] = datetime.fromisoformat(ts).strftime("%Y-%m-%d %H:%M")
-                                except (ValueError, AttributeError):
-                                    pass  # Keep original value if parsing fails
-                            formatted_rows.append(tuple(row_list))
-                        rows = formatted_rows
-                    
-                    # Store query in session for CSV download
-                    session["last_sql"] = sql_query
-                    
-                    return render_template(
-                        "admin_dbviewer.html",
-                        rows=rows,
-                        columns=columns,
-                        sql_query=sql_query,
-                        show_download=True
-                    )
-                    
-                except Exception as e:
-                    return render_template(
-                        "admin_dbviewer.html",
-                        error=f"SQL Error: {str(e)}",
-                        rows=[],
-                        columns=[],
-                        sql_query=sql_query
-                    )
-            
-            else:
-                # GET request - show default query
-                default_query = """SELECT id, timestamp, unit_name, qtag, result, model
-FROM submissions
-ORDER BY id DESC
-LIMIT 20"""
-                
-                try:
-                    conn = sqlite3.connect(self.grader.db_path)
-                    cursor = conn.cursor()
-                    cursor.execute(default_query)
-                    
-                    columns = [desc[0] for desc in cursor.description] if cursor.description else []
-                    rows = cursor.fetchall()
-                    conn.close()
-                    
-                    # Format timestamps if 'timestamp' column exists
-                    if 'timestamp' in columns:
-                        timestamp_idx = columns.index('timestamp')
-                        formatted_rows = []
-                        for row in rows:
-                            row_list = list(row)
-                            if row_list[timestamp_idx]:
-                                try:
-                                    ts = row_list[timestamp_idx]
-                                    row_list[timestamp_idx] = datetime.fromisoformat(ts).strftime("%Y-%m-%d %H:%M")
-                                except (ValueError, AttributeError):
-                                    pass  # Keep original value if parsing fails
-                            formatted_rows.append(tuple(row_list))
-                        rows = formatted_rows
-                    
-                    # Store query in session
-                    session["last_sql"] = default_query
-                    
-                    return render_template(
-                        "admin_dbviewer.html",
-                        rows=rows,
-                        columns=columns,
-                        sql_query=default_query,
-                        show_download=True
-                    )
-                    
-                except Exception as e:
-                    return render_template(
-                        "admin_dbviewer.html",
-                        error=f"Database Error: {str(e)}",
-                        rows=[],
-                        columns=[],
-                        sql_query=default_query
-                    )
+
+            data = request.get_json(silent=True) or {}
+            sql_query = (data.get("sql_query") or "").strip()
+
+            if not sql_query:
+                return jsonify({
+                    "columns": [],
+                    "rows": [],
+                    "error": "Please enter a SQL query"
+                })
+
+            try:
+                conn = sqlite3.connect(self.grader.db_path)
+                cursor = conn.cursor()
+                cursor.execute(sql_query)
+
+                # Column names
+                columns = [desc[0] for desc in cursor.description] if cursor.description else []
+
+                # First 20 rows
+                rows = cursor.fetchmany(20)
+                conn.close()
+
+                # Timestamp formatting
+                if "timestamp" in columns:
+                    ts_idx = columns.index("timestamp")
+                    formatted = []
+                    for row in rows:
+                        row = list(row)
+                        try:
+                            if row[ts_idx]:
+                                row[ts_idx] = datetime.fromisoformat(row[ts_idx]).strftime("%Y-%m-%d %H:%M")
+                        except Exception:
+                            pass
+                        formatted.append(tuple(row))
+                    rows = formatted
+
+                # Store last query for CSV download
+                session["last_sql"] = sql_query
+
+                return jsonify({
+                    "columns": columns,
+                    "rows": rows,
+                    "error": None
+                })
+
+            except Exception as e:
+                return jsonify({
+                    "columns": [],
+                    "rows": [],
+                    "error": f"SQL Error: {str(e)}"
+                })
+
+        
 
         @app.route("/admin/dbviewer/download")
         @self.require_admin

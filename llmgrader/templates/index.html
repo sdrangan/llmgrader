@@ -1,4 +1,5 @@
 <!DOCTYPE html>
+<!-- Old template-based views removed; app now uses /views/*.html exclusively -->
 <html lang="en">
 <head><meta charset="UTF-8">
 
@@ -6,6 +7,8 @@
 <head>
     <title>AI-Auto Grader</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/analytics.css') }}">
     <script>
     window.MathJax = {
       tex: {
@@ -14,7 +17,9 @@
       }
     };
     </script>
+    <!-- Menu styles moved to style.css -->
     <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 </head>
 
 <!-- Top Banner -->
@@ -27,131 +32,175 @@
             <div class="professors">Profs. Sundeep Rangan, Siddharth Garg</div>
         </div>
     </div>
-
-    <div class="right">
-        <label for="apiKeyInput" class="api-key-label">OpenAI API Key</label>
-        <input id="apiKeyInput" type="password" placeholder="OpenAI API Key" class="key-box">
-        <button id="saveKeyBtn" class="save-btn">Save</button>
-    </div>
 </div>
 
-<!-- Instructions -->
-<div style="text-align: left; font-size: 0.85rem; margin-top: 4px; margin-bottom: 8px;">
-  <a href="https://sdrangan.github.io/hwdesign/docs/aiautograder/"
-     target="_blank"
-     style="color: #57068c; text-decoration: none;">
-     Instructions for using this grader
-  </a>
+<!-- Top Menu Bar -->
+<div class="top-menu-bar" role="menubar" aria-label="Application menus">
+    <div class="menu-group" role="none">
+        <button class="menu-button" role="menuitem" aria-haspopup="true" aria-expanded="false">File</button>
+        <div class="menu-dropdown" role="menu">
+            <div class="submenu" role="none">
+                <button class="submenu-trigger" role="menuitem" aria-haspopup="true" aria-expanded="false">Switch View</button>
+                <div class="submenu-menu" role="menu">
+                    <button class="menu-item" role="menuitem" type="button" data-view="grade">Grade</button>
+                    <button class="menu-item" role="menuitem" type="button" data-view="admin">Admin</button>
+                    <button class="menu-item" role="menuitem" type="button" data-view="analytics">Analytics</button>
+                    <button class="menu-item" role="menuitem" type="button" data-view="dashboard">Dashboard</button>
+                </div>
+            </div>
+            <button class="menu-item" role="menuitem" type="button" id="preferences-menu-item">Preferences…</button>
+        </div>
+    </div>
+
+    <div class="menu-group" role="none">
+        <button class="menu-button" role="menuitem" aria-haspopup="true" aria-expanded="false">Edit</button>
+        <div class="menu-dropdown" role="menu">
+            <button class="menu-item" role="menuitem" type="button" id="edit-cut-menu-item" onclick="editCut()">Cut</button>
+            <button class="menu-item" role="menuitem" type="button" id="edit-copy-menu-item" onclick="editCopy()">Copy</button>
+            <button class="menu-item" role="menuitem" type="button" id="edit-paste-menu-item" onclick="editPaste()">Paste</button>
+            <button class="menu-item" role="menuitem" type="button" id="edit-delete-menu-item" onclick="editDelete()">Delete</button>
+        </div>
+    </div>
+
+    <!-- View menu removed during UI cleanup -->
+
+    <div class="menu-group" role="none">
+        <button class="menu-button" role="menuitem" aria-haspopup="true" aria-expanded="false">Help</button>
+        <div class="menu-dropdown" role="menu">
+            <a class="menu-item" role="menuitem" href="https://sdrangan.github.io/hwdesign/docs/aiautograder/" target="_blank" rel="noopener noreferrer">Documentation</a>
+        </div>
+    </div>
+
+    <div class="menu-group view-menu is-active" role="none" data-view="grade">
+        <button class="menu-button" role="menuitem" aria-haspopup="true" aria-expanded="false">Grade</button>
+        <div class="menu-dropdown" role="menu">
+            <button class="menu-item" role="menuitem" type="button" onclick="openUnitDropdown()">Unit...</button>
+            <button class="menu-item" role="menuitem" type="button" onclick="openQuestionDropdown()">Question...</button>
+            <button class="menu-item" role="menuitem" type="button" onclick="openPartDropdown()">Part...</button>
+            <button class="menu-item" role="menuitem" type="button" onclick="openModelDropdown()">Model...</button>
+            <div class="menu-separator" role="separator"></div>
+            <button class="menu-item" role="menuitem" type="button" onclick="document.getElementById('load-results-file').click()">Load Results...</button>
+            <button class="menu-item" role="menuitem" type="button" onclick="saveResultsForUnit()">Save Results...</button>
+            <button class="menu-item" role="menuitem" type="button" onclick="gradeCurrentQuestion()">Grade</button>
+        </div>
+    </div>
+
+    <div class="menu-group view-menu" role="none" data-view="admin">
+        <button class="menu-button" role="menuitem" aria-haspopup="true" aria-expanded="false">Admin</button>
+        <div class="menu-dropdown" role="menu">
+            <button class="menu-item" role="menuitem" type="button" id="load-course-menu-item">Load Course Package…</button>
+            <button class="menu-item" role="menuitem" type="button" disabled>Save Unit Package... (future)</button>
+            <button class="menu-item" role="menuitem" type="button" disabled>Edit Questions... (future)</button>
+            <button class="menu-item" role="menuitem" type="button" disabled>Edit Notes... (future)</button>
+        </div>
+    </div>
+
+    <div class="menu-group view-menu" role="none" data-view="analytics">
+        <button class="menu-button" role="menuitem" aria-haspopup="true" aria-expanded="false">Analytics</button>
+        <div class="menu-dropdown" role="menu">
+            <button class="menu-item" role="menuitem" type="button"
+                    onclick="runAnalyticsQuery()">
+                Run Query
+            </button>
+
+            <button class="menu-item" role="menuitem" type="button"
+                    id="analytics-download-menu-item"
+                    disabled
+                    onclick="downloadAnalyticsCSV()">
+                Download CSV
+            </button>
+        </div>
+    </div>
+
+    <div class="menu-group view-menu" role="none" data-view="dashboard">
+        <button class="menu-button" role="menuitem" aria-haspopup="true" aria-expanded="false">Dashboard</button>
+        <div class="menu-dropdown" role="menu">
+            <button class="menu-item" role="menuitem" type="button" disabled>Unit...</button>
+            <button class="menu-item" role="menuitem" type="button" disabled>Download Submission</button>
+        </div>
+    </div>
 </div>
 
 <body>
-    <div class="container">
+    <div class="top-controls">
+        <label for="unit-select" class="unit-dropdown">Unit:</label>
+        <select id="unit-select" class="unit-dropdown grade-dropdown"></select>
 
-    <!-- LEFT COLUMN -->
-    <div class="left-column">
+        <label for="question-number" class="grade-only">Question:</label>
+        <select id="question-number" class="grade-only grade-dropdown"></select>
 
-        <div class="stacked-controls">
+        <span class="part-label grade-only">Part</span>
+        <select id="part-select" class="grade-only">
+            <option value="all">All</option>
+        </select>
 
-            <div class="control-row">
-                <label for="unit-select">Unit:</label>
-                <select id="unit-select"></select>
-                <button id="save-results" type="button" onclick="saveResultsForUnit()">Save Results</button>
-                <input type="file" id="load-results-file" accept=".json" style="display: none;">
-                <button id="load-results" type="button" onclick="document.getElementById('load-results-file').click()">Load Results</button>
-            </div>
+        <label for="model-select" class="model-label grade-only">Model:</label>
+        <select id="model-select" class="grade-only">
+            <option value="gpt-4.1-mini">gpt‑4.1‑mini</option>
+            <option value="gpt-5-mini">gpt‑5‑mini</option>
+            <option value="gpt-5.1">gpt‑5.1</option>
+            <option value="gpt-5.2">gpt‑5.2</option>
+        </select>
 
+        <button id="grade-button" class="grade-only" onclick="gradeCurrentQuestion()">Grade</button>
 
-            <div class="control-row">
-                <label for="question-number">Question:</label>
-                <select id="question-number"></select>
-            </div>
+        <label for="timeout-input" class="timeout-label grade-only">Timeout (s):</label>
+        <input
+            id="timeout-input"
+            type="number"
+            min="1"
+            max="120"
+            value="20"
+            class="timeout-input grade-only"
+        />
 
-            <div class="control-row">
-                <label for="student-file">Upload latex solution:</label>
-                <input type="file" id="student-file">
-                <button id="load-student-file" type="button">Load</button>
-            </div>
-
-        </div>
-        <div class="resizable-container">
-            <div class="panel" id="question-panel">
-                <h3>Question</h3>
-                <div id="question-text"></div>
-            </div>
-            <div class="divider"></div>
-
-            <div class="panel" id="solution-panel">
-                <h3>Your Solution</h3>
-                <textarea id="student-solution"></textarea>
-            </div>
-        </div>
-
-
-        <!-- Grade Button + Part Selector -->
-        <div class="grade-row">
-            <button id="grade-button" onclick="gradeCurrentQuestion()">Grade</button>
-
-            <span class="part-label">Part</span>
-
-            <select id="part-select">
-                <!-- Filled dynamically -->
-                <option value="all">All</option>
-            </select>
-
-            <label for="model-select" class="model-label">Model:</label>
-            <select id="model-select">
-                <option value="gpt-4.1-mini">gpt‑4.1‑mini</option>
-                <option value="gpt-5-mini">gpt‑5‑mini</option>
-                <option value="gpt-5.1">gpt‑5.1</option>
-                <option value="gpt-5.2">gpt‑5.2</option>
-            </select>
-
-            <label for="timeout-input" class="timeout-label">Timeout (s):</label>
-            <input
-                id="timeout-input"
-                type="number"
-                min="1"
-                max="120"
-                value="20"
-                class="timeout-input"
-            />
-
-
-        </div>
-
+        <input type="file" id="load-results-file" accept=".json" style="display: none;">
+        
+        <!-- Download button only shown in Dashboard view, but we add event listener here since the button element is not present until Dashboard view is loaded -->
+        <button id="download-submission-btn" class="dashboard-only dashboard-download-btn">
+            Download Submission
+        </button>
 
     </div>
 
-    <!-- RIGHT COLUMN -->
-    <div class="right-column">
+<!-- Views split into separate HTML fragments and loaded dynamically -->
+<div id="view-container"></div>
 
-        <!-- Grade Status -->
-        <div class="grade-status-container">
-            <div id="grade-status" class="status-not-graded">
-                Not graded
-            </div>
-            <div id="grade-points" class="grade-points"></div>
-            <a href="{{ url_for('api.dashboard') }}" class="dashboard-link">Dashboard</a>
+<!-- Preferences Modal -->
+<div id="preferences-modal" class="modal-overlay" style="display: none;">
+    <div class="modal-dialog">
+        <h2>Preferences</h2>
+        <div class="modal-content">
+            <label for="preferences-api-key">OpenAI API Key</label>
+            <input id="preferences-api-key" type="password" placeholder="Enter API Key">
         </div>
-
-        <div id="grading-output">
-
-            <h3>Feedback</h3>
-            <div id="feedback-box" class="panel">
-                No feedback yet.
-            </div>
-
-            <h3>Full Explanation</h3>
-            <div id="full-explanation-box" class="panel">
-                No explanation yet.
-            </div>
-
+        <div class="modal-buttons">
+            <button id="preferences-save-btn" class="modal-btn modal-btn-primary">Save</button>
+            <button id="preferences-cancel-btn" class="modal-btn">Cancel</button>
         </div>
-
     </div>
-
 </div>
 
+<!-- Load Course Package Modal -->
+<div id="load-course-modal" class="modal-overlay" style="display: none;">
+    <div class="modal-dialog">
+        <h2>Load Course Package</h2>
+        <div class="modal-content">
+            <label for="course-package-file">Select Course Package (.zip)</label>
+            <input id="course-package-file" type="file" accept=".zip">
+        </div>
+        <div class="modal-buttons">
+            <button id="load-course-btn" class="modal-btn modal-btn-primary">Load</button>
+            <button id="load-course-cancel-btn" class="modal-btn">Cancel</button>
+        </div>
+    </div>
+</div>
+
+<script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
+<script src="{{ url_for('static', filename='js/analytics.js') }}"></script>
 <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+<!-- Menu JS moved to menu.js -->
+<script src="{{ url_for('static', filename='js/menu.js') }}"></script>
+<script src="{{ url_for('static', filename='js/ui-controls.js') }}"></script>
 </body>
 </html>

@@ -32,7 +32,7 @@
     min-width: 200px;
 }
 
-.dashboard-controls .download-btn {
+.dashboard-download-btn {
     margin-left: auto;
     padding: 6px 16px;
     font-size: 0.9em;
@@ -44,7 +44,7 @@
     font-weight: bold;
 }
 
-.dashboard-controls .download-btn:hover {
+.dashboard-download-btn:hover {
     background-color: #450670;
 }
 

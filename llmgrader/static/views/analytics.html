@@ -1,0 +1,38 @@
+<div id="analytics-view" class="app-view analytics-view">
+
+    <h2>Database Viewer</h2>
+
+    <div class="query-section">
+        <h3>SQL Query</h3>
+
+        <div id="analytics-error" class="error" style="display:none;"></div>
+
+        <textarea id="analytics-sql-input"
+                  placeholder="Enter your SQL query here..."></textarea>
+
+        <button id="analytics-run-btn">Run Query</button>
+        <a id="analytics-download-link"
+           class="download-link"
+           style="display:none;">Download CSV</a>
+
+        <p class="info-text">
+            Showing first 20 rows. Use "Download CSV" to get all results.
+        </p>
+    </div>
+
+    <div class="results-section">
+        <h3>Results</h3>
+
+        <table id="analytics-results-table">
+            <thead></thead>
+            <tbody></tbody>
+        </table>
+
+        <p id="analytics-no-results"
+           class="info-text"
+           style="display:none;">
+            No results to display. Run a query to see data.
+        </p>
+    </div>
+
+</div>

@@ -1,0 +1,44 @@
+<!-- Admin View now matches Grade View layout and splitter behavior -->
+<div id="admin-view" class="view-container">
+
+    <div class="admin-top-bar">
+        <label for="admin-unit-select">Unit:</label>
+        <select id="admin-unit-select"></select>
+
+        <label for="admin-question-select">Question:</label>
+        <select id="admin-question-select"></select>
+    </div>
+
+    <div class="layout-row">
+        <div class="column">
+            <div class="resizable-container">
+
+                <div id="admin-question-panel" class="panel-container">
+                    <h3>Question</h3>
+                    <div id="admin-question-text" class="panel html-box"></div>
+                </div>
+
+                <div class="divider"></div>
+
+                <div id="admin-solution-panel" class="panel-container">
+                    <h3>Reference Solution</h3>
+                    <div id="admin-solution-text" class="panel html-box"></div>
+                </div>
+            </div>
+        </div>
+
+        <div id="admin-vertical-divider" class="vertical-divider"></div>
+
+        <div class="column">
+            <div class="resizable-container">
+
+                <div id="admin-grading-panel" class="panel-container">
+                    <h3>Grading Notes</h3>
+                    <div id="admin-grading-notes" class="panel text-box"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+

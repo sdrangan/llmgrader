@@ -1,0 +1,100 @@
+
+.analytics-view .nav-links {
+    margin: 20px 0;
+}
+.analytics-view .nav-links a {
+    margin-right: 15px;
+    color: #57068c;
+    text-decoration: none;
+}
+.analytics-view .nav-links a:hover {
+    text-decoration: underline;
+}
+.analytics-view .query-section {
+    margin: 20px 0;
+    padding: 20px;
+    border: 1px solid #ddd;
+    border-radius: 5px;
+    background: #f9f9f9;
+}
+.analytics-view textarea {
+    width: 100%;
+    min-height: 120px;
+    font-family: 'Courier New', monospace;
+    font-size: 14px;
+    padding: 10px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    box-sizing: border-box;
+}
+.analytics-view button {
+    padding: 10px 20px;
+    margin: 10px 5px 10px 0;
+    cursor: pointer;
+    background-color: #57068c;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    font-size: 14px;
+}
+.analytics-view button:hover {
+    background-color: #6f2da8;
+}
+.analytics-view .download-link {
+    display: inline-block;
+    padding: 10px 20px;
+    margin: 10px 5px;
+    background-color: #28a745;
+    color: white;
+    text-decoration: none;
+    border-radius: 4px;
+    font-size: 14px;
+}
+.analytics-view .download-link:hover {
+    background-color: #218838;
+}
+.analytics-view .error {
+    color: red;
+    padding: 10px;
+    margin: 10px 0;
+    background-color: #ffe6e6;
+    border: 1px solid #ff0000;
+    border-radius: 4px;
+}
+.analytics-view .results-section {
+    margin: 20px 0;
+}
+.analytics-view table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 20px;
+    background: white;
+}
+.analytics-view th, 
+.analytics-view td {
+    border: 1px solid #ddd;
+    padding: 8px;
+    text-align: left;
+}
+.analytics-view th {
+    background-color: #57068c;
+    color: white;
+    font-weight: bold;
+}
+.analytics-view tr:nth-child(even) {
+    background-color: #f9f9f9;
+}
+.analytics-view tr:hover {
+    background-color: #f0f0f0;
+}
+.analytics-view td {
+    max-width: 300px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.analytics-view .info-text {
+    color: #666;
+    font-style: italic;
+    margin-top: 10px;
+}
