@@ -92,11 +92,31 @@
     <!-- View menu removed during UI cleanup -->
 
     <div class="menu-group" role="none">
-        <button class="menu-button" role="menuitem" aria-haspopup="true" aria-expanded="false">Help</button>
+        <button class="menu-button" role="menuitem" aria-haspopup="true" aria-expanded="false">
+            Help
+        </button>
+
         <div class="menu-dropdown" role="menu">
-            <a class="menu-item" role="menuitem" href="https://sdrangan.github.io/hwdesign/docs/aiautograder/" target="_blank" rel="noopener noreferrer">Documentation</a>
+
+            <a class="menu-item" role="menuitem"
+            href="https://sdrangan.github.io/llmgrader/docs"
+            target="_blank" rel="noopener noreferrer">
+                LLM grader guide
+            </a>
+
+            <a class="menu-item" role="menuitem"
+            href="https://sdrangan.github.io/hwdesign/docs/"
+            target="_blank" rel="noopener noreferrer">
+                Course webpage
+            </a>
+
+            <button class="menu-item" role="menuitem" id="about-button">
+                About
+            </button>
+
         </div>
     </div>
+
 
     <div class="menu-group view-menu is-active" role="none" data-view="grade">
         <button class="menu-button" role="menuitem" aria-haspopup="true" aria-expanded="false">Grade</button>
@@ -237,6 +257,21 @@
         </div>
     </div>
 </div>
+
+<div id="about-modal" class="modal-overlay hidden">
+    <div class="modal-dialog">
+        <h2>About LLM Grader</h2>
+
+        <div class="modal-content">
+            <p>Version 1.0<br>NYU Wireless<br>Created by Sundeep Rangan</p>
+        </div>
+
+        <div class="modal-buttons">
+            <button id="about-close" class="modal-btn">Close</button>
+        </div>
+    </div>
+</div>
+
 
 <script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
 <script src="{{ url_for('static', filename='js/analytics.js') }}"></script>

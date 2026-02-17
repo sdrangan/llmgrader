@@ -107,6 +107,11 @@ html, body {
     background: #6a0fa5;
 }
 
+.hidden {
+    display: none !important;
+}
+
+
 /* ------------------------------
    VIEW VISIBILITY SYSTEM
 ------------------------------ */
@@ -187,6 +192,10 @@ body[data-active-view="analytics"] #analytics-view {
 .menu-group:hover .menu-dropdown,
 .menu-group:focus-within .menu-dropdown {
     display: block;
+}
+
+.menu-item {
+    text-decoration: none;
 }
 
 .menu-item,

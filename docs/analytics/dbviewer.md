@@ -13,13 +13,8 @@ Each time a user submits a grade request,
 the usage is logged in an SQLite database.
 All data is stored in an anonymized manner -- there
 are no fields with user identifying information.
-Right now, we have a simple **database viewer** available at:
-
-```
-/admin/dbviewer
-```
-
-It is accessible only to authenticated admins.
+Right now, we have a simple **database viewer** available at **File->Select View->Analytics**.
+You must [log in as an administrator](../admin/buildcourse/login.md) to access this view.
 
 The page provides:
 

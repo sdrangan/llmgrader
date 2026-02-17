@@ -847,3 +847,15 @@ function updateEditMenuState() {
     document.getElementById("menu-paste").disabled = false;
 }
 
+document.addEventListener("DOMContentLoaded", () => {
+
+    document.getElementById("about-button").addEventListener("click", () => {
+        document.getElementById("about-modal").classList.remove("hidden");
+    });
+
+    document.getElementById("about-close").addEventListener("click", () => {
+        document.getElementById("about-modal").classList.add("hidden");
+    });
+
+});
+

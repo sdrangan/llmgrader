@@ -1,7 +1,7 @@
 ---
 title:  Uploading the Package
 parent: Building a Course Package
-nav_order: 4
+nav_order: 5
 has_children: false
 ---
 
@@ -13,7 +13,7 @@ The upload process installs the course configuration and all unit XML files into
 
 ---
 
-## 📦 1. Create the Solution Package
+## Create the Solution Package
 
 Once the [package configuration XML file](./pkgconfig.md) and the [unit XML files](./unitxml.md)
 have been written, you can create the package.
@@ -35,7 +35,7 @@ The ZIP contains the files at the root level (no nested folder).
 
 ---
 
-## 🧪 2. Validate the Package (Optional but Recommended)
+## Validate the Package (Optional but Recommended)
 
 Before uploading, you may want to inspect the ZIP:
 
@@ -47,25 +47,18 @@ If anything is missing, the admin upload page will reject the package with a cle
 
 ---
 
-## 🌐 3. Upload via the Admin Interface
+## Upload via the Admin Interface
 
-Navigate to the admin upload page:
+Navigate to the admin view with **File->Select View->Admin**.  
+You must [login in as an administrator](./login.md) for this view to be visible.
 
-```
-https://<your-app>.onrender.com/admin/upload
-```
-
-or, in local development:
-
-```
-http://localhost:5000/admin/upload
-```
+Then, select **File->Admin->Load course package...**.
 
 Steps:
 
 1. Click **Choose File**  
 2. Select `soln_package.zip`  
-3. Click **Upload Package**
+3. Click **Load**
 
 The grader will:
 
@@ -79,7 +72,7 @@ If any XML is malformed or missing, the upload will fail with a descriptive erro
 
 ---
 
-## 🗂️ 4. What Happens After Upload
+## What Happens After Upload
 
 After a successful upload:
 
