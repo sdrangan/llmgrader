@@ -139,6 +139,8 @@
             <button class="menu-item" role="menuitem" type="button" disabled>Save Unit Package... (future)</button>
             <button class="menu-item" role="menuitem" type="button" disabled>Edit Questions... (future)</button>
             <button class="menu-item" role="menuitem" type="button" disabled>Edit Notes... (future)</button>
+            <div class="menu-separator" role="separator"></div>
+            <button class="menu-item" role="menuitem" type="button" id="admin-preferences-menu-item">Preferences…</button>
         </div>
     </div>
 
@@ -221,9 +223,30 @@
             <label for="preferences-api-key">OpenAI API Key</label>
             <input id="preferences-api-key" type="password" placeholder="Enter API Key">
         </div>
+        <div class="modal-content">
+            <label for="preferences-hf-token">Hugging Face Token</label>
+            <input id="preferences-hf-token" type="password" placeholder="Enter Hugging Face Token">
+            <a href="https://huggingface.co/settings/tokens" target="_blank" rel="noopener noreferrer" style="font-size: 0.85em; text-decoration: none; color: inherit;">Get a Hugging Face token</a>
+        </div>
         <div class="modal-buttons">
             <button id="preferences-save-btn" class="modal-btn modal-btn-primary">Save</button>
             <button id="preferences-cancel-btn" class="modal-btn">Cancel</button>
+        </div>
+    </div>
+</div>
+
+<!-- Admin Preferences Modal -->
+<div id="admin-preferences-modal" class="modal-overlay" style="display: none;">
+    <div class="modal-dialog">
+        <h2>Admin Preferences</h2>
+        <div class="modal-content">
+            <label for="admin-hf-token">Admin Hugging Face Token</label>
+            <input id="admin-hf-token" type="password" placeholder="Enter Admin HF Token">
+            <a href="https://huggingface.co/settings/tokens" target="_blank" class="help-link">Get a Hugging Face token</a>
+        </div>
+        <div class="modal-buttons">
+            <button id="admin-preferences-save-btn" class="modal-btn modal-btn-primary">Save</button>
+            <button id="admin-preferences-cancel-btn" class="modal-btn">Cancel</button>
         </div>
     </div>
 </div>
@@ -275,6 +298,7 @@
 
 <script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
 <script src="{{ url_for('static', filename='js/analytics.js') }}"></script>
+<script src="{{ url_for('static', filename='js/admin.js') }}"></script>
 <script src="{{ url_for('static', filename='js/app.js') }}"></script>
 <!-- Menu JS moved to menu.js -->
 <script src="{{ url_for('static', filename='js/menu.js') }}"></script>

@@ -199,6 +199,7 @@ function initializeMenuSystem() {
     var preferencesMenuItem = document.getElementById('preferences-menu-item');
     var preferencesModal = document.getElementById('preferences-modal');
     var preferencesApiKeyInput = document.getElementById('preferences-api-key');
+    var preferencesHfTokenInput = document.getElementById('preferences-hf-token');
     var preferencesSaveBtn = document.getElementById('preferences-save-btn');
     var preferencesCancelBtn = document.getElementById('preferences-cancel-btn');
 
@@ -208,7 +209,11 @@ function initializeMenuSystem() {
         }
         // Load current API key from localStorage
         var currentKey = localStorage.getItem('openai_api_key') || '';
+        var currentHfToken = localStorage.getItem('hfToken') || '';
         preferencesApiKeyInput.value = currentKey;
+        if (preferencesHfTokenInput) {
+            preferencesHfTokenInput.value = currentHfToken;
+        }
         preferencesModal.style.display = 'flex';
         closeMenus();
     }
@@ -232,7 +237,9 @@ function initializeMenuSystem() {
                 return;
             }
             var apiKey = preferencesApiKeyInput.value.trim();
+            var hfToken = preferencesHfTokenInput ? preferencesHfTokenInput.value.trim() : '';
             localStorage.setItem('openai_api_key', apiKey);
+            localStorage.setItem('hfToken', hfToken);
             closePreferencesModal();
         });
     }

@@ -11,6 +11,16 @@ let currentStudentSolutions = {};   // dict: qtag -> student solution
 let currentQtagName = null;
 let currentActiveView = null;
 
+const MODEL_PROVIDER = {
+    "gpt-4.1-mini": "openai",
+    "gpt-5-mini": "openai",
+    "gpt-5.1": "openai",
+    "gpt-5.2": "openai",
+
+    // Hugging Face (paid, user must supply their own HF token)
+    "hf:meta-llama/Llama-3.1-8B-Instruct": "hf",
+};
+
 // sessionState[unitName][qtag] = {
 //     student_solution: "...",
 //     parts: {
@@ -22,8 +32,36 @@ let sessionState = {};
 // Create menu system on page load
 document.addEventListener("DOMContentLoaded", () => {
     initializeMenuSystem();
+    initializeModelSelection();
+    initializeAdminPreferencesModal();
     loadView("grade");   // or whatever your default view is
 });
+
+function initializeModelSelection() {
+    const modelSelect = document.getElementById("model-select");
+    if (!modelSelect) {
+        return;
+    }
+
+    const savedModel = sessionStorage.getItem("selectedModel");
+    if (savedModel && MODEL_PROVIDER[savedModel]) {
+        modelSelect.value = savedModel;
+    }
+
+    const handleModelSelection = () => {
+        const model = modelSelect.value;
+        const provider = MODEL_PROVIDER[model];
+        sessionStorage.setItem("selectedModel", model);
+        modelSelect.dataset.provider = provider || "";
+    };
+
+    if (!modelSelect.dataset.modelSelectionBound) {
+        modelSelect.addEventListener("change", handleModelSelection);
+        modelSelect.dataset.modelSelectionBound = "true";
+    }
+
+    handleModelSelection();
+}
 
 //
 // ---------------------------
@@ -673,19 +711,33 @@ async function gradeCurrentQuestion() {
     const partSelect = document.getElementById("part-select");
     const selectedPart = partSelect.value;
 
-    const apiKey = getApiKey();
-    if (!apiKey) {
-        alert("Please set your OpenAI API key first.");
+    const timeout = Number(document.getElementById("timeout-input").value);
+    const model = document.getElementById("model-select").value;
+    const provider = MODEL_PROVIDER[model];
+
+
+    if (provider === "openai") {
+        apiKey = getApiKey();
+        if (!apiKey) {
+            alert("Please set your OpenAI API key first.");
+            return;
+        }
+    }
+    else if (provider === "hf") {
+        apiKey = await getHfToken();
+        if (!apiKey) {
+            alert("No Hugging Face token found. Add one in Preferences or Admin Preferences.");
+            return;
+        }
+    }
+    else {
+        alert("Unknown model provider. Please select a valid model.");
         return;
     }
-
-    const timeout = Number(document.getElementById("timeout-input").value);
 
     const gradeBtn = document.getElementById("grade-button");
     gradeBtn.disabled = true;
     gradeBtn.textContent = "Grading...";
-
-    const model = document.getElementById("model-select").value;
 
     const resp = await fetch("/grade", {
         method: "POST",
@@ -696,7 +748,8 @@ async function gradeCurrentQuestion() {
             student_solution: studentSolution,
             part_label: selectedPart,
             model: model,
-            api_key: apiKey,
+            api_key : apiKey,
+            provider: provider,
             timeout: timeout
         })
     });
@@ -858,4 +911,31 @@ document.addEventListener("DOMContentLoaded", () => {
     });
 
 });
+
+// ---------------------------
+//  Gets the Hugging Face token to use for HF models, checking user token first then falling back to admin token
+// ---------------------------
+async function getHfToken() {
+    // 1. User token (localStorage)
+    const userToken = localStorage.getItem("hfToken");
+    if (userToken && userToken.trim() !== "") {
+        return userToken.trim();
+    }
+
+    // 2. Admin token (persistent storage via backend)
+    try {
+        const resp = await fetch("/api/admin/hf-token");
+        if (resp.ok) {
+            const data = await resp.json();
+            if (data.token && data.token.trim() !== "") {
+                return data.token.trim();
+            }
+        }
+    } catch (err) {
+        console.error("Error fetching admin HF token:", err);
+    }
+
+    // 3. Nothing found
+    return null;
+}
 

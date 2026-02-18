@@ -1,6 +1,7 @@
 print("LOADING api.py FROM:", __file__)
 
 import os
+import json
 from functools import wraps
 from flask import Blueprint, request, jsonify, make_response
 from flask import render_template, session, Response
@@ -14,7 +15,19 @@ class APIController:
     def __init__(self, grader):
         self.grader = grader
     
-    
+    def read_admin_hf_token(self) -> str | None:
+        """Returns the admin HF token from persistent storage, or None if missing."""
+        path = self.grader.get_admin_pref_path()
+        if not os.path.exists(path):
+            return None
+
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                token = data.get("adminHfToken", "").strip()
+                return token if token else None
+        except Exception:
+            return None
 
     def require_admin(self, f):
         """
@@ -103,9 +116,10 @@ class APIController:
             part_label = data.get("part_label", "all")
             model = data.get("model", "gpt-4.1-mini")
             api_key = data.get("api_key", None)
+            provider = data.get("provider", None)
             timeout = data.get("timeout", 20)
 
-
+    
             # Retrieve the question data
             u = self.grader.units[unit]
 
@@ -159,6 +173,7 @@ class APIController:
                 unit_name=unit,
                 qtag=qtag,
                 model=model,
+                provider=provider,
                 api_key=api_key,
                 timeout=timeout
             )
@@ -169,6 +184,39 @@ class APIController:
         def reload_units():
             print("In /reload endpoint")
             self.grader.load_unit_pkg()
+            return jsonify({"status": "ok"})
+
+        @bp.get("/api/admin/hf-token")
+        def get_admin_hf_token():
+            pref_path = self.grader.get_admin_pref_path()
+
+            if not os.path.exists(pref_path):
+                return jsonify({"token": ""})
+
+            try:
+                with open(pref_path, "r", encoding="utf-8") as f:
+                    config = json.load(f)
+            except (OSError, json.JSONDecodeError):
+                return jsonify({"token": ""})
+
+            return jsonify({"token": config.get("adminHfToken", "")})
+
+        @bp.post("/api/admin/hf-token")
+        def set_admin_hf_token():
+            data = request.get_json(silent=True) or {}
+            token = data.get("token", "")
+
+            if token is None:
+                token = ""
+
+            pref_path = self.grader.get_admin_pref_path()
+
+            try:
+                with open(pref_path, "w", encoding="utf-8") as f:
+                    json.dump({"adminHfToken": token}, f)
+            except OSError as e:
+                return jsonify({"error": str(e)}), 500
+
             return jsonify({"status": "ok"})
 
         @app.route("/admin")

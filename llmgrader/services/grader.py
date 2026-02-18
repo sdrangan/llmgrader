@@ -4,6 +4,7 @@ import shutil
 from pathlib import Path
 import json
 import os
+from urllib import response
 import pandas as pd
 from openai import OpenAI, APITimeoutError
 import xml.etree.ElementTree as ET
@@ -419,38 +420,37 @@ class Grader:
 
         return {"status": "ok"}
 
-
     def load_unit_pkg(self):
-        """
-        Loads units from the soln_pkg directory.
-        """
         self.units = {}
 
-        # Log the search process
+        # Logging
         fn = os.path.join(self.scratch_dir, "load_unit_pkg_log.txt")
         log = open(fn, "w", encoding="utf-8")
-
-        # Write the time and date
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         log.write(f'Loading unit package at {now}\n')
 
-        soln_pkg_path = self.soln_pkg
+        # Set the solution package path.  If explicitly set in constructor, use it
+        if self.soln_pkg is not None:
+            soln_pkg_path = self.soln_pkg
 
-        if soln_pkg_path is None:
-            soln_pkg_path = os.environ.get("SOLN_PKG_PATH")
+        else:
+            # Check unified storage root
+            storage_root = os.environ.get("LLMGRADER_STORAGE_PATH")
 
-        if soln_pkg_path is None:
-            soln_pkg_path = os.path.join(os.getcwd(), "soln_pkg")
+            if storage_root:
+                soln_pkg_path = os.path.join(storage_root, "soln_pkg")
+            else:
+                # Local fallback
+                local_root = os.path.join(os.getcwd(), "local_data")
+                os.makedirs(local_root, exist_ok=True)
+                soln_pkg_path = os.path.join(local_root, "soln_pkg")
 
         soln_pkg_path = os.path.abspath(soln_pkg_path)
+        os.makedirs(soln_pkg_path, exist_ok=True)
         self.soln_pkg = soln_pkg_path
-        log.write(f'Using solution package path: {soln_pkg_path}\n')
 
-        # Check if the directory exists
-        if not os.path.exists(soln_pkg_path):
-            # Only create it in the fallback local mode
-            log.write(f'Path does not exist. Creating directory: {soln_pkg_path}\n')
-            os.makedirs(soln_pkg_path, exist_ok=True)
+        log.write(f'Using solution package path: {soln_pkg_path}\n')
+    
 
         # Get the path to llmgrader_config.xml
         llmgrader_config_path = os.path.join(soln_pkg_path, "llmgrader_config.xml")
@@ -736,6 +736,73 @@ class Grader:
 
         return task
 
+    def _make_llm_caller(self, provider, model, api_key, task, timeout):
+        """
+        Creates a function that calls the specified LLM provider with the given parameters.
+        
+        Parameters
+        ----------
+        provider: str
+            The LLM provider to use ("openai" or "hf").
+        model: str
+            The model to use for grading.
+        api_key: str
+            The API key for authentication with the LLM provider.
+        task: str
+            The input prompt to send to the LLM.
+        timeout: float
+            The timeout in seconds for the API call.
+
+        Returns
+        -------
+        function
+            A function that, when called, will execute the API call to the 
+            specified LLM provider and return the parsed GradeResult.
+        """
+        if provider == "openai":
+            client = OpenAI(api_key=api_key)
+
+            def call_openai():
+                resp = client.responses.parse(
+                    model=model,
+                    input=task,
+                    text_format=GradeResult,
+                    temperature=1 if model.startswith("gpt-5-mini") else 0,
+                    timeout=timeout
+                )
+                return resp.output_parsed 
+            return call_openai
+
+        elif provider == "hf":
+            import requests
+            hf_model = model.replace("hf:", "")
+            url = f"https://router.huggingface.co/models/{hf_model}/v1/chat/completions"
+            headers = {"Authorization": f"Bearer {api_key}"}
+
+            def call_hf():
+                payload = {
+                    "model": hf_model,
+                    "messages": [
+                        {"role": "user", "content": task}
+                    ],
+                    "temperature": 0,
+                }
+
+                resp = requests.post(url, headers=headers, json=payload, timeout=timeout)
+                resp.raise_for_status()
+                data = resp.json()
+
+                # Extract assistant message
+                text = data["choices"][0]["message"]["content"]
+
+                # Parse using your existing GradeResult model
+                return GradeResult.model_validate_json(text)
+
+            return call_hf
+
+        else:
+            raise ValueError(f"Unknown provider '{provider}'")
+
     def grade(
             self, 
             question_text: str, 
@@ -745,6 +812,7 @@ class Grader:
             part_label: str="all",
             unit_name: str = "",
             qtag: str = "",
+            provider : str = "openai",
             model: str="gpt-4.1-mini",
             api_key: str | None = None,
             timeout: float = 20.) -> GradeResult:
@@ -767,12 +835,14 @@ class Grader:
             The unit name for the question.
         qtag: str
             The question tag identifier.
+        provider: str
+            The model provider to use for grading (e.g., "openai" or "hf").
         model: str
-            The OpenAI model to use for grading.
+            The  model to use for grading.
         api_key: str | None
-            The OpenAI API key to use for authentication.
+            The API key (either OpenAI API key or Hugging Face token) to use for authentication.
         timeout: float
-            The timeout in seconds for the OpenAI API call.
+            The timeout in seconds for the API call.
 
         Returns
         -------
@@ -801,45 +871,35 @@ class Grader:
             f.write(task)
 
         # ---------------------------------------------------------
-        # 3. Call OpenAI
+        # 3. Call the LLM API with timeout handling
         # ---------------------------------------------------------
-        
-        if model.startswith("gpt-5-mini"):
-            temperature = 1  # gpt-5-mini only allow temperature = 1
-        else:
-            temperature = 0
-        
 
         # Create the OpenAI LLM client
         if api_key is None:
             grade = {
                 'result': 'error', 
                 'full_explanation': 'Missing API key.', 
-                'feedback': 'Cannot grade without an API key.'}
-        else:
-            try:
-                client = OpenAI(api_key=api_key)
-            except Exception as e:
-                grade = {
-                    'result': 'error', 
-                    'full_explanation': f'Failed to create OpenAI client: {str(e)}', 
-                    'feedback': 'Cannot grade without a valid API key.'}
+                'feedback': f'Cannot grade without an API key for provider {provider}.'
+            }
 
         # Only attempt API call if no error yet
         if grade is None:
-            log_std('Calling OpenAI for grading...')
+            log_std(f'Calling {provider} for grading...')
             
-            # Define a function to call the OpenAI API
-            def call_openai_api():
-                return client.responses.parse(
-                    model=model,
-                    input=task,
-                    text_format=GradeResult,
-                    temperature=temperature,
-                    timeout=timeout
-                )
+            # Create the API call function
+            try:
+                call_llm = self._make_llm_caller(provider, model, api_key, task, timeout)
+            except Exception as e:
+                grade = {
+                    "result": "error",
+                    "full_explanation": f"Failed to initialize LLM client: {e}",
+                    "feedback": "Initialization failed."
+                }
+
+        if grade is None:
+
             executor = ThreadPoolExecutor(max_workers=1)
-            future = executor.submit(call_openai_api)
+            future = executor.submit(call_llm)
             
             try:
                 additional_timeout = 5.0  # seconds
@@ -847,29 +907,29 @@ class Grader:
                 
                 # Get the result with timeout
                 response = future.result(timeout=total_timeout)
-                grade = response.output_parsed.model_dump()
-                log_std("Received response from OpenAI.")
+                grade = response.model_dump()
+                log_std(f"Received response from {provider}.")
 
             except ThreadTimeoutError:
                 # Thread timed out
                 timed_out = True
                 log_error(f"Thread timed out after {total_timeout} seconds.")
                 explanation = (
-                    f"OpenAI API did not respond within {total_timeout} seconds. "
+                    f"{provider} API did not respond within {total_timeout} seconds. "
                     f"(timeout={timeout}, extra={additional_timeout})."
                 )
                 grade = {
                     "result": "error",
                     "full_explanation": explanation,
-                    "feedback": "OpenAI server not responding in time. Try again."
+                    "feedback": f"{provider} server not responding in time. Try again."
                 }
 
             except APITimeoutError:
                 timed_out = True
-                log_error("OpenAI API call timed out at the SDK level.")
+                log_error(f"{provider} API call timed out at the SDK level.")
                 # SDK-level timeout
                 explanation = (
-                    f"OpenAI API responded with a timeout after {timeout} seconds."
+                    f"{provider} API responded with a timeout after {timeout} seconds."
                 )
                 grade = {
                     "result": "error",
@@ -878,11 +938,11 @@ class Grader:
                 }
             
             except Exception as e:
-                log_error(f"OpenAI API call failed: {str(e)}")
+                log_error(f"{provider} API call failed: {str(e)}")
                 grade = {
                     'result': 'error', 
-                    'full_explanation': f'OpenAI API call failed: {str(e)}', 
-                    'feedback': 'There was an error while trying to grade the solution.'}
+                    'full_explanation': f'{provider} API call failed: {str(e)}', 
+                    'feedback': f'There was an error while trying to grade the solution using {provider}.'}
             finally:
                 # IMPORTANT: do NOT overwrite grade here
                 executor.shutdown(wait=False, cancel_futures=True)
@@ -946,30 +1006,44 @@ class Grader:
         print(f"Loaded solution file with {len(resp)} qtags.")
         return resp
     
+    def get_storage_path(self) -> str:
+        """
+        Returns the root storage directory.
+        On Render: uses LLMGRADER_STORAGE_PATH (e.g., /var/data)
+        Locally: falls back to ./local_data
+        """
+        root = os.environ.get("LLMGRADER_STORAGE_PATH")
+        if root:
+            storage_path = root
+        else:
+            storage_path = os.path.join(os.getcwd(), "local_data")
+            os.makedirs(storage_path, exist_ok=True)
+
+        return storage_path
+    
     def get_db_path(self) -> str:
         """
         Returns the full path to the SQLite database file.
-        Uses the environment variable LLMGRADER_DB_PATH if set.
-        Otherwise defaults to a local 'local_data/llmgrader.db' file.
 
-        Returns
-        -------
-        str
-            Full path to the SQLite database file.
         """
-        # Check environment variable (Render)
-        env_path = os.environ.get("LLMGRADER_DB_PATH")
-        if env_path:
-            db_path = env_path
-        else:
-            # Local development fallback
-            local_dir = os.path.join(os.getcwd(), "local_data")
-            os.makedirs(local_dir, exist_ok=True)
-            db_path = os.path.join(local_dir, "llmgrader.db")
-
-        print('Using database path:', db_path)
-
+        storage = self.get_storage_path()
+        db_dir = os.path.join(storage, "db")
+        os.makedirs(db_dir, exist_ok=True)
+        db_path = os.path.join(db_dir, "llmgrader.db")
+        print("Using database path:", db_path)
         return db_path
+
+    def get_admin_pref_path(self) -> str:
+        """
+        Returns the full path to the admin preferences JSON file.
+        """
+        storage = self.get_storage_path()
+        pref_dir = os.path.join(storage, "pref")
+        os.makedirs(pref_dir, exist_ok=True)
+        admin_pref_path = os.path.join(pref_dir, "admin-config.json")
+        return admin_pref_path
+            
+
     
     @staticmethod
     def initialize_field_format():
