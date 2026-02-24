@@ -28,6 +28,8 @@ const MODEL_PROVIDER = {
 //     }
 // }
 let sessionState = {};
+let studentSolutionEditor = null;
+let studentSolutionEditorPersistenceBound = false;
 
 // Create menu system on page load
 document.addEventListener("DOMContentLoaded", () => {
@@ -162,6 +164,102 @@ function getApiKey() {
     return localStorage.getItem("openai_api_key") || "";
 }
 
+function destroyStudentSolutionEditor() {
+    if (studentSolutionEditor && typeof studentSolutionEditor.destroy === "function") {
+        studentSolutionEditor.destroy();
+    }
+    studentSolutionEditor = null;
+    studentSolutionEditorPersistenceBound = false;
+}
+
+function initializeStudentSolutionEditor() {
+    const solutionTextarea = document.getElementById("student-solution");
+    if (!solutionTextarea) {
+        destroyStudentSolutionEditor();
+        return;
+    }
+
+    destroyStudentSolutionEditor();
+
+    if (typeof window.createStudentSolutionEditor === "function") {
+        try {
+            studentSolutionEditor = window.createStudentSolutionEditor(solutionTextarea, {
+                onChange: persistStudentSolutionToSession
+            });
+            studentSolutionEditorPersistenceBound = true;
+            return;
+        } catch (err) {
+            console.error("Failed to initialize rich solution editor:", err);
+            studentSolutionEditor = null;
+            studentSolutionEditorPersistenceBound = false;
+        }
+    }
+
+    console.warn("Rich solution editor unavailable; falling back to plain textarea.");
+    bindStudentSolutionPersistence();
+}
+
+function getStudentSolutionValue() {
+    if (studentSolutionEditor && typeof studentSolutionEditor.getValue === "function") {
+        return studentSolutionEditor.getValue();
+    }
+    const solutionTextarea = document.getElementById("student-solution");
+    return solutionTextarea ? solutionTextarea.value : "";
+}
+
+function setStudentSolutionValue(value) {
+    const nextValue = value || "";
+    if (studentSolutionEditor && typeof studentSolutionEditor.setValue === "function") {
+        studentSolutionEditor.setValue(nextValue);
+        return;
+    }
+    const solutionTextarea = document.getElementById("student-solution");
+    if (solutionTextarea) {
+        solutionTextarea.value = nextValue;
+    }
+}
+
+function persistStudentSolutionToSession() {
+    const dropdown = document.getElementById("question-number");
+    const qtag = dropdown ? dropdown.value : null;
+    if (currentUnitName && qtag) {
+        updateSessionData(currentUnitName, qtag, {
+            student_solution: getStudentSolutionValue()
+        });
+    }
+}
+
+function bindStudentSolutionPersistence() {
+    if (studentSolutionEditor && studentSolutionEditorPersistenceBound) {
+        return;
+    }
+
+    const solutionTextarea = document.getElementById("student-solution");
+    if (!solutionTextarea) {
+        return;
+    }
+
+    if (solutionTextarea.dataset.solutionInputBound === "true") {
+        return;
+    }
+    solutionTextarea.addEventListener("input", persistStudentSolutionToSession);
+    solutionTextarea.dataset.solutionInputBound = "true";
+}
+
+window.addEventListener("rich-solution-editor-ready", () => {
+    if (currentActiveView === "grade") {
+        initializeStudentSolutionEditor();
+    } else {
+        bindStudentSolutionPersistence();
+    }
+});
+
+window.addEventListener("load", () => {
+    if (currentActiveView === "grade" && !studentSolutionEditor) {
+        initializeStudentSolutionEditor();
+    }
+});
+
 
 //
 // ---------------------------
@@ -169,6 +267,7 @@ function getApiKey() {
 // ---------------------------
 async function loadView(name) {
     try {
+        destroyStudentSolutionEditor();
         const response = await fetch(`/static/views/${name}.html`);
         const html = await response.text();
         document.getElementById("view-container").innerHTML = html;
@@ -253,6 +352,8 @@ function initVerticalDivider(dividerId) {
 }
 
 function initializeGradeView() {
+    initializeStudentSolutionEditor();
+
     // Reattach horizontal divider (question/solution splitter)
     const grade_hdivider = document.querySelector(".divider");
     const topPanel = document.getElementById("grade-question-panel");
@@ -596,9 +697,11 @@ function displayQuestion(qtag) {
     const sessionData = getSessionData(currentUnitName, qtag);
 
     // Update student solution - prefer session state, then fall back to loaded file
-    const solBox = document.getElementById("student-solution");
-    solBox.value = sessionData.student_solution || 
-                   currentStudentSolutions[qtag]?.solution || "";
+    setStudentSolutionValue(
+        sessionData.student_solution ||
+        currentStudentSolutions[qtag]?.solution ||
+        ""
+    );
 
     // ---------------------------
     // Update PART DROPDOWN
@@ -681,21 +784,7 @@ function populateQuestionDropdown(qtags, selectedQtag = null) {
         currentQtagName = dropdown.value;
     };
 
-    // sessionState save/restore wiring restored after UI refactor
-    // Add event listener to save student solution on input
-    // This code only runs if the student-solution textarea exists
-    const solBox = document.getElementById("student-solution");
-    if (solBox) {
-        solBox.addEventListener("input", () => {
-            const qtag = dropdown.value;
-            if (currentUnitName && qtag) {
-                // Save student solution at qtag level (not per-part)
-                updateSessionData(currentUnitName, qtag, {
-                    student_solution: solBox.value
-                }, null);
-            }
-        });
-    }
+    bindStudentSolutionPersistence();
 }
 
 
@@ -707,7 +796,7 @@ async function gradeCurrentQuestion() {
     const dropdown = document.getElementById("question-number");
     const qtag = dropdown.value;
 
-    const studentSolution = document.getElementById("student-solution").value;
+    const studentSolution = getStudentSolutionValue();
     const partSelect = document.getElementById("part-select");
     const selectedPart = partSelect.value;
 
@@ -938,4 +1027,3 @@ async function getHfToken() {
     // 3. Nothing found
     return null;
 }
-
