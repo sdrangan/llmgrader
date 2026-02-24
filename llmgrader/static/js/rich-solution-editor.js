@@ -32,6 +32,19 @@ function renderMarkdownPreview(markdownText) {
 
     if (window.hljs) {
         previewContainer.querySelectorAll("pre code").forEach((block) => {
+            const languageClass = Array.from(block.classList)
+                .find((className) => className.startsWith("language-"));
+
+            if (languageClass) {
+                const language = languageClass.slice("language-".length).toLowerCase();
+                const hasLanguage = typeof window.hljs.getLanguage === "function" &&
+                    Boolean(window.hljs.getLanguage(language));
+                if (!hasLanguage && language === "systemverilog" &&
+                    window.hljs.getLanguage("verilog")) {
+                    block.classList.remove(languageClass);
+                    block.classList.add("language-verilog");
+                }
+            }
             window.hljs.highlightElement(block);
         });
     }
@@ -117,8 +130,8 @@ function applyWrapAroundSelection(editor, before, after, placeholder = "") {
     editor.focus();
 }
 
-function insertCodeFence(editor) {
-    applyWrapAroundSelection(editor, "```python\n", "\n```", "your_code_here");
+function insertCodeFence(editor, language = "python", placeholder = "your_code_here") {
+    applyWrapAroundSelection(editor, `\`\`\`${language}\n`, "\n```", placeholder);
 }
 
 function makeToolbarButton(label, title, onClick) {
@@ -195,6 +208,13 @@ class MonacoSolutionEditor {
             }),
             makeToolbarButton("Block", "Code block", () => {
                 insertCodeFence(this.editor);
+            }),
+            makeToolbarButton("SV Block", "SystemVerilog code block", () => {
+                insertCodeFence(
+                    this.editor,
+                    "systemverilog",
+                    "module top;\n  // your logic here\nendmodule"
+                );
             }),
             makeToolbarButton("Link", "Insert link", () => {
                 applyWrapAroundSelection(this.editor, "[", "](https://example.com)", "link text");
