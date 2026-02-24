@@ -171,6 +171,15 @@ async function loadView(name) {
     try {
         const response = await fetch(`/static/views/${name}.html`);
         const html = await response.text();
+
+        // Rescue any elements that were moved into the view container so they
+        // are not destroyed when view-container.innerHTML is replaced.
+        const gradeBtn = document.getElementById("grade-button");
+        const desktopBtnContainer = document.getElementById("desktop-grade-button-container");
+        if (gradeBtn && desktopBtnContainer && gradeBtn.parentElement !== desktopBtnContainer) {
+            desktopBtnContainer.appendChild(gradeBtn);
+        }
+
         document.getElementById("view-container").innerHTML = html;
 
         // Update global active view state
@@ -252,7 +261,44 @@ function initVerticalDivider(dividerId) {
     });
 }
 
+// Re-initialize grade view whenever the mobile/desktop breakpoint is crossed
+if (!window._gradeMediaListenerAttached) {
+    window._gradeMediaListenerAttached = true;
+    window.matchMedia("(max-width: 768px)").addEventListener("change", () => {
+        if (currentActiveView === "grade") {
+            initializeGradeView();
+        }
+    });
+}
+
 function initializeGradeView() {
+    if (isMobile()) {
+        initializeGradeViewMobile();
+    } else {
+        initializeGradeViewDesktop();
+    }
+    initializeGradeDropdowns();
+    restoreGradeState();
+}
+
+function isMobile() {
+    return window.innerWidth <= 768;
+}
+
+function initializeGradeViewDesktop() {
+    console.log("Initializing Grade View for desktop layout.");
+
+    // Ensure desktop columns and dividers are visible (may have been hidden by mobile init)
+    document.querySelectorAll(".layout-row > .column").forEach(col => col.style.display = "");
+    const vDiv = document.getElementById("grade-vertical-divider");
+    if (vDiv) vDiv.style.display = "";
+    const hDiv = document.querySelector(".divider");
+    if (hDiv) hDiv.style.display = "";
+
+    moveSolutionTextareaTo("desktop-solution-container");
+    moveGradeButtonTo("desktop-grade-button-container");
+    moveGradeStatusTo("desktop-grade-result-container");
+
     // Reattach horizontal divider (question/solution splitter)
     const grade_hdivider = document.querySelector(".divider");
     const topPanel = document.getElementById("grade-question-panel");
@@ -284,21 +330,136 @@ function initializeGradeView() {
         });
     }
 
-    
     // Reattach grade_vdivider controls left/right split in Grade view
+    console.log("Initializing Grade View vertical divider.");
     initVerticalDivider("grade-vertical-divider");
+}
 
-    if (currentUnitName && currentUnitQtags.length > 0) {
-        populateQuestionDropdown(currentUnitQtags, currentQtagName);
+function mirrorQuestionWhenReady() {
+    const q = document.getElementById("question-text");
+    const mq = document.getElementById("mobile-question-text");
+    if (!q || !mq) return;
 
-        // After populating, restore the correct question from global state
-        const qSelect = document.getElementById("question-number");
-        if (qSelect && currentQtagName && currentUnitQtags.includes(currentQtagName)) {
-            qSelect.value = currentQtagName;
-            displayQuestion(currentQtagName);
-        }
+    // Copy immediately if already loaded
+    if (q.innerHTML.trim().length > 0) {
+        mq.innerHTML = q.innerHTML;
     }
 
+    // Watch for future updates
+    const observer = new MutationObserver(() => {
+        mq.innerHTML = q.innerHTML;
+    });
+
+    observer.observe(q, { childList: true, subtree: true });
+}
+
+function autoExpand(el) {
+    el.style.height = "auto";
+    el.style.height = el.scrollHeight + "px";
+}
+
+function mirrorFeedbackWhenReady() {
+    const fb = document.getElementById("feedback-box");
+    const mfb = document.getElementById("mobile-feedback-box");
+    const ex = document.getElementById("full-explanation-box");
+    const mex = document.getElementById("mobile-explanation-box");
+
+    if (fb && mfb) {
+        mfb.textContent = fb.textContent;
+        new MutationObserver(() => { mfb.textContent = fb.textContent; })
+            .observe(fb, { childList: true, characterData: true, subtree: true });
+    }
+
+    if (ex && mex) {
+        mex.textContent = ex.textContent;
+        new MutationObserver(() => { mex.textContent = ex.textContent; })
+            .observe(ex, { childList: true, characterData: true, subtree: true });
+    }
+}
+
+function initializeGradeViewMobile() {
+    console.log("Initializing Grade View for mobile layout.");
+    // Hide desktop layout
+    document.querySelectorAll(".column").forEach(col => col.style.display = "none");
+    const hDiv = document.querySelector(".divider");
+    const vDiv = document.getElementById("grade-vertical-divider");
+    if (hDiv) hDiv.style.display = "none";
+    if (vDiv) vDiv.style.display = "none";
+
+    // Show mobile tabs
+    const tabs = document.querySelector(".mobile-tabs");
+    if (tabs) tabs.classList.remove("mobile-hidden");
+
+    // Mirror desktop content into mobile panels
+    const q = document.getElementById("question-text");
+    const mq = document.getElementById("mobile-question-text");
+    if (q && mq) mq.innerHTML = q.innerHTML;
+
+    const fb = document.getElementById("feedback-box");
+    const mfb = document.getElementById("mobile-feedback-box");
+    if (fb && mfb) mfb.innerHTML = fb.innerHTML;
+
+    const ex = document.getElementById("full-explanation-box");
+    const mex = document.getElementById("mobile-explanation-box");
+    if (ex && mex) mex.innerHTML = ex.innerHTML;
+
+    // Show first panel
+    showMobilePanel("question");
+    moveSolutionTextareaTo("mobile-solution-container");
+    moveGradeButtonTo("mobile-grade-button-container");
+    moveGradeStatusTo("mobile-grade-result-container");
+    mirrorQuestionWhenReady();
+    mirrorFeedbackWhenReady();
+
+    // Tab switching
+    document.querySelectorAll(".mobile-tabs button").forEach(btn => {
+        btn.addEventListener("click", () => {
+            const panel = btn.getAttribute("data-panel");
+            showMobilePanel(panel);
+        });
+    });
+}
+
+function showMobilePanel(name) {
+    document.querySelectorAll(".mobile-panel").forEach(p => {
+        p.classList.add("mobile-hidden");
+    });
+    const active = document.getElementById(`mobile-${name}`);
+    if (active) active.classList.remove("mobile-hidden");
+
+    document.querySelectorAll(".mobile-tabs button").forEach(btn => {
+        btn.classList.toggle("active", btn.getAttribute("data-panel") === name);
+    });
+}
+
+function moveSolutionTextareaTo(containerId) {
+    const sol = document.getElementById("student-solution");
+    const container = document.getElementById(containerId);
+    if (sol && container && sol.parentElement !== container) {
+        container.appendChild(sol);
+    }
+}
+
+function moveGradeButtonTo(containerId) {
+    const btn = document.getElementById("grade-button");
+    const container = document.getElementById(containerId);
+    if (btn && container && btn.parentElement !== container) {
+        container.appendChild(btn);
+    }
+}
+
+function moveGradeStatusTo(containerId) {
+    const block = document.querySelector(".grade-status-container");
+    const container = document.getElementById(containerId);
+    if (block && container && block.parentElement !== container) {
+        container.appendChild(block);
+    }
+}
+
+function initializeGradeDropdowns() {
+    if (currentUnitName && currentUnitQtags.length > 0) {
+        populateQuestionDropdown(currentUnitQtags, currentQtagName);
+    }
 
     // Initialize global selection state from Grade View dropdowns
     const unitSelect = document.getElementById("unit-select");
@@ -308,7 +469,15 @@ function initializeGradeView() {
         currentUnitName = unitSelect.value;
         currentQtagName = questionSelect.value;
     }
+}
 
+function restoreGradeState() {
+    // After populating, restore the correct question from global state
+    const qSelect = document.getElementById("question-number");
+    if (qSelect && currentQtagName && currentUnitQtags.includes(currentQtagName)) {
+        qSelect.value = currentQtagName;
+        displayQuestion(currentQtagName);
+    }
 }
 
 // Admin View now matches Grade View layout and splitter behavior

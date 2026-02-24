@@ -197,22 +197,80 @@ function initializeMenuSystem() {
 
     // Preferences modal functionality
     var preferencesMenuItem = document.getElementById('preferences-menu-item');
+    var settingsGearBtn = document.getElementById('settings-gear-btn');
     var preferencesModal = document.getElementById('preferences-modal');
-    var preferencesApiKeyInput = document.getElementById('preferences-api-key');
-    var preferencesHfTokenInput = document.getElementById('preferences-hf-token');
     var preferencesSaveBtn = document.getElementById('preferences-save-btn');
     var preferencesCancelBtn = document.getElementById('preferences-cancel-btn');
+    var preferencesModelSelect = document.getElementById('model-select');
+    var preferencesTimeoutInput = document.getElementById('timeout-input');
+
+    function maskKey(key) {
+        if (!key) return '';
+        if (key.length <= 8) return key[0] + '****' + key[key.length - 1];
+        return key.slice(0, 4) + '***' + key.slice(-4);
+    }
+
+    function populateKeyFields() {
+        var openaiKey = localStorage.getItem('openai_api_key') || '';
+        var hfKey = localStorage.getItem('hfToken') || '';
+
+        var okInput = document.getElementById('openai-key-input');
+        var okArea  = document.getElementById('openai-key-textarea');
+        var okBtn   = document.getElementById('openai-key-toggle');
+        var hfInput = document.getElementById('hf-key-input');
+        var hfArea  = document.getElementById('hf-key-textarea');
+        var hfBtn   = document.getElementById('hf-key-toggle');
+
+        if (okInput) { okInput.dataset.realValue = openaiKey; okInput.value = maskKey(openaiKey); }
+        if (okArea)  { okArea.value = ''; okArea.classList.add('hidden'); }
+        if (okBtn)   { okBtn.textContent = 'Show'; okBtn.dataset.state = 'masked'; }
+
+        if (hfInput) { hfInput.dataset.realValue = hfKey; hfInput.value = maskKey(hfKey); }
+        if (hfArea)  { hfArea.value = ''; hfArea.classList.add('hidden'); }
+        if (hfBtn)   { hfBtn.textContent = 'Show'; hfBtn.dataset.state = 'masked'; }
+
+        if (okInput) okInput.classList.remove('hidden');
+        if (hfInput) hfInput.classList.remove('hidden');
+    }
+
+    function setupKeyToggle(inputId, areaId, btnId) {
+        var input = document.getElementById(inputId);
+        var area  = document.getElementById(areaId);
+        var btn   = document.getElementById(btnId);
+        if (!input || !area || !btn) return;
+        btn.addEventListener('click', function () {
+            var real = input.dataset.realValue || '';
+            if (btn.dataset.state === 'masked') {
+                area.value = real;
+                input.classList.add('hidden');
+                area.classList.remove('hidden');
+                btn.textContent = 'Hide';
+                btn.dataset.state = 'shown';
+            } else {
+                input.value = maskKey(real);
+                area.classList.add('hidden');
+                input.classList.remove('hidden');
+                btn.textContent = 'Show';
+                btn.dataset.state = 'masked';
+            }
+        });
+    }
+
+    setupKeyToggle('openai-key-input', 'openai-key-textarea', 'openai-key-toggle');
+    setupKeyToggle('hf-key-input', 'hf-key-textarea', 'hf-key-toggle');
 
     function openPreferencesModal() {
-        if (!preferencesModal || !preferencesApiKeyInput) {
-            return;
+        if (!preferencesModal) return;
+        populateKeyFields();
+        // Load saved model selection
+        if (preferencesModelSelect) {
+            var savedModel = sessionStorage.getItem('selectedModel');
+            if (savedModel) preferencesModelSelect.value = savedModel;
         }
-        // Load current API key from localStorage
-        var currentKey = localStorage.getItem('openai_api_key') || '';
-        var currentHfToken = localStorage.getItem('hfToken') || '';
-        preferencesApiKeyInput.value = currentKey;
-        if (preferencesHfTokenInput) {
-            preferencesHfTokenInput.value = currentHfToken;
+        // Load saved timeout
+        if (preferencesTimeoutInput) {
+            var savedTimeout = localStorage.getItem('gradeTimeout');
+            if (savedTimeout) preferencesTimeoutInput.value = savedTimeout;
         }
         preferencesModal.style.display = 'flex';
         closeMenus();
@@ -225,21 +283,32 @@ function initializeMenuSystem() {
         preferencesModal.style.display = 'none';
     }
 
-    if (preferencesMenuItem) {
-        preferencesMenuItem.addEventListener('click', function () {
-            openPreferencesModal();
-        });
-    }
-
     if (preferencesSaveBtn) {
         preferencesSaveBtn.addEventListener('click', function () {
-            if (!preferencesApiKeyInput) {
-                return;
+            var okInput = document.getElementById('openai-key-input');
+            var okArea  = document.getElementById('openai-key-textarea');
+            var okBtn   = document.getElementById('openai-key-toggle');
+            var hfInput = document.getElementById('hf-key-input');
+            var hfArea  = document.getElementById('hf-key-textarea');
+            var hfBtn   = document.getElementById('hf-key-toggle');
+
+            var openaiKey = (okBtn && okBtn.dataset.state === 'shown')
+                ? (okArea ? okArea.value : '')
+                : (okInput ? okInput.dataset.realValue || '' : '');
+            var hfKey = (hfBtn && hfBtn.dataset.state === 'shown')
+                ? (hfArea ? hfArea.value : '')
+                : (hfInput ? hfInput.dataset.realValue || '' : '');
+
+            localStorage.setItem('openai_api_key', openaiKey);
+            localStorage.setItem('hfToken', hfKey);
+            // Save model selection
+            if (preferencesModelSelect) {
+                sessionStorage.setItem('selectedModel', preferencesModelSelect.value);
             }
-            var apiKey = preferencesApiKeyInput.value.trim();
-            var hfToken = preferencesHfTokenInput ? preferencesHfTokenInput.value.trim() : '';
-            localStorage.setItem('openai_api_key', apiKey);
-            localStorage.setItem('hfToken', hfToken);
+            // Save timeout
+            if (preferencesTimeoutInput) {
+                localStorage.setItem('gradeTimeout', preferencesTimeoutInput.value);
+            }
             closePreferencesModal();
         });
     }
@@ -247,6 +316,18 @@ function initializeMenuSystem() {
     if (preferencesCancelBtn) {
         preferencesCancelBtn.addEventListener('click', function () {
             closePreferencesModal();
+        });
+    }
+
+    if (preferencesMenuItem) {
+        preferencesMenuItem.addEventListener('click', function () {
+            openPreferencesModal();
+        });
+    }
+
+    if (settingsGearBtn) {
+        settingsGearBtn.addEventListener('click', function () {
+            openPreferencesModal();
         });
     }
 

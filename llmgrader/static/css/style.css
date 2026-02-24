@@ -37,8 +37,8 @@ html, body {
     background: white;
     border-radius: 8px;
     padding: 24px;
-    min-width: 400px;
-    max-width: 90%;
+    width: clamp(280px, 90vw, 480px);
+    box-sizing: border-box;
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
 }
 
@@ -60,7 +60,9 @@ html, body {
     color: #333;
 }
 
-.modal-content input[type="password"] {
+.modal-content input[type="password"],
+.modal-content input[type="text"],
+.modal-content input[type="number"] {
     width: 100%;
     padding: 8px;
     border: 1px solid #ccc;
@@ -716,7 +718,52 @@ textarea {
     white-space: nowrap;
 }
 
+#desktop-solution-container {
+    width: 100%;
+    box-sizing: border-box;
+}
+
+#student-solution {
+    width: 100%;
+    box-sizing: border-box;
+}
+
 /* moved top-controls styles from index.html */
+
+.settings-gear-btn {
+    background: none;
+    border: none;
+    font-size: 1.3rem;
+    cursor: pointer;
+    margin-left: 8px;
+    padding: 4px 6px;
+}
+
+.key-field {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.key-toggle-btn {
+    align-self: flex-start;
+    background: none;
+    border: 1px solid #ccc;
+    padding: 4px 8px;
+    border-radius: 4px;
+    cursor: pointer;
+}
+
+#openai-key-textarea,
+#hf-key-textarea {
+    width: 100%;
+    min-height: 60px;
+    font-size: 0.85rem;
+    line-height: 1.4;
+    box-sizing: border-box;
+    white-space: normal;
+    word-break: break-all;
+}
 
 /* ------------------------------
    ADMIN VIEW
@@ -737,6 +784,151 @@ textarea {
     width: 6px;
     cursor: col-resize;
     background-color: #ddd;
+}
+
+/* Mobile elements are hidden by default; revealed only on small screens */
+.mobile-tabs,
+.mobile-panel,
+.mobile-only {
+    display: none;
+}
+
+@media (max-width: 768px) {
+
+    .dropdown-label {
+        display: none;
+    }
+
+    .top-controls {
+        gap: 4px;
+        flex-wrap: nowrap;
+    }
+
+    .grade-dropdown,
+    #part-select {
+        font-size: 0.85rem;
+        padding: 4px 6px;
+        max-width: 110px;
+        box-sizing: border-box;
+    }
+
+    #part-select {
+        max-width: 80px;
+    }
+
+    .settings-gear-btn {
+        flex-shrink: 0;
+        font-size: 1.2rem;
+        padding: 2px 4px;
+        margin-left: 0;
+    }
+
+    .mobile-only {
+        display: flex;
+    }
+
+    #mobile-grade-row {
+        flex-direction: row;
+        justify-content: space-between;
+        align-items: center;
+        gap: 8px;
+        padding: 4px 8px;
+    }
+
+    #mobile-grade-button-container,
+    #mobile-grade-result-container {
+        flex: 1;
+    }
+
+    #mobile-grade-result-container .grade-status-container {
+        width: 100%;
+    }
+
+    #grade-points {
+        display: none;
+    }
+
+    .nyu-banner {
+        padding: 6px 10px;
+    }
+
+    .nyu-logo {
+        height: 32px;
+        margin-right: 8px;
+    }
+
+    .title {
+        font-size: 13px;
+        font-weight: bold;
+    }
+
+    .professors {
+        display: none;
+    }
+
+    /* Hide desktop splitters */
+    .divider,
+    #grade-vertical-divider {
+        display: none !important;
+    }
+
+    /* Hide desktop left/right columns */
+    .layout-row .column {
+        display: none !important;
+    }
+
+    /* Show mobile tab bar */
+    .mobile-tabs {
+        display: flex !important;
+        flex-direction: row;
+        justify-content: space-around;
+        gap: 4px;
+        padding: 8px;
+        background: #f0f0f0;
+        border-bottom: 1px solid #ccc;
+    }
+
+    .mobile-tabs button {
+        flex: 1;
+        padding: 8px;
+        font-size: 14px;
+        border: none;
+        background: #e6e6e6;
+        border-radius: 4px;
+    }
+
+    .mobile-tabs button.active {
+        background-color: #E5D4F3;
+        border-bottom: 2px solid #57068C;
+        font-weight: 600;
+    }
+
+    #student-solution::placeholder {
+        color: #888;
+        font-style: italic;
+    }
+
+    /* Mobile panels stack vertically */
+    .mobile-panel {
+        display: block !important;
+        padding: 12px;
+    }
+
+    /* Hidden by default until selected */
+    .mobile-hidden {
+        display: none !important;
+    }
+
+    #student-solution {
+        width: 100%;
+        min-height: 120px;
+        resize: none;
+        overflow: hidden;
+        box-sizing: border-box;
+        font-size: 1rem;
+        line-height: 1.4;
+        padding: 10px;
+    }
 }
 
 

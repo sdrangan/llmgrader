@@ -2,6 +2,7 @@
 <!-- Old template-based views removed; app now uses /views/*.html exclusively -->
 <html lang="en">
 <head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 
 <html>
 <head>
@@ -9,32 +10,7 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/analytics.css') }}">
-    <style>
-        .admin-login-modal {
-            position: fixed;
-            inset: 0;
-            display: none;
-            align-items: center;
-            justify-content: center;
-            background: rgba(0, 0, 0, 0.4);
-            z-index: 1000;
-        }
-
-        .admin-login-dialog {
-            background: #ffffff;
-            padding: 16px;
-            border-radius: 8px;
-            min-width: 280px;
-            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
-        }
-
-        .admin-login-actions {
-            display: flex;
-            gap: 8px;
-            justify-content: flex-end;
-            margin-top: 12px;
-        }
-    </style>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/admin.css') }}">
     <script>
     window.MathJax = {
       tex: {
@@ -172,36 +148,21 @@
 
 <body>
     <div class="top-controls">
-        <label for="unit-select" class="unit-dropdown">Unit:</label>
+        <label for="unit-select" class="unit-dropdown dropdown-label">Unit:</label>
         <select id="unit-select" class="unit-dropdown grade-dropdown"></select>
 
-        <label for="question-number" class="grade-only">Question:</label>
+        <label for="question-number" class="grade-only dropdown-label">Question:</label>
         <select id="question-number" class="grade-only grade-dropdown"></select>
 
-        <span class="part-label grade-only">Part</span>
+        <span class="part-label grade-only dropdown-label">Part</span>
         <select id="part-select" class="grade-only">
             <option value="all">All</option>
         </select>
 
-        <label for="model-select" class="model-label grade-only">Model:</label>
-        <select id="model-select" class="grade-only">
-            <option value="gpt-4.1-mini">gpt‑4.1‑mini</option>
-            <option value="gpt-5-mini">gpt‑5‑mini</option>
-            <option value="gpt-5.1">gpt‑5.1</option>
-            <option value="gpt-5.2">gpt‑5.2</option>
-        </select>
-
-        <button id="grade-button" class="grade-only" onclick="gradeCurrentQuestion()">Grade</button>
-
-        <label for="timeout-input" class="timeout-label grade-only">Timeout (s):</label>
-        <input
-            id="timeout-input"
-            type="number"
-            min="1"
-            max="120"
-            value="20"
-            class="timeout-input grade-only"
-        />
+        <div id="desktop-grade-button-container">
+            <button id="grade-button" class="grade-only" onclick="gradeCurrentQuestion()">Grade</button>
+        </div>
+        <button id="settings-gear-btn" class="settings-gear-btn grade-only">⚙️</button>
 
         <input type="file" id="load-results-file" accept=".json" style="display: none;">
         
@@ -220,13 +181,33 @@
     <div class="modal-dialog">
         <h2>Preferences</h2>
         <div class="modal-content">
-            <label for="preferences-api-key">OpenAI API Key</label>
-            <input id="preferences-api-key" type="password" placeholder="Enter API Key">
+            <label>OpenAI API Key</label>
+            <div class="key-field">
+                <input id="openai-key-input" type="text">
+                <textarea id="openai-key-textarea" class="hidden"></textarea>
+                <button id="openai-key-toggle" class="key-toggle-btn">Show</button>
+            </div>
         </div>
         <div class="modal-content">
-            <label for="preferences-hf-token">Hugging Face Token</label>
-            <input id="preferences-hf-token" type="password" placeholder="Enter Hugging Face Token">
+            <label>Hugging Face Token</label>
+            <div class="key-field">
+                <input id="hf-key-input" type="text">
+                <textarea id="hf-key-textarea" class="hidden"></textarea>
+                <button id="hf-key-toggle" class="key-toggle-btn">Show</button>
+            </div>
             <a href="https://huggingface.co/settings/tokens" target="_blank" rel="noopener noreferrer" style="font-size: 0.85em; text-decoration: none; color: inherit;">Get a Hugging Face token</a>
+        </div>
+        <div class="modal-content">
+            <label for="model-select">Model:</label>
+            <select id="model-select">
+                <option value="gpt-4.1-mini">gpt‑4.1‑mini</option>
+                <option value="gpt-5-mini">gpt‑5‑mini</option>
+                <option value="gpt-5.1">gpt‑5.1</option>
+                <option value="gpt-5.2">gpt‑5.2</option>
+            </select>
+
+            <label for="timeout-input">Timeout (seconds):</label>
+            <input id="timeout-input" type="number" min="1" max="120" value="20">
         </div>
         <div class="modal-buttons">
             <button id="preferences-save-btn" class="modal-btn modal-btn-primary">Save</button>
