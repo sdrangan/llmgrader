@@ -312,12 +312,25 @@ function initializeMenuSystem() {
             var hfArea  = document.getElementById('hf-key-textarea');
             var hfBtn   = document.getElementById('hf-key-toggle');
 
-            var openaiKey = (okBtn && okBtn.dataset.state === 'shown')
-                ? (okArea ? okArea.value : '')
-                : (okInput ? okInput.dataset.realValue || '' : '');
-            var hfKey = (hfBtn && hfBtn.dataset.state === 'shown')
-                ? (hfArea ? hfArea.value : '')
-                : (hfInput ? hfInput.dataset.realValue || '' : '');
+            // If shown: read the textarea. If masked: check whether the user
+            // typed a new value (differs from the masked display) — if so use
+            // what they typed, otherwise keep the stored real value unchanged.
+            var openaiKey;
+            if (okBtn && okBtn.dataset.state === 'shown') {
+                openaiKey = okArea ? okArea.value : '';
+            } else {
+                var storedOk = okInput ? (okInput.dataset.realValue || '') : '';
+                var typedOk  = okInput ? okInput.value : '';
+                openaiKey = (typedOk !== maskKey(storedOk)) ? typedOk : storedOk;
+            }
+            var hfKey;
+            if (hfBtn && hfBtn.dataset.state === 'shown') {
+                hfKey = hfArea ? hfArea.value : '';
+            } else {
+                var storedHf = hfInput ? (hfInput.dataset.realValue || '') : '';
+                var typedHf  = hfInput ? hfInput.value : '';
+                hfKey = (typedHf !== maskKey(storedHf)) ? typedHf : storedHf;
+            }
 
             localStorage.setItem('openai_api_key', openaiKey);
             localStorage.setItem('hfToken', hfKey);
