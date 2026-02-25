@@ -780,6 +780,13 @@ textarea {
     min-width: 0;
 }
 
+.admin-top-bar select {
+    max-width: 180px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
 
 .vertical-divider {
     width: 6px;
@@ -907,6 +914,21 @@ textarea {
     #student-solution::placeholder {
         color: #888;
         font-style: italic;
+    }
+
+    .admin-top-bar {
+        gap: 4px;
+        padding: 4px 8px;
+        flex-wrap: wrap;
+    }
+
+    .admin-top-bar label {
+        display: none;
+    }
+
+    .admin-top-bar select {
+        font-size: 0.85rem;
+        max-width: 140px;
     }
 
     /* Mobile panels stack vertically */

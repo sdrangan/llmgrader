@@ -9,6 +9,24 @@
         <select id="admin-question-select"></select>
     </div>
 
+    <!-- MOBILE TABS -->
+    <div class="mobile-tabs mobile-hidden">
+        <button data-panel="question">Question</button>
+        <button data-panel="refsol">Ref Soln</button>
+        <button data-panel="notes">Grade Notes</button>
+    </div>
+
+    <!-- MOBILE PANELS -->
+    <div id="admin-mobile-question" class="mobile-panel mobile-hidden">
+        <div id="admin-mobile-question-text" class="panel html-box"></div>
+    </div>
+    <div id="admin-mobile-refsol" class="mobile-panel mobile-hidden">
+        <div id="admin-mobile-solution-text" class="panel html-box"></div>
+    </div>
+    <div id="admin-mobile-notes" class="mobile-panel mobile-hidden">
+        <div id="admin-mobile-grading-notes" class="panel text-box"></div>
+    </div>
+
     <div class="layout-row">
         <div class="column">
             <div class="resizable-container">

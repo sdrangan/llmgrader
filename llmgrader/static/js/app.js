@@ -267,6 +267,8 @@ if (!window._gradeMediaListenerAttached) {
     window.matchMedia("(max-width: 768px)").addEventListener("change", () => {
         if (currentActiveView === "grade") {
             initializeGradeView();
+        } else if (currentActiveView === "admin") {
+            initializeAdminView();
         }
     });
 }
@@ -490,8 +492,58 @@ function restoreGradeState() {
 
 // Admin View now matches Grade View layout and splitter behavior
 function initializeAdminView() {
+    if (isMobile()) {
+        initializeAdminViewMobile();
+    } else {
+        initializeAdminViewDesktop();
+    }
     setupAdminDropdowns();
+}
+
+function initializeAdminViewMobile() {
+    const adminView = document.getElementById("admin-view");
+    if (!adminView) return;
+    // Hide desktop columns and dividers
+    adminView.querySelectorAll(".layout-row > .column").forEach(col => col.style.display = "none");
+    const vDiv = document.getElementById("admin-vertical-divider");
+    const hDiv = adminView.querySelector(".divider");
+    if (vDiv) vDiv.style.display = "none";
+    if (hDiv) hDiv.style.display = "none";
+    // Show mobile tabs
+    const tabs = adminView.querySelector(".mobile-tabs");
+    if (tabs) tabs.classList.remove("mobile-hidden");
+    // Show first panel
+    showAdminMobilePanel("question");
+    // Wire tab clicks
+    adminView.querySelectorAll(".mobile-tabs button").forEach(btn => {
+        btn.addEventListener("click", () => {
+            showAdminMobilePanel(btn.getAttribute("data-panel"));
+        });
+    });
+}
+
+function initializeAdminViewDesktop() {
+    const adminView = document.getElementById("admin-view");
+    if (!adminView) return;
+    // Restore desktop columns and dividers
+    adminView.querySelectorAll(".layout-row > .column").forEach(col => col.style.display = "");
+    const vDiv = document.getElementById("admin-vertical-divider");
+    const hDiv = adminView.querySelector(".divider");
+    if (vDiv) vDiv.style.display = "";
+    if (hDiv) hDiv.style.display = "";
+    // Hide mobile tabs and panels
+    const tabs = adminView.querySelector(".mobile-tabs");
+    if (tabs) tabs.classList.add("mobile-hidden");
+    adminView.querySelectorAll(".mobile-panel").forEach(p => p.classList.add("mobile-hidden"));
     setupAdminSplitters();
+}
+
+function showAdminMobilePanel(name) {
+    document.querySelectorAll("#admin-view .mobile-panel").forEach(p => p.classList.add("mobile-hidden"));
+    document.getElementById(`admin-mobile-${name}`)?.classList.remove("mobile-hidden");
+    document.querySelectorAll("#admin-view .mobile-tabs button").forEach(btn => {
+        btn.classList.toggle("active", btn.getAttribute("data-panel") === name);
+    });
 }
 
 function setupAdminDropdowns() {
@@ -568,6 +620,16 @@ function displayAdminQuestion(unit, qtag) {
         document.getElementById("admin-question-text").innerHTML = q.question_text || "";
         document.getElementById("admin-solution-text").innerHTML = q.solution || "";
         document.getElementById("admin-grading-notes").textContent = q.grading_notes || "";
+
+        // Mirror into mobile panels if on mobile
+        if (isMobile()) {
+            const mq = document.getElementById("admin-mobile-question-text");
+            const ms = document.getElementById("admin-mobile-solution-text");
+            const mn = document.getElementById("admin-mobile-grading-notes");
+            if (mq) mq.innerHTML = q.question_text || "";
+            if (ms) ms.innerHTML = q.solution || "";
+            if (mn) mn.textContent = q.grading_notes || "";
+        }
 
         if (window.MathJax) MathJax.typesetPromise();
     });
