@@ -192,7 +192,8 @@ body[data-active-view="analytics"] #analytics-view {
 }
 
 .menu-group:hover .menu-dropdown,
-.menu-group:focus-within .menu-dropdown {
+.menu-group:focus-within .menu-dropdown,
+.menu-group.is-open .menu-dropdown {
     display: block;
 }
 
@@ -922,12 +923,14 @@ textarea {
     #student-solution {
         width: 100%;
         min-height: 120px;
-        resize: none;
-        overflow: hidden;
+        resize: vertical;
+        overflow-y: auto;
         box-sizing: border-box;
         font-size: 1rem;
         line-height: 1.4;
         padding: 10px;
+        flex: none !important;
+        field-sizing: content;
     }
 }
 

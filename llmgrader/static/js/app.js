@@ -411,6 +411,14 @@ function initializeGradeViewMobile() {
     mirrorQuestionWhenReady();
     mirrorFeedbackWhenReady();
 
+    // Auto-expand textarea as user types
+    const solTextarea = document.getElementById("student-solution");
+    if (solTextarea && !solTextarea._autoExpandAttached) {
+        solTextarea.addEventListener("input", () => autoExpand(solTextarea));
+        solTextarea._autoExpandAttached = true;
+    }
+    if (solTextarea) autoExpand(solTextarea);
+
     // Tab switching
     document.querySelectorAll(".mobile-tabs button").forEach(btn => {
         btn.addEventListener("click", () => {
@@ -769,6 +777,22 @@ function displayQuestion(qtag) {
     solBox.value = sessionData.student_solution || 
                    currentStudentSolutions[qtag]?.solution || "";
 
+    // Wire auto-expand for browsers without field-sizing:content support
+    if (isMobile()) {
+        // Force flex override via inline style (defeats any CSS specificity issue)
+        solBox.style.flex = "none";
+        solBox.style.overflow = "hidden";
+        autoExpand(solBox);
+        if (!solBox._autoExpandAttached) {
+            solBox.addEventListener("input", () => {
+                solBox.style.height = "auto";
+                solBox.style.height = solBox.scrollHeight + "px";
+            });
+            solBox._autoExpandAttached = true;
+            console.log("autoExpand listener attached in displayQuestion");
+        }
+    }
+
     // ---------------------------
     // Update PART DROPDOWN
     // ---------------------------
@@ -863,6 +887,7 @@ function populateQuestionDropdown(qtags, selectedQtag = null) {
                     student_solution: solBox.value
                 }, null);
             }
+            if (isMobile()) autoExpand(solBox);
         });
     }
 }

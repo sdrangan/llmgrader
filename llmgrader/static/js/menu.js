@@ -83,6 +83,26 @@ function initializeMenuSystem() {
     menuButtons.forEach(function (button) {
         button.addEventListener('mouseenter', openMenus);
         button.addEventListener('focus', openMenus);
+        button.addEventListener('click', function (e) {
+            openMenus();
+            var group = button.closest('.menu-group');
+            var isAlreadyOpen = group && group.classList.contains('is-open');
+            // Close all open groups
+            document.querySelectorAll('.menu-group.is-open').forEach(function (g) {
+                g.classList.remove('is-open');
+            });
+            if (!isAlreadyOpen && group) {
+                group.classList.add('is-open');
+                e.stopPropagation();
+            }
+        });
+    });
+
+    // Close open menus when clicking outside
+    document.addEventListener('click', function () {
+        document.querySelectorAll('.menu-group.is-open').forEach(function (g) {
+            g.classList.remove('is-open');
+        });
     });
 
     var editCutMenuItem = document.getElementById('edit-cut-menu-item');
