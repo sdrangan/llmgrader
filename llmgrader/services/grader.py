@@ -938,7 +938,13 @@ class Grader:
         # 5. All checks passed
         print('admin key=', admin_key)
         return admin_key, None
-        
+
+    def api_key_walkthrough(self) -> str:
+        """
+        Returns a special token that tells the frontend to launch the
+        API Key Setup Wizard modal.
+        """
+        return "__START_API_KEY_WALKTHROUGH__"
 
     def grade(
             self, 
@@ -1017,21 +1023,14 @@ class Grader:
         # Create the OpenAI LLM client
         print('API key: ', api_key)
         if not api_key or not api_key.strip():
-            print('No API key provided, checking if admin key can be used...')
             admin_key, reason = self.get_admin_key(model)
-            print('Admin key check result:', admin_key )
-            print('Reason:', reason)
-
             if admin_key is None:
-                # reason is already a full user-facing message
-                grade = {
+                token = self.api_key_walkthrough()
+                return {
                     "result": "error",
-                    "full_explanation": reason,
-                    "feedback": reason
+                    "full_explanation": token,
+                    "feedback": reason or ""
                 }
-                return grade
-
-            # Admin key allowed
             api_key = admin_key
             used_admin_key = True
         else:

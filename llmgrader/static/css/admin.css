@@ -22,3 +22,31 @@
     justify-content: flex-end;
     margin-top: 12px;
 }
+
+/* ── API Key Setup Wizard ──────────────────────────────────────────────────── */
+
+.wizard-dialog {
+    max-width: 480px;
+}
+
+.wizard-step-indicator {
+    font-size: 0.8em;
+    color: #888;
+    margin: 0 0 8px 0;
+}
+
+.wizard-body ol {
+    padding-left: 20px;
+}
+
+.wizard-body li {
+    margin-bottom: 8px;
+}
+
+.wizard-body code {
+    background: #f4f4f4;
+    padding: 2px 5px;
+    border-radius: 3px;
+    font-size: 0.9em;
+    font-family: monospace;
+}

@@ -44,6 +44,7 @@ document.addEventListener("DOMContentLoaded", () => {
     populateModelSelect();
     initializeModelSelection();
     initializeAdminPreferencesModal();
+    initializeApiKeyWizard();
     loadView("grade");   // or whatever your default view is
 });
 
@@ -1010,6 +1011,14 @@ async function gradeCurrentQuestion() {
     });
 
     const data = await resp.json();
+
+    // If the backend signals that the user needs an API key, launch the wizard
+    if (data.full_explanation === "__START_API_KEY_WALKTHROUGH__") {
+        gradeBtn.disabled = false;
+        gradeBtn.textContent = "Grade";
+        if (typeof openApiKeyWizard === "function") openApiKeyWizard(data.feedback || "");
+        return;
+    }
 
     gradeBtn.disabled = false;
     gradeBtn.textContent = "Grade";

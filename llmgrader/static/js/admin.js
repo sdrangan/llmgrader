@@ -1,5 +1,121 @@
 // ── Model allowlist ──────────────────────────────────────────────────────────
 
+// ── API Key Setup Wizard ──────────────────────────────────────────────────
+
+const WIZARD_STEPS = [
+    {
+        title: "Why do I need an API key?",
+        body: `
+            <p>LLM Grader uses OpenAI language models to grade your submissions.
+            A limited number of tokens are available for free for community usage on certain models.</p>
+            <p>To use the grading service when these tokens are exceeded, or on
+            models not covered by the community service, you need a personal <strong>OpenAI API key</strong>.
+            Your key is stored only in your browser and is <em>never</em> sent to the
+            LLM Grader server.</p>
+            <p>Click <strong>Next</strong> to learn how to get one.</p>
+        `
+    },
+    {
+        title: "Create an OpenAI API key",
+        body: `
+            <ol>
+                <li>Visit <a href="https://platform.openai.com/api-keys" target="_blank">
+                    https://platform.openai.com/api-keys</a>.</li>
+                <li>Log in, or create a free OpenAI account.</li>
+                <li>Click <strong>Create new secret key</strong>, give it a name,
+                    and click <strong>Create secret key</strong>.</li>
+                <li>Copy the key &mdash; it starts with <code>sk-</code>.
+                    <em>You won’t be able to see it again after closing the dialog.</em></li>
+            </ol>
+            <p>Once you have copied the key, click <strong>Next</strong>.</p>
+        `
+    },
+    {
+        title: "Enter your key in LLM Grader",
+        body: `
+            <ol>
+                <li>Open <strong>File &rarr; Preferences</strong> in LLM Grader.</li>
+                <li>Paste your key into the <strong>OpenAI API key</strong> field.</li>
+                <li>Click <strong>Save</strong>.</li>
+            </ol>
+            <p>Your key is stored only in your browser and is never sent to the server.</p>
+        `
+    },
+    {
+        title: "You\u2019re all set!",
+        body: `
+            <p>Once you have saved your API key, click <strong>Grade</strong> again
+            to grade your submission.</p>
+            <p>If you ever need to update your key, open
+            <strong>File &rarr; Preferences</strong>.</p>
+        `
+    }
+];
+
+let _wizardStep = 0;
+let _wizardReason = null;
+
+function openApiKeyWizard(reason) {
+    _wizardStep = 0;
+    _wizardReason = (reason && reason.trim()) ? reason.trim() : null;
+    _renderWizardStep();
+    document.getElementById("api-key-wizard-modal").style.display = "flex";
+}
+
+function _renderWizardStep() {
+    const step = WIZARD_STEPS[_wizardStep];
+    document.getElementById("wizard-title").textContent = step.title;
+
+    let bodyHtml = step.body;
+    if (_wizardStep === 0 && _wizardReason) {
+        bodyHtml = `<p>${_wizardReason}</p>\n` + bodyHtml;
+    }
+    document.getElementById("wizard-body").innerHTML = bodyHtml;
+
+    const indicator = document.getElementById("wizard-step-indicator");
+    if (indicator) indicator.textContent = `Step ${_wizardStep + 1} of ${WIZARD_STEPS.length}`;
+
+    const backBtn = document.getElementById("wizard-back-btn");
+    const nextBtn = document.getElementById("wizard-next-btn");
+    backBtn.disabled = _wizardStep === 0;
+    nextBtn.textContent = _wizardStep === WIZARD_STEPS.length - 1 ? "Finish" : "Next";
+}
+
+function _closeWizard() {
+    document.getElementById("api-key-wizard-modal").style.display = "none";
+}
+
+function initializeApiKeyWizard() {
+    const modal = document.getElementById("api-key-wizard-modal");
+    if (!modal || modal.dataset.initialized === "true") return;
+
+    document.getElementById("wizard-back-btn").addEventListener("click", () => {
+        if (_wizardStep > 0) { _wizardStep--; _renderWizardStep(); }
+    });
+
+    document.getElementById("wizard-next-btn").addEventListener("click", () => {
+        if (_wizardStep < WIZARD_STEPS.length - 1) {
+            _wizardStep++;
+            _renderWizardStep();
+        } else {
+            _closeWizard();
+        }
+    });
+
+    document.getElementById("wizard-cancel-btn").addEventListener("click", _closeWizard);
+
+    modal.addEventListener("click", (e) => {
+        if (e.target === modal) _closeWizard();
+    });
+
+    modal.dataset.initialized = "true";
+}
+
+window.openApiKeyWizard = openApiKeyWizard;
+window.initializeApiKeyWizard = initializeApiKeyWizard;
+
+// ──────────────────────────────────────────────────────────
+
 let adminAllowedModels = [];
 
 function renderAdminModelList(allowedModels) {

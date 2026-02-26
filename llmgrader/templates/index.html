@@ -181,32 +181,35 @@
         <h2>Preferences</h2>
         <div class="modal-content">
             <label>OpenAI API Key</label>
-            <div class="key-field">
-                <input id="openai-key-input" type="text">
+            <div class="key-field" style="display:flex; flex-direction:row; align-items:center; gap:8px;">
+                <input id="openai-key-input" type="text" style="flex:1;">
                 <textarea id="openai-key-textarea" class="hidden"></textarea>
-                <button id="openai-key-toggle" class="key-toggle-btn">Show</button>
+                <button id="openai-key-toggle" class="key-toggle-btn" style="flex-shrink:0;">Show</button>
             </div>
         </div>
         <div class="modal-content">
             <label>Hugging Face Token</label>
-            <div class="key-field">
-                <input id="hf-key-input" type="text">
+            <div class="key-field" style="display:flex; flex-direction:row; align-items:center; gap:8px;">
+                <input id="hf-key-input" type="text" style="flex:1;">
                 <textarea id="hf-key-textarea" class="hidden"></textarea>
-                <button id="hf-key-toggle" class="key-toggle-btn">Show</button>
+                <button id="hf-key-toggle" class="key-toggle-btn" style="flex-shrink:0;">Show</button>
             </div>
             <a href="https://huggingface.co/settings/tokens" target="_blank" rel="noopener noreferrer" style="font-size: 0.85em; text-decoration: none; color: inherit;">Get a Hugging Face token</a>
         </div>
         <div class="modal-content">
-            <label for="model-select">Model:</label>
-            <select id="model-select">
-                <option value="gpt-4.1-mini">gpt‑4.1‑mini</option>
-                <option value="gpt-5-mini">gpt‑5‑mini</option>
-                <option value="gpt-5.1">gpt‑5.1</option>
-                <option value="gpt-5.2">gpt‑5.2</option>
-            </select>
-
-            <label for="timeout-input">Timeout (seconds):</label>
-            <input id="timeout-input" type="number" min="1" max="120" value="20">
+            <div style="display:flex; align-items:center; gap:8px; margin-bottom:8px;">
+                <label for="model-select" style="white-space:nowrap; margin:0;">Model:</label>
+                <select id="model-select" style="flex:1;">
+                    <option value="gpt-4.1-mini">gpt‑4.1‑mini</option>
+                    <option value="gpt-5-mini">gpt‑5‑mini</option>
+                    <option value="gpt-5.1">gpt‑5.1</option>
+                    <option value="gpt-5.2">gpt‑5.2</option>
+                </select>
+            </div>
+            <div style="display:flex; align-items:center; gap:8px;">
+                <label for="timeout-input" style="white-space:nowrap; margin:0;">Timeout (seconds):</label>
+                <input id="timeout-input" type="number" min="1" max="120" value="20" style="flex:1;">
+            </div>
         </div>
         <div class="modal-buttons">
             <button id="preferences-save-btn" class="modal-btn modal-btn-primary">Save</button>
@@ -296,6 +299,20 @@
 
         <div class="modal-buttons">
             <button id="about-close" class="modal-btn">Close</button>
+        </div>
+    </div>
+</div>
+
+<!-- API Key Setup Wizard -->
+<div id="api-key-wizard-modal" class="modal-overlay" style="display:none;">
+    <div class="modal-dialog wizard-dialog">
+        <h2 id="wizard-title"></h2>
+        <p id="wizard-step-indicator" class="wizard-step-indicator"></p>
+        <div id="wizard-body" class="modal-content wizard-body"></div>
+        <div class="modal-buttons">
+            <button id="wizard-back-btn" class="modal-btn">Back</button>
+            <button id="wizard-next-btn" class="modal-btn modal-btn-primary">Next</button>
+            <button id="wizard-cancel-btn" class="modal-btn">Cancel</button>
         </div>
     </div>
 </div>
