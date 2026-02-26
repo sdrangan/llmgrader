@@ -509,28 +509,32 @@ class Grader:
             log.close()
             return
         
-        unit_list = units_elem.findall('unit')
-        if not unit_list:
+        # Build ordered list (sections + units) and parallel unit/path lists
+        self.units_order = []
+        self.units_list = []
+        self.xml_path_list = []
+
+        for child in units_elem:
+            if child.tag == 'section':
+                section_name = (child.text or '').strip()
+                self.units_order.append({"type": "section", "name": section_name})
+                log.write(f'Found section: {section_name}\n')
+            elif child.tag == 'unit':
+                name = child.findtext('name')
+                destination = child.findtext('destination')
+                if not name or not destination:
+                    log.write(f'Skipping unit: missing <name> or <destination> element\n')
+                    continue
+                self.units_order.append({"type": "unit", "name": name})
+                self.units_list.append(name)
+                self.xml_path_list.append(destination)
+                log.write(f'Found unit in config: {name} -> {destination}\n')
+
+        if not self.units_list:
             log.write('No <unit> elements found in llmgrader_config.xml\n')
             self.units = {}
             log.close()
             return
-        
-        # Build lists of unit names and XML paths from config
-        self.units_list = []
-        self.xml_path_list = []
-        
-        for unit in unit_list:
-            name = unit.findtext('name')
-            destination = unit.findtext('destination')
-            
-            if not name or not destination:
-                log.write(f'Skipping unit: missing <name> or <destination> element\n')
-                continue
-            
-            self.units_list.append(name)
-            self.xml_path_list.append(destination)
-            log.write(f'Found unit in config: {name} -> {destination}\n')
 
         units = {}
 

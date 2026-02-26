@@ -565,13 +565,23 @@ function setupAdminDropdowns() {
 
     // Populate units from currentUnitQtags data
     // We'll need to fetch units first
-    fetch("/units").then(r => r.json()).then(units => {
-        unitSelect.innerHTML = units.map(u => `<option value="${u}">${u}</option>`).join("");
-        
-        const firstUnit = units[0];
-        unitSelect.value = currentUnitName;
+    fetch("/units").then(r => r.json()).then(items => {
+        unitSelect.innerHTML = items.map(item => {
+            if (item.type === "section") {
+                return `<option value="" disabled style="font-weight:bold;color:#888">&mdash; ${item.name} &mdash;</option>`;
+            }
+            return `<option value="${item.name}">${item.name}</option>`;
+        }).join("");
+
+        const unitNames = items.filter(i => i.type === "unit").map(i => i.name);
+        if (unitNames.includes(currentUnitName)) {
+            unitSelect.value = currentUnitName;
+        } else if (unitNames.length > 0) {
+            unitSelect.value = unitNames[0];
+        }
 
         unitSelect.addEventListener("change", () => {
+            if (!unitSelect.value) return; // ignore section separators
             currentUnitName = unitSelect.value;
             populateAdminQuestions();
             displayAdminCurrent();
@@ -582,7 +592,7 @@ function setupAdminDropdowns() {
             displayAdminCurrent();
         });
 
-        if (units.length > 0) {
+        if (unitNames.length > 0) {
             populateAdminQuestions();
         }
     });
@@ -695,26 +705,36 @@ document.addEventListener("DOMContentLoaded", () => {
 
 async function loadUnits() {
     const resp = await fetch("/units");
-    const units = await resp.json();
+    const items = await resp.json();
 
     const dropdown = document.getElementById("unit-select");
     dropdown.innerHTML = "";
 
-    units.forEach(unit => {
+    items.forEach(item => {
         const opt = document.createElement("option");
-        opt.value = unit;
-        opt.textContent = unit;
+        if (item.type === "section") {
+            opt.value = "";
+            opt.textContent = `\u2014 ${item.name} \u2014`;
+            opt.disabled = true;
+            opt.style.fontWeight = "bold";
+            opt.style.color = "#888";
+        } else {
+            opt.value = item.name;
+            opt.textContent = item.name;
+        }
         dropdown.appendChild(opt);
     });
 
-    if (units.length > 0) {
+    const unitNames = items.filter(i => i.type === "unit").map(i => i.name);
+
+    if (unitNames.length > 0) {
         const savedUnit = sessionStorage.getItem("selectedUnit");
-        if (savedUnit && units.includes(savedUnit)) {
+        if (savedUnit && unitNames.includes(savedUnit)) {
             dropdown.value = savedUnit;
             await loadUnit(savedUnit);   // <-- IMPORTANT
         } else {
-            dropdown.value = units[0];
-            await loadUnit(units[0]);    // <-- IMPORTANT
+            dropdown.value = unitNames[0];
+            await loadUnit(unitNames[0]);    // <-- IMPORTANT
         }
 
         // NOW the Grade View dropdowns exist and are populated
@@ -729,6 +749,7 @@ async function loadUnits() {
 
     const unitSelect = dropdown;
     dropdown.onchange = () => {
+        if (!dropdown.value) return; // ignore clicks on section separators
         sessionStorage.setItem("selectedUnit", dropdown.value);
         currentUnitName = unitSelect.value;
         loadUnit(dropdown.value);

@@ -101,7 +101,11 @@ class APIController:
 
         @bp.get("/units")
         def units():
-            return jsonify(list(self.grader.units.keys()))
+            units_order = getattr(self.grader, 'units_order', None)
+            if units_order:
+                return jsonify(units_order)
+            # Fallback: return plain unit list as structured items
+            return jsonify([{"type": "unit", "name": k} for k in self.grader.units.keys()])
 
         @bp.get("/unit/<unit_name>")
         def unit(unit_name):
