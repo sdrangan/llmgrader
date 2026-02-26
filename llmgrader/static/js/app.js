@@ -15,11 +15,20 @@ const MODEL_PROVIDER = {
     "gpt-4.1-mini": "openai",
     "gpt-5-mini": "openai",
     "gpt-5.1": "openai",
-    "gpt-5.2": "openai",
-
-    // Hugging Face (paid, user must supply their own HF token)
-    "hf:meta-llama/Llama-3.1-8B-Instruct": "hf",
+    "gpt-5.2": "openai"
 };
+
+function populateModelSelect() {
+    const modelSelect = document.getElementById("model-select");
+    if (!modelSelect) return;
+    modelSelect.innerHTML = "";
+    Object.keys(MODEL_PROVIDER).forEach(model => {
+        const opt = document.createElement("option");
+        opt.value = model;
+        opt.textContent = model;
+        modelSelect.appendChild(opt);
+    });
+}
 
 // sessionState[unitName][qtag] = {
 //     student_solution: "...",
@@ -32,6 +41,7 @@ let sessionState = {};
 // Create menu system on page load
 document.addEventListener("DOMContentLoaded", () => {
     initializeMenuSystem();
+    populateModelSelect();
     initializeModelSelection();
     initializeAdminPreferencesModal();
     loadView("grade");   // or whatever your default view is
@@ -974,20 +984,9 @@ async function gradeCurrentQuestion() {
 
     if (provider === "openai") {
         apiKey = getApiKey();
-        if (!apiKey) {
-            alert("Please set your OpenAI API key first.");
-            return;
-        }
-    }
-    else if (provider === "hf") {
-        apiKey = await getHfToken();
-        if (!apiKey) {
-            alert("No Hugging Face token found. Add one in Preferences or Admin Preferences.");
-            return;
-        }
     }
     else {
-        alert("Unknown model provider. Please select a valid model.");
+        alert("Only OpenAI models are supported.");
         return;
     }
 

@@ -220,9 +220,34 @@
     <div class="modal-dialog">
         <h2>Admin Preferences</h2>
         <div class="modal-content">
-            <label for="admin-hf-token">Admin Hugging Face Token</label>
-            <input id="admin-hf-token" type="password" placeholder="Enter Admin HF Token">
-            <a href="https://huggingface.co/settings/tokens" target="_blank" class="help-link">Get a Hugging Face token</a>
+            <div class="input-with-help" style="display:flex; align-items:center; gap:8px;">
+                <label for="admin-openai-token" style="white-space:nowrap; font-weight:normal; margin:0;">OpenAI API key</label>
+                <input id="admin-openai-token" type="password" placeholder="Enter Admin OpenAI Token" style="flex:1;">
+                <a href="https://sdrangan.github.io/llmgrader/docs/student/openai.html" target="_blank" class="help-link" style="flex-shrink:0; text-decoration:none;"><span class="help-icon" style="display:inline-flex; align-items:center; justify-content:center; width:22px; height:22px; border-radius:50%; background-color:#57068c; color:#fff; font-size:13px; font-weight:bold; cursor:pointer;">?</span></a>
+            </div>
+
+            <div class="input-with-help" style="display:flex; align-items:center; gap:8px;">
+                <label for="admin-hf-token" style="white-space:nowrap; font-weight:normal; margin:0;">HF token</label>
+                <input id="admin-hf-token" type="password" placeholder="Enter Admin HF Token" style="flex:1;">
+                <a href="https://huggingface.co/settings/tokens" target="_blank" class="help-link" style="flex-shrink:0; text-decoration:none;"><span class="help-icon" style="display:inline-flex; align-items:center; justify-content:center; width:22px; height:22px; border-radius:50%; background-color:#57068c; color:#fff; font-size:13px; font-weight:bold; cursor:pointer;">?</span></a>
+            </div>
+
+            <div class="modal-section" style="margin-top:12px;">
+                <label>Models allowed with admin key</label>
+                <div id="admin-model-list"></div>
+            </div>
+
+            <label for="admin-token-limit" style="display:block; margin-top:12px;">Token Limit</label>
+            <div class="token-limit-row" style="display:flex; align-items:center; gap:8px;">
+                <input id="admin-token-limit" type="number" placeholder="0">
+                <select id="admin-token-period">
+                    <option value="per_hour">per hour</option>
+                    <option value="per_day">per day</option>
+                    <option value="per_week">per week</option>
+                    <option value="per_month">per month</option>
+                    <option value="unlimited">unlimited</option>
+                </select>
+            </div>
         </div>
         <div class="modal-buttons">
             <button id="admin-preferences-save-btn" class="modal-btn modal-btn-primary">Save</button>

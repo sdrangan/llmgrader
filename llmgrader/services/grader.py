@@ -129,6 +129,7 @@ class Grader:
         "timed_out": "INTEGER",
         "tokens_in": "INTEGER",
         "tokens_out": "INTEGER",
+        "used_admin_key" : "INTEGER",
         "raw_prompt": "TEXT",
         "result": "TEXT",
         "full_explanation": "TEXT",
@@ -195,11 +196,14 @@ class Grader:
         self.scratch_dir = scratch_dir
         self.soln_pkg = soln_pkg
 
-        # Get teh database path
+        # Get the database path
         self.db_path = self.get_db_path()
 
         # Initialize field format
         Grader.initialize_field_format()
+
+         # Temporary database modification to add 'used_admin_key' column if it doesn't exist
+        self.temp_modify_db()
         
         # Initialize the database
         self.init_db()
@@ -216,6 +220,31 @@ class Grader:
 
         # Load units from the solution package
         self.load_unit_pkg() 
+
+       
+
+    def temp_modify_db(self):
+        """
+        Temporarily modify the database schema to add the 'used_admin_key' column
+        if it does not already exists.  This is a temporary solution to support the 
+        new admin key feature without requiring all users to run a database migration script.  
+        This function can be removed in the future once all users have the updated schema.
+        """
+        import sqlite3
+        conn = sqlite3.connect(self.db_path)  
+        cursor = conn.cursor()
+
+        # Check if column exists
+        cursor.execute("PRAGMA table_info(submissions);")
+        columns = [row[1] for row in cursor.fetchall()]
+
+        if "used_admin_key" not in columns:
+            cursor.execute(
+                "ALTER TABLE submissions ADD COLUMN used_admin_key INTEGER DEFAULT 0;"
+            )
+            conn.commit()
+
+        conn.close()
 
     def init_db(self):
         """
@@ -757,7 +786,11 @@ class Grader:
         -------
         function
             A function that, when called, will execute the API call to the 
-            specified LLM provider and return the parsed GradeResult.
+            specified LLM provider and return: 
+                result:  GradeResult
+                    Grading result
+                input_tokens, output_tokens: int
+                    Number of tokens used in the API call (input & output)
         """
         if provider == "openai":
             client = OpenAI(api_key=api_key)
@@ -770,7 +803,16 @@ class Grader:
                     temperature=1 if model.startswith("gpt-5-mini") else 0,
                     timeout=timeout
                 )
-                return resp.output_parsed 
+
+                # Get the total tokens used (input + output)
+                if resp.usage is not None:
+                    inputs_tokens = resp.usage.input_tokens
+                    output_tokens = resp.usage.output_tokens
+                else:
+                    inputs_tokens = 0
+                    output_tokens = 0
+                return resp.output_parsed, inputs_tokens, output_tokens
+            
             return call_openai
 
         elif provider == "hf":
@@ -795,13 +837,108 @@ class Grader:
                 # Extract assistant message
                 text = data["choices"][0]["message"]["content"]
 
+                # Set tokens to 0 now since HF API does not provide then
+                input_tokens = 0
+                output_tokens = 0
+
                 # Parse using your existing GradeResult model
-                return GradeResult.model_validate_json(text)
+                return GradeResult.model_validate_json(text), tokens
 
             return call_hf
 
         else:
             raise ValueError(f"Unknown provider '{provider}'")
+        
+    def get_admin_key(self, model: str) -> tuple[str | None, str | None]:
+        """
+        Determine whether the admin key may be used for this grading request.
+
+        Returns:
+            (admin_key_or_none, reason_message_or_none)
+
+            If admin_key is None, reason_message contains the full user-facing message.
+            If admin_key is not None, reason_message is None.
+        """
+
+        prefs = self.load_admin_preferences()
+        print(f"Admin preferences loaded: {prefs}")
+        admin_key = prefs.get("openaiApiKey", None)
+        
+
+        # 1. No admin key at all
+        if admin_key is None or not admin_key.strip():
+            return None, (
+                "Please add your OpenAI API key to continue."
+            )
+
+        # 2. Model not allowed for admin usage
+        allowed_models = prefs.get("allowedModels", [])
+        if model not in allowed_models:
+            return None, (
+                "This model is not available for the free community service. "
+                "Select another model or add your own OpenAI API key."
+            )
+
+        # 3. Token-limit logic
+        limit_info = prefs.get("tokenLimit", {})
+        token_limit = limit_info.get("limit", 0)
+        period = limit_info.get("period", "unlimited")
+
+        # Compute cutoff timestamp based on period
+        from datetime import datetime, timedelta
+
+        now = datetime.now(timezone.utc)
+        cutoff = None
+
+        if period == "per_hour":
+            cutoff = now - timedelta(hours=1)
+            reset_period = "hour"
+        elif period == "per_day":
+            cutoff = now - timedelta(days=1)
+            reset_period = "day"
+        elif period == "per_week":
+            cutoff = now - timedelta(weeks=1)
+            reset_period = "week"
+        elif period == "per_month":
+            cutoff = now - timedelta(days=30)
+            reset_period = "month"
+        elif period == "unlimited":
+            cutoff = None
+
+        # If there is no cutoff, we can skip the DB query and token counting
+        if cutoff is None:
+            return admin_key, None
+
+        
+        # Query DB for token usage in the window
+        import sqlite3
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+
+        cutoff_str = cutoff.isoformat(timespec="seconds")
+        sql = """
+            SELECT SUM(tokens_in + tokens_out)
+            FROM submissions
+            WHERE used_admin_key = 1
+            AND timestamp >= ?
+        """
+        params = (cutoff_str,)
+        print(f"Executing DB query:\n{sql}\nWith params: {params}")
+        cursor.execute(sql, params)
+        total_tokens = cursor.fetchone()[0] or 0
+        conn.close()
+
+        # 4. Compare to token limit
+        if total_tokens >= token_limit:
+            return None, (
+                f"The community usage has exceeded the free token limit for this {reset_period}. "
+                "Please add your OpenAI API key to continue."
+            )
+
+        # 5. All checks passed
+        print('admin key=', admin_key)
+        return admin_key, None
+        
 
     def grade(
             self, 
@@ -852,7 +989,10 @@ class Grader:
         """
         # Initialize variables
         grade = None
+        tokens_in = 0
+        tokens_out = 0
         timed_out = False
+        used_admin_key = False
     
         # Start measuring time
         t0 = time.time()
@@ -875,12 +1015,27 @@ class Grader:
         # ---------------------------------------------------------
 
         # Create the OpenAI LLM client
-        if api_key is None:
-            grade = {
-                'result': 'error', 
-                'full_explanation': 'Missing API key.', 
-                'feedback': f'Cannot grade without an API key for provider {provider}.'
-            }
+        print('API key: ', api_key)
+        if not api_key or not api_key.strip():
+            print('No API key provided, checking if admin key can be used...')
+            admin_key, reason = self.get_admin_key(model)
+            print('Admin key check result:', admin_key )
+            print('Reason:', reason)
+
+            if admin_key is None:
+                # reason is already a full user-facing message
+                grade = {
+                    "result": "error",
+                    "full_explanation": reason,
+                    "feedback": reason
+                }
+                return grade
+
+            # Admin key allowed
+            api_key = admin_key
+            used_admin_key = True
+        else:
+            used_admin_key = False
 
         # Only attempt API call if no error yet
         if grade is None:
@@ -906,7 +1061,7 @@ class Grader:
                 total_timeout = timeout + additional_timeout
                 
                 # Get the result with timeout
-                response = future.result(timeout=total_timeout)
+                response, tokens_in, tokens_out = future.result(timeout=total_timeout)
                 grade = response.model_dump()
                 log_std(f"Received response from {provider}.")
 
@@ -976,7 +1131,10 @@ class Grader:
             result=grade.get("result", "error"),
             full_explanation=grade.get("full_explanation", ""),
             feedback=grade.get("feedback", ""),
-            timed_out=1 if timed_out else 0
+            tokens_in = tokens_in,
+            tokens_out = tokens_out,
+            timed_out=1 if timed_out else 0,
+            used_admin_key=used_admin_key
         )
         
         return grade
@@ -1042,6 +1200,34 @@ class Grader:
         os.makedirs(pref_dir, exist_ok=True)
         admin_pref_path = os.path.join(pref_dir, "admin-config.json")
         return admin_pref_path
+
+    def load_admin_preferences(self) -> dict:
+        """
+        Load admin preferences from the JSON file at get_admin_pref_path().
+
+        Returns the stored dict on success, or a default dict if the file
+        does not exist or contains malformed JSON.
+        """
+        defaults = {
+            "openaiApiKey": "",
+            "hfToken": "",
+            "allowedModels": [],
+            "tokenLimit": {
+                "limit": 0,
+                "period": "unlimited"
+            }
+        }
+
+        path = self.get_admin_pref_path()
+        if not os.path.exists(path):
+            return defaults
+
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                prefs = json.load(f)
+                return prefs
+        except (json.JSONDecodeError, OSError):
+            return defaults
             
 
     

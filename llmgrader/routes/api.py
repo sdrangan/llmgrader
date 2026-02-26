@@ -11,6 +11,18 @@ import io
 from datetime import datetime
 
 
+def get_default_admin_prefs():
+    return {
+        "openaiApiKey": "",
+        "hfToken": "",
+        "allowedModels": [],
+        "tokenLimit": {
+            "limit": 0,
+            "period": "hour"
+        }
+    }
+
+
 class APIController:
     def __init__(self, grader):
         self.grader = grader
@@ -186,34 +198,36 @@ class APIController:
             self.grader.load_unit_pkg()
             return jsonify({"status": "ok"})
 
-        @bp.get("/api/admin/hf-token")
-        def get_admin_hf_token():
+        @bp.get("/api/admin/preferences")
+        def get_admin_preferences():
             pref_path = self.grader.get_admin_pref_path()
+            defaults = get_default_admin_prefs()
 
             if not os.path.exists(pref_path):
-                return jsonify({"token": ""})
+                return jsonify(defaults)
 
             try:
                 with open(pref_path, "r", encoding="utf-8") as f:
                     config = json.load(f)
             except (OSError, json.JSONDecodeError):
-                return jsonify({"token": ""})
+                return jsonify(defaults)
 
-            return jsonify({"token": config.get("adminHfToken", "")})
+            merged = {**defaults, **config}
+            return jsonify(merged)
 
-        @bp.post("/api/admin/hf-token")
-        def set_admin_hf_token():
-            data = request.get_json(silent=True) or {}
-            token = data.get("token", "")
+        @bp.post("/api/admin/preferences")
+        def set_admin_preferences():
+            data = request.get_json(silent=True)
+            if not isinstance(data, dict):
+                return jsonify({"error": "invalid request body"}), 400
 
-            if token is None:
-                token = ""
+            defaults = get_default_admin_prefs()
+            merged = {**defaults, **data}
 
             pref_path = self.grader.get_admin_pref_path()
-
             try:
                 with open(pref_path, "w", encoding="utf-8") as f:
-                    json.dump({"adminHfToken": token}, f)
+                    json.dump(merged, f, indent=2)
             except OSError as e:
                 return jsonify({"error": str(e)}), 500
 
