@@ -47,11 +47,59 @@ from pydantic import BaseModel
 class GradeResult(BaseModel):
     """
     Data model for the grading result.
+
+    max_point_parts: float | list[float] | None
+        - If the question has multiple parts and we are grading all parts (part_label == "all"), this will be a list of maximum points for each part, in the same order as part_labels
+        - If the question has multiple parts but we are grading a specific part, this will be the maximum points for that part.
+        - If the question has only one part, this will be the maximum points for that part.
+        - This field is returned even if partial_credit is False, since the maximum points may still be relevant for grading and feedback.
+        - The field is computed pre-grader
+    point_parts: float | list[float] | None
+        If partial_credit is True, this field contains the points awarded for each part of the question with an identical structure as `max_point_parts`.  In the multi-part case when part_label == "all", 
+        the points for each part are returned by the grader.  In the case of grading a specific part or a single-part question, the grader returns `points` and that value is copied to `point_parts`
+        post-grader for consistency.
+        If partial_credit is False, the values are derived post-grader from `result_parts` with 0 points for "fail", "error", or "partial" and max_points for "pass".
+    result_parts: Literal["pass", "fail", "error", "partial"] | list[Literal["pass", "fail", "error", "partial"]]
+        - If partial_credit is False, this field has the same format as `max_point_parts`.  Specifically, if the question has multiple parts and part_label == "all", 
+        this field is a list of results for each part of the question, in the same order as part_labels. In this case, the grader populates each result with "pass", "fail", or "error".
+        The "partial" value is not used. If the question has multiple parts but we are grading a specific or the question has a single part, the field is a single value of "pass", "fail", or "error".
+        The value will be copied post-grader from `result` to `result_parts` for consistency.
+        - If partial_credit is True, the field is populated post-grading by the backend with values in points with 'pass' indicating full points, 'partial' indicating some points between 1 and max_points, 
+        and 'fail' indicating 0 points.  The grader should not return the "partial" value in this case, since the backend will determine it based on the points awarded.
+    result : Literal["pass", "fail", "error", "partial"]
+        - If partial_credit is False and grading a specific part or single-part question, the field is filled by the grader and then copied to `result_parts` for consistency.  
+        The grader should return "pass", "fail", or "error" in this case, but not "partial". 
+        - In all other cases, the field is derived post-grader by the backend with "pass" if all values in `result_parts == 'pass'`.  If any `result_parts == 'error'`, the result is "error".  
+        Otherwise, `result='fail'` if any `result_parts == 'fail'` and no parts are 'error'. 
+    points : float | None
+        When partial_credit==True and  grading a specific part or single-part question, the grader returns the points awarded for that part.  
+        This value is copied post-grader to the appropriate position in `point_parts` for consistency.
+        In all other cases, the value is derived post-grader by summing the point_parts.
+    max_points : float | None
+        The total maximum points for the question, i.e., sum(max_point_parts)
+        The grader does not need to return this field since the backend will compute it.
+    result: Literal["pass", "fail", "error"] | list[Literal["pass", "fail", "error"]]
     """
-    result: Union[Literal["pass", "fail", "error"], float]
+    max_point_parts: float | list[float] | None
+    point_parts: float | list[float] | None
+    result_parts: Literal["pass", "fail", "error", "partial"] | list[Literal["pass", "fail", "error", "partial"]]
+    result: Literal["pass", "fail", "error"]
     full_explanation: str
     feedback: str
-    scores: list[float] | None = None  # Optional list of scores for partial credit grading
+    points: float | None = None
+    max_points: float | None
+
+
+class GraderRawResult(BaseModel):
+    """
+    Raw fields that the LLM grader may return before backend post-processing.
+    """
+    point_parts: list[float] | None = None
+    result_parts: list[Literal["pass", "fail", "error"]] | None = None
+    result: Union[Literal["pass", "fail", "error"], float, None] = None
+    full_explanation: str
+    feedback: str
+    points: float | None = None
 
 
 
@@ -126,7 +174,12 @@ class Grader:
         "raw_prompt": "TEXT",
         "result": "TEXT",
         "full_explanation": "TEXT",
-        "feedback": "TEXT"
+        "feedback": "TEXT",
+        "point_parts_json": "TEXT",
+        "max_point_parts_json": "TEXT",
+        "points": "REAL",
+        "max_points": "REAL",
+        "result_parts_json": "TEXT",
     }
 
     # Field formatting rules for submission detail view
@@ -151,6 +204,11 @@ class Grader:
         "tokens_out": "text",
         "client_id": "text",
         "user_email": "text",
+        "point_parts_json": "text",
+        "max_point_parts_json": "text",
+        "points": "text",
+        "max_points": "text",
+        "result_parts_json": "text",
     }
 
     # Formats for displaying DB fields.
@@ -169,7 +227,6 @@ class Grader:
         "tokens_in": "text",
         "tokens_out": "text",
     }
-
 
     
     def __init__(self, 
@@ -215,29 +272,38 @@ class Grader:
         self.load_unit_pkg() 
 
        
-
     def temp_modify_db(self):
         """
-        Temporarily modify the database schema to add the 'used_admin_key' column
-        if it does not already exists.  This is a temporary solution to support the 
-        new admin key feature without requiring all users to run a database migration script.  
-        This function can be removed in the future once all users have the updated schema.
+        Modify the database schema to add new JSON columns for points and max_points
+        if they do not already exist. This supports older databases without requiring
+        users to run a migration script. Safe to remove once all users have updated.
         """
         import sqlite3
-        conn = sqlite3.connect(self.db_path)  
+        conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
 
-        # Check if column exists
+        # Get existing columns
         cursor.execute("PRAGMA table_info(submissions);")
         columns = [row[1] for row in cursor.fetchall()]
 
-        if "used_admin_key" not in columns:
-            cursor.execute(
-                "ALTER TABLE submissions ADD COLUMN used_admin_key INTEGER DEFAULT 0;"
-            )
-            conn.commit()
+        new_columns = {
+            "max_point_parts_json": "TEXT",
+            "point_parts_json": "TEXT",
+            "result_parts_json": "TEXT",
+            "points": "REAL",
+            "max_points": "REAL",
+        }
+
+        # Add each column if missing
+        for col_name, col_type in new_columns.items():
+            if col_name not in columns:
+                cursor.execute(
+                    f"ALTER TABLE submissions ADD COLUMN {col_name} {col_type} DEFAULT NULL;"
+                )
+                conn.commit()
 
         conn.close()
+
 
     def init_db(self):
         """
@@ -697,7 +763,7 @@ class Grader:
         partial_credit: bool = False,
         part_labels: list[str] | None = None,
         max_points: list[int] | None = None,
-    ):
+    ) -> tuple[str, int | list[int] | None]:
         """
         Build the grading prompt sent to the language model.
 
@@ -722,8 +788,15 @@ class Grader:
 
         Returns
         -------
-        str
+        prompt : str
             The full prompt text to send to the grading model.
+        max_points_part : float | list[float]
+            If the input `max_points` is None, returns None.
+            If part_label == 'all', returns max_points and the question has multiple parts, returns 
+            max_points, the list with points for all parts
+            If part_label is a specific part or the question has a single part, returns
+            the maximum points for that part.  Note that this field is returned even if partial_credit is False,
+            since the maximum points may still be relevant for grading and feedback.
         """
         prompt = textwrap.dedent("""
             Your task is to grade a student's solution to an engineering problem.
@@ -733,9 +806,29 @@ class Grader:
             - HTML version of a correct reference solution,
             - Plain text grading notes, and
             - Plain text student solution.
+
+            Return only the fields explicitly requested below.
+            The backend will compute derived fields such as max_point_parts, max_points,
+            aggregate result, aggregate points, and any fields not explicitly requested.
+            Text fields such as "full_explanation" and "feedback" may use Markdown,
+            including paragraphs, lists, and tables.
         """)
 
         multi_part = part_labels is not None and len(part_labels) > 1
+        max_points_part = None
+
+        if max_points is not None:
+            if multi_part and part_label == "all":
+                max_points_part = max_points
+            elif max_points:
+                if multi_part and part_labels:
+                    try:
+                        part_index = part_labels.index(part_label)
+                        max_points_part = max_points[part_index]
+                    except (ValueError, IndexError):
+                        max_points_part = None
+                else:
+                    max_points_part = max_points[0]
 
         if partial_credit:
             if not part_labels or not max_points or len(part_labels) != len(max_points):
@@ -744,16 +837,16 @@ class Grader:
         # ---------- Mode 1: partial credit, multi-part, grade ALL ----------
         if partial_credit and multi_part and part_label == "all":
             prompt += "\nThis question allows partial credit. It has multiple parts.\n"
-            prompt += "The parts and their maximum scores are:\n\n"
+            prompt += "The parts and their maximum points are:\n\n"
             for lbl, pts in zip(part_labels, max_points):
-                prompt += f"- ({lbl}): max_score = {pts}\n"
+                prompt += f"- ({lbl}): max_points = {pts}\n"
 
             prompt += textwrap.dedent("""
                 
                 You must return a JSON object with the following fields:
 
-                - "scores": a list of numeric values, one for each part, in the exact order above.
-                Each score must be between 0 and the maximum score for that part.
+                - "point_parts": a list of numeric values, one for each part, in the exact order above.
+                Each point value must be between 0 and the maximum points for that part.
                 - "full_explanation": a detailed explanation of your grading reasoning.
                 - "feedback": concise (up to 5 sentences), student-facing guidance that helps the
                 student improve without revealing the reference solution or grading notes.
@@ -768,30 +861,31 @@ class Grader:
                 3. In "full_explanation", explain your reasoning step by step, describing what is correct
                 and what is incorrect for each part.
                 4. Based on your reasoning and the grading notes, assign a numeric score to each part,
-                between 0 and that part's maximum score. Place these scores in the "scores" list in
+                between 0 and that part's maximum points. Place these point values in the "point_parts" list in
                 the exact order given above.
                 5. In "feedback", provide concise, student-facing guidance that helps the student improve,
                 without revealing the reference solution or grading notes.
 
                 Important rules:
                 - Do not return part labels.
-                - Do not return maximum scores.
-                - Do not compute or return the total score; the backend will sum the scores.
+                - Do not return maximum points.
+                - Do not compute or return the total points; the backend will sum the points.
+                - Do not return result, result_parts, max_point_parts, or max_points.
                 - Return only valid JSON with no surrounding text.
             """)
 
         # ---------- Mode 2: partial credit,  multi-part,  grading one part ----------
         elif partial_credit and multi_part:
             idx = part_labels.index(part_label)
-            max_score = max_points[idx]
+            max_points_part = max_points[idx]
 
             prompt += f"\nThis question allows partial credit. You are grading only part ({part_label}).\n"
-            prompt += f"The maximum score for this part is {max_score} points.\n\n"
+            prompt += f"The maximum points for this part is {max_points_part} points.\n\n"
 
             prompt += textwrap.dedent(f"""
                 You must return a JSON object with the following fields:
 
-                - "result": the numeric score for this part, between 0 and {max_score}.
+                - "points": the numeric points for this part, between 0 and {max_points_part}.
                 - "full_explanation": a detailed explanation of your grading reasoning for this part.
                 - "feedback": concise (up to 5 sentences), student-facing guidance that helps the
                 student improve without revealing the reference solution or grading notes.
@@ -806,55 +900,62 @@ class Grader:
                 3. In "full_explanation", work through your reasoning step by step, explaining what is
                 correct and what is incorrect.
                 4. Based on your reasoning and the grading notes, decide how many points (from 0 to
-                {max_score}) the student earns for this part and set "result" to that numeric value.
+                {max_points_part}) the student earns for this part and set "points" to that numeric value.
                 5. In "feedback", provide concise, student-facing guidance that helps the student improve,
                 without revealing the reference solution or grading notes.
 
                 Important rules:
-                - Do not return scores for other parts.
-                - Do not return a list of scores.
+                - Do not return points for other parts.
+                - Do not return a list of points.
+                - Do not return result, result_parts, max_point_parts, point_parts, or max_points.
                 - Return only valid JSON with no surrounding text.
             """)
         # ---------- Mode 3: partial credit,  single part ----------
         elif partial_credit:
-            max_score = max_points[0]
+            max_points_question = max_points[0]
 
             prompt += "\nThis question allows partial credit. It has a single part.\n"
-            prompt += f"The maximum score for this question is {max_score} points.\n\n"
+            prompt += f"The maximum points for this question is {max_points_question} points.\n\n"
 
             prompt += textwrap.dedent(f"""
-                You must return a JSON object with the following fields:
+            You must return a JSON object with the following fields:
 
-                - "result": the numeric score for this question, between 0 and {max_score}.
-                - "full_explanation": a detailed explanation of your grading reasoning.
-                - "feedback": concise (up to 5 sentences), student-facing guidance that helps the
-                student improve without revealing the reference solution or grading notes.
+            - "points": the numeric points for this question, between 0 and {max_points_question}.
+            - "full_explanation": a detailed explanation of your grading reasoning.
+            - "feedback": concise (up to 5 sentences), student-facing guidance that helps the
+            student improve without revealing the reference solution or grading notes.
 
-                Follow these steps:
+            Follow these steps:
 
-                1. Read the student's solution carefully.
-                2. Compare the student's solution to the reference solution, using the grading notes as guidance.
-                3. In "full_explanation", work through your reasoning step by step, explaining what is
-                correct and what is incorrect.
-                4. Based on your reasoning and the grading notes, decide how many points (from 0 to
-                {max_score}) the student earns and set "result" to that numeric value.
-                5. In "feedback", provide concise, student-facing guidance that helps the student improve,
-                without revealing the reference solution or grading notes.
+            1. Read the student's solution carefully.
+            2. Compare the student's solution to the reference solution, using the grading notes as guidance.
+            3. In "full_explanation", work through your reasoning step by step, explaining what is
+            correct and what is incorrect.
+            4. Based on your reasoning and the grading notes, decide how many points (from 0 to
+            {max_points_question}) the student earns and set "points" to that numeric value.
+            5. In "feedback", provide concise, student-facing guidance that helps the student improve,
+            without revealing the reference solution or grading notes.
 
-                Important rules:
-                - Do not return a list of scores.
-                - Return only valid JSON with no surrounding text.
+            Important rules:
+            - Do not return a list of points.
+            - Do not return result, result_parts, max_point_parts, point_parts, or max_points.
+            - Return only valid JSON with no surrounding text.
             """)
 
 
         # ---------- Mode 4: binary, multi-part, grade ALL ----------
         elif not partial_credit and multi_part and part_label == "all":
+            prompt += "\nThis question has multiple parts. The parts are:\n\n"
+            for lbl in part_labels:
+                prompt += f"- ({lbl})\n"
+
             prompt += textwrap.dedent("""
                 This question is configured for binary grading (no partial credit).
 
                 You must return a JSON object with the following fields:
 
-                - "result": "pass", "fail", or "error"
+                - "result_parts": a list with one value for each part, in the same order as the parts above.
+                Each value must be one of "pass", "fail", or "error".
                 - "full_explanation": a detailed explanation of your grading reasoning.
                 - "feedback": concise (up to 5 sentences), student-facing guidance that helps the
                 student improve without revealing the reference solution or grading notes.
@@ -868,15 +969,14 @@ class Grader:
                 solution, using the grading notes as guidance.
                 3. In "full_explanation", work through your reasoning step by step, explaining what is
                 correct and what is incorrect for each part.
-                4. After you have completed your reasoning, decide the overall correctness:
-                - If all parts are correct, set "result" to "pass".
-                - If any part is incorrect, set "result" to "fail".
-                - If you cannot grade due to missing or inconsistent information, set "result" to "error".
+                4. After you have completed your reasoning, decide the correctness of each part and place
+                the corresponding values in "result_parts" in the exact part order above.
                 5. In "feedback", provide concise, student-facing guidance that helps the student improve,
                 without revealing the reference solution or grading notes.
 
                 Important rules:
-                - Do not return part scores.
+                - Do not return part points.
+                - Do not return aggregate result, max_point_parts, point_parts, points, or max_points.
                 - Return only valid JSON with no surrounding text.
             """)
 
@@ -909,7 +1009,8 @@ class Grader:
                 without revealing the reference solution or grading notes.
 
                 Important rules:
-                - Do not return part scores.
+                - Do not return part points.
+                - Do not return result_parts, max_point_parts, point_parts, points, or max_points.
                 - Return only valid JSON with no surrounding text.
             """)
 
@@ -939,6 +1040,7 @@ class Grader:
                 without revealing the reference solution or grading notes.
 
                 Important rules:
+                - Do not return result_parts, max_point_parts, point_parts, points, or max_points.
                 - Return only valid JSON with no surrounding text.
             """)
 
@@ -947,7 +1049,200 @@ class Grader:
         prompt += "\n\n--- GRADING NOTES ---\n" + grading_notes
         prompt += "\n\n--- STUDENT SOLUTION ---\n" + student_soln
 
-        return prompt
+        return prompt, max_points_part
+
+    def grade_post_process(
+        self,
+        raw_grade: dict,
+        partial_credit: bool,
+        max_points_part: int | list[int] | None,
+        part_labels: list[str] | None = None,
+        part_label: str = "all",
+    ) -> GradeResult:
+        """
+        Fill in derived GradeResult fields that are not returned directly by the grader.
+        """
+        full_explanation = str(raw_grade.get("full_explanation", ""))
+        feedback = str(raw_grade.get("feedback", ""))
+
+        def total_max_points(value):
+            if isinstance(value, list):
+                return float(sum(value))
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                return float(value)
+            return None
+
+        def classify_points(points_value, max_value):
+            if max_value is None or points_value is None:
+                return "error"
+            if points_value >= float(max_value):
+                return "pass"
+            if points_value > 0:
+                return "partial"
+            return "fail"
+
+        def aggregate_result(result_parts_value):
+            if isinstance(result_parts_value, list):
+                if any(part_result == "error" for part_result in result_parts_value):
+                    return "error"
+                if all(part_result == "pass" for part_result in result_parts_value):
+                    return "pass"
+                return "fail"
+            if result_parts_value == "error":
+                return "error"
+            if result_parts_value == "pass":
+                return "pass"
+            return "fail"
+
+        def append_result_table(
+            explanation: str,
+            point_parts_value,
+            max_point_parts_value,
+            result_parts_value,
+        ) -> str:
+            if isinstance(max_point_parts_value, list):
+                row_labels = part_labels if part_labels and len(part_labels) == len(max_point_parts_value) else [str(index + 1) for index in range(len(max_point_parts_value))]
+                row_points = point_parts_value if isinstance(point_parts_value, list) else [point_parts_value] * len(max_point_parts_value)
+                row_results = result_parts_value if isinstance(result_parts_value, list) else [result_parts_value] * len(max_point_parts_value)
+                row_max_points = max_point_parts_value
+            else:
+                row_labels = [part_label]
+                row_points = [point_parts_value]
+                row_results = [result_parts_value]
+                row_max_points = [max_point_parts_value]
+
+            table_lines = [
+                "",
+                "| part_label | points | max_points | result |",
+                "| --- | --- | --- | --- |",
+            ]
+            for row_label, row_point, row_max_point, row_result in zip(row_labels, row_points, row_max_points, row_results):
+                table_lines.append(f"| {row_label} | {row_point} | {row_max_point} | {row_result} |")
+
+            if explanation:
+                return explanation + "\n" + "\n".join(table_lines)
+            return "\n".join(table_lines).lstrip("\n")
+
+        def invalid_grade(message: str) -> GradeResult:
+            explanation = full_explanation
+            if explanation:
+                explanation += f"\n\n{message}"
+            else:
+                explanation = message
+
+            if isinstance(max_points_part, list):
+                result_parts_value = ["error"] * len(max_points_part)
+            else:
+                result_parts_value = "error"
+
+            return GradeResult(
+                max_point_parts=max_points_part,
+                point_parts=None,
+                result_parts=result_parts_value,
+                result="error",
+                full_explanation=explanation,
+                feedback=feedback,
+                points=None,
+                max_points=total_max_points(max_points_part),
+            )
+
+        max_points_total = total_max_points(max_points_part)
+
+        if partial_credit:
+            if isinstance(max_points_part, list):
+                raw_point_parts = raw_grade.get("point_parts")
+                if not isinstance(raw_point_parts, list) or len(raw_point_parts) != len(max_points_part):
+                    return invalid_grade("Grader error: expected point_parts as a list matching the part structure.")
+
+                point_parts: list[float] = []
+                for point_value, max_value in zip(raw_point_parts, max_points_part):
+                    if not isinstance(point_value, (int, float)) or isinstance(point_value, bool):
+                        return invalid_grade("Grader error: all values in point_parts must be numeric.")
+                    point_value = float(point_value)
+                    if point_value < 0 or point_value > float(max_value):
+                        return invalid_grade("Grader error: point_parts contains a value outside the allowed range.")
+                    point_parts.append(point_value)
+
+                result_parts = [
+                    classify_points(point_value, max_value)
+                    for point_value, max_value in zip(point_parts, max_points_part)
+                ]
+                points = float(sum(point_parts))
+                result = aggregate_result(result_parts)
+
+                return GradeResult(
+                    max_point_parts=max_points_part,
+                    point_parts=point_parts,
+                    result_parts=result_parts,
+                    result=result,
+                    full_explanation=append_result_table(full_explanation, point_parts, max_points_part, result_parts),
+                    feedback=feedback,
+                    points=points,
+                    max_points=max_points_total,
+                )
+
+            raw_points = raw_grade.get("points")
+            if not isinstance(raw_points, (int, float)) or isinstance(raw_points, bool):
+                return invalid_grade("Grader error: expected numeric points for this grading mode.")
+
+            points_value = float(raw_points)
+            scalar_max_points = max_points_total
+            if scalar_max_points is not None and (points_value < 0 or points_value > scalar_max_points):
+                return invalid_grade("Grader error: points is outside the allowed range.")
+
+            result_parts = classify_points(points_value, scalar_max_points)
+            result = aggregate_result(result_parts)
+            return GradeResult(
+                max_point_parts=max_points_part,
+                point_parts=points_value,
+                result_parts=result_parts,
+                result=result,
+                full_explanation=append_result_table(full_explanation, points_value, max_points_part, result_parts),
+                feedback=feedback,
+                points=points_value,
+                max_points=max_points_total,
+            )
+
+        valid_results = {"pass", "fail", "error"}
+        if isinstance(max_points_part, list):
+            raw_result_parts = raw_grade.get("result_parts")
+            if not isinstance(raw_result_parts, list) or len(raw_result_parts) != len(max_points_part):
+                return invalid_grade("Grader error: expected result_parts as a list matching the part structure.")
+            if any(result_value not in valid_results for result_value in raw_result_parts):
+                return invalid_grade("Grader error: result_parts contains an invalid value.")
+
+            point_parts = [
+                float(max_value) if result_value == "pass" else 0.0
+                for result_value, max_value in zip(raw_result_parts, max_points_part)
+            ]
+            result = aggregate_result(raw_result_parts)
+
+            return GradeResult(
+                max_point_parts=max_points_part,
+                point_parts=point_parts,
+                result_parts=raw_result_parts,
+                result=result,
+                full_explanation=append_result_table(full_explanation, point_parts, max_points_part, raw_result_parts),
+                feedback=feedback,
+                points=float(sum(point_parts)),
+                max_points=max_points_total,
+            )
+
+        raw_result = raw_grade.get("result")
+        if raw_result not in valid_results:
+            return invalid_grade("Grader error: expected result to be pass, fail, or error.")
+
+        point_parts = float(max_points_total) if raw_result == "pass" and max_points_total is not None else 0.0
+        return GradeResult(
+            max_point_parts=max_points_part,
+            point_parts=point_parts,
+            result_parts=raw_result,
+            result=raw_result,
+            full_explanation=append_result_table(full_explanation, point_parts, max_points_part, raw_result),
+            feedback=feedback,
+            points=point_parts,
+            max_points=max_points_total,
+        )
 
 
     def _make_llm_caller(self, provider, model, api_key, task, timeout):
@@ -984,7 +1279,7 @@ class Grader:
                 resp = client.responses.parse(
                     model=model,
                     input=task,
-                    text_format=GradeResult,
+                    text_format=GraderRawResult,
                     temperature=1 if model.startswith("gpt-5-mini") else 0,
                     timeout=timeout
                 )
@@ -1027,7 +1322,7 @@ class Grader:
                 output_tokens = 0
 
                 # Parse using your existing GradeResult model
-                return GradeResult.model_validate_json(text), tokens
+                return GraderRawResult.model_validate_json(text), input_tokens, output_tokens
 
             return call_hf
 
@@ -1206,7 +1501,7 @@ class Grader:
         # ---------------------------------------------------------
         # 1. Build the task prompt
         # ---------------------------------------------------------
-        task = self.build_task_prompt(
+        task, max_points_part = self.build_task_prompt(
             question_text,
             solution,
             grading_notes,
@@ -1233,11 +1528,17 @@ class Grader:
             admin_key, reason = self.get_admin_key(model)
             if admin_key is None:
                 token = self.api_key_walkthrough()
-                return {
-                    "result": "error",
-                    "full_explanation": token,
-                    "feedback": reason or ""
-                }
+                return self.grade_post_process(
+                    {
+                        "result": "error",
+                        "full_explanation": token,
+                        "feedback": reason or "",
+                    },
+                    partial_credit=partial_credit,
+                    max_points_part=max_points_part,
+                    part_labels=part_labels,
+                    part_label=part_label,
+                ).model_dump()
             api_key = admin_key
             used_admin_key = True
         else:
@@ -1308,47 +1609,13 @@ class Grader:
                 # IMPORTANT: do NOT overwrite grade here
                 executor.shutdown(wait=False, cancel_futures=True)
 
-        # Debug mode:  Since we have not yet implemented partial credit grading, we convert any "scores" list in the respone
-        # to a 'pass' or 'fail' result for backward compatibility with the frontend. This allows us to test the 
-        # partial credit prompt structure.
-
-        # First check grade['result'] is already one of 'pass', 'fail', or 'error' (the expected values for binary grading).
-        # If so we can skip the conversion and return the grade as is. 
-        if grade.get('result') not in ['pass', 'fail', 'error']:
-            if part_label == 'all':
-                max_points_part = sum(max_points) if max_points else 0
-            else:
-                max_points_part = 0
-                if part_labels and max_points:
-                    try:
-                        part_index = part_labels.index(part_label)
-                        max_points_part = max_points[part_index]
-                    except (ValueError, IndexError):
-                        max_points_part = 0
-
-            raw_result = grade.get('result')
-            if isinstance(raw_result, (int, float)) and not isinstance(raw_result, bool):
-                score_part = float(raw_result)
-            else:
-                raw_scores = grade.get('scores', [])
-                if isinstance(raw_scores, list):
-                    score_part = sum(
-                        float(score)
-                        for score in raw_scores
-                        if isinstance(score, (int, float)) and not isinstance(score, bool)
-                    )
-                else:
-                    score_part = 0
-
-            log_std(
-                f"Converting numeric grade to pass/fail: score_part={score_part}, "
-                f"max_points_part={max_points_part}, part_label={part_label}"
-            )
-            grade['result'] = 'pass' if score_part >= max_points_part else 'fail'
-
-        # TODO:  Append the scores to the full explanation 
-        if 'scores' in grade:
-            grade['full_explanation'] += f"\n\n[Debug] Scores received: {grade['scores']}"
+        grade = self.grade_post_process(
+            grade,
+            partial_credit=partial_credit,
+            max_points_part=max_points_part,
+            part_labels=part_labels,
+            part_label=part_label,
+        ).model_dump()
 
         # ---------------------------------------------------------
         # 4. Save raw response to scratch/resp.json
@@ -1362,6 +1629,9 @@ class Grader:
         # ---------------------------------------------------------
         t1 = time.time()
         latency_ms = int((t1 - t0) * 1000)
+        point_parts = grade.get("point_parts")
+        max_point_parts = grade.get("max_point_parts")
+        result_parts = grade.get("result_parts")
         self.insert_submission(
             timestamp=datetime.now(timezone.utc).isoformat(),
             question_text=question_text,
@@ -1378,6 +1648,11 @@ class Grader:
             result=grade.get("result", "error"),
             full_explanation=grade.get("full_explanation", ""),
             feedback=grade.get("feedback", ""),
+            point_parts_json=json.dumps(point_parts) if isinstance(point_parts, list) else None,
+            max_point_parts_json=json.dumps(max_point_parts) if isinstance(max_point_parts, list) else None,
+            result_parts_json=json.dumps(result_parts),
+            points=grade.get("points"),
+            max_points=grade.get("max_points"),
             tokens_in = tokens_in,
             tokens_out = tokens_out,
             timed_out=1 if timed_out else 0,

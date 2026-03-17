@@ -371,6 +371,31 @@ function autoExpand(el) {
     el.style.height = el.scrollHeight + "px";
 }
 
+function escapeHtml(text) {
+    return String(text)
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#39;");
+}
+
+function renderMarkdown(markdownText) {
+    const safeMarkdown = escapeHtml(markdownText ?? "");
+    if (window.marked && typeof window.marked.parse === "function") {
+        return window.marked.parse(safeMarkdown, { gfm: true, breaks: true });
+    }
+    return safeMarkdown.replace(/\n/g, "<br>");
+}
+
+function renderMarkdownInto(element, markdownText) {
+    if (!element) return;
+    element.innerHTML = renderMarkdown(markdownText);
+    if (window.MathJax) {
+        MathJax.typesetPromise([element]).catch(() => {});
+    }
+}
+
 function mirrorFeedbackWhenReady() {
     const fb = document.getElementById("feedback-box");
     const mfb = document.getElementById("mobile-feedback-box");
@@ -378,14 +403,14 @@ function mirrorFeedbackWhenReady() {
     const mex = document.getElementById("mobile-explanation-box");
 
     if (fb && mfb) {
-        mfb.textContent = fb.textContent;
-        new MutationObserver(() => { mfb.textContent = fb.textContent; })
+        mfb.innerHTML = fb.innerHTML;
+        new MutationObserver(() => { mfb.innerHTML = fb.innerHTML; })
             .observe(fb, { childList: true, characterData: true, subtree: true });
     }
 
     if (ex && mex) {
-        mex.textContent = ex.textContent;
-        new MutationObserver(() => { mex.textContent = ex.textContent; })
+        mex.innerHTML = ex.innerHTML;
+        new MutationObserver(() => { mex.innerHTML = ex.innerHTML; })
             .observe(ex, { childList: true, characterData: true, subtree: true });
     }
 }
@@ -801,15 +826,15 @@ function restorePartUI(qtag, partLabel) {
     // Restore from part-specific data if available
     if (partData) {
         if (partData.explanation) {
-            explanationBox.textContent = partData.explanation;
+            renderMarkdownInto(explanationBox, partData.explanation);
         } else {
-            explanationBox.textContent = "Not yet graded. No explanation yet.";
+            renderMarkdownInto(explanationBox, "Not yet graded. No explanation yet.");
         }
         
         if (partData.feedback) {
-            feedbackBox.textContent = partData.feedback;
+            renderMarkdownInto(feedbackBox, partData.feedback);
         } else {
-            feedbackBox.textContent = "Not yet graded. No feedback yet.";
+            renderMarkdownInto(feedbackBox, "Not yet graded. No feedback yet.");
         }
         
         if (partData.grade_status) {
@@ -829,8 +854,8 @@ function restorePartUI(qtag, partLabel) {
         }
     } else {
         // No part data available - show default state
-        explanationBox.textContent = "Not yet graded. No explanation yet.";
-        feedbackBox.textContent = "Not yet graded. No feedback yet.";
+        renderMarkdownInto(explanationBox, "Not yet graded. No explanation yet.");
+        renderMarkdownInto(feedbackBox, "Not yet graded. No feedback yet.");
         gradeStatus.textContent = "";
         gradeStatus.className = "status-not-graded";
     }
@@ -1056,9 +1081,8 @@ async function gradeCurrentQuestion() {
 
     document.getElementById("grade-status").textContent = gradeStatusText;
     document.getElementById("grade-status").className = gradeStatusClass;
-    document.getElementById("feedback-box").textContent = data.feedback;
-    document.getElementById("full-explanation-box").textContent =
-        data.full_explanation;
+    renderMarkdownInto(document.getElementById("feedback-box"), data.feedback);
+    renderMarkdownInto(document.getElementById("full-explanation-box"), data.full_explanation);
 
     // Save student solution at qtag level
     updateSessionData(currentUnitName, qtag, {

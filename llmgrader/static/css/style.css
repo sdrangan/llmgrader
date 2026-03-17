@@ -665,7 +665,28 @@ textarea {
 }
 
 .text-box {
-    white-space: pre-line;
+    white-space: pre-wrap;
+}
+
+.text-box table {
+    white-space: normal;
+    border-collapse: collapse;
+    width: 100%;
+    margin-top: 8px;
+    font-size: 0.95rem;
+}
+
+.text-box th,
+.text-box td {
+    border: 1px solid #ccc;
+    padding: 6px 8px;
+    text-align: left;
+    vertical-align: top;
+}
+
+.text-box th {
+    background: #f4f4f4;
+    font-weight: 600;
 }
 /* A panel that contains a heading and HTML-rendered content */
 .html-panel {
