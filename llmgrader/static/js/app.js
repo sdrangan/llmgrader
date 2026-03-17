@@ -15,12 +15,18 @@ const MODEL_PROVIDER = {
     "gpt-4.1-mini": "openai",
     "gpt-5-mini": "openai",
     "gpt-5.1": "openai",
-    "gpt-5.2": "openai"
+    "gpt-5.2": "openai",
+    "gpt-5.4-nano": "openai",
+    "gpt-5.4-mini": "openai",
+    "gpt-5.4": "openai"
 };
+
+const DEFAULT_MODEL = "gpt-4.1-mini";
 
 function populateModelSelect() {
     const modelSelect = document.getElementById("model-select");
     if (!modelSelect) return;
+    const previousValue = modelSelect.value;
     modelSelect.innerHTML = "";
     Object.keys(MODEL_PROVIDER).forEach(model => {
         const opt = document.createElement("option");
@@ -28,6 +34,12 @@ function populateModelSelect() {
         opt.textContent = model;
         modelSelect.appendChild(opt);
     });
+
+    if (previousValue && MODEL_PROVIDER[previousValue]) {
+        modelSelect.value = previousValue;
+    } else if (MODEL_PROVIDER[DEFAULT_MODEL]) {
+        modelSelect.value = DEFAULT_MODEL;
+    }
 }
 
 // sessionState[unitName][qtag] = {
@@ -69,6 +81,8 @@ function initializeModelSelection() {
     const savedModel = sessionStorage.getItem("selectedModel");
     if (savedModel && MODEL_PROVIDER[savedModel]) {
         modelSelect.value = savedModel;
+    } else if (MODEL_PROVIDER[DEFAULT_MODEL]) {
+        modelSelect.value = DEFAULT_MODEL;
     }
 
     const handleModelSelection = () => {
@@ -760,6 +774,18 @@ function setupAdminDropdowns() {
     });
 }
 
+function updateAdminPartialCreditIndicator(questionData) {
+    const indicator = document.getElementById("admin-partial-credit-indicator");
+    if (!indicator) return;
+
+    const isPartial = questionData?.partial_credit === true;
+    indicator.textContent = isPartial ? "Partial" : "Binary";
+    indicator.className = `admin-mode-badge ${isPartial ? "admin-mode-partial" : "admin-mode-binary"}`;
+    indicator.title = isPartial
+        ? "Selected question uses partial-credit grading"
+        : "Selected question uses binary pass/fail grading";
+}
+
 function populateAdminQuestions() {
     const unit = document.getElementById("admin-unit-select").value;
     const qSelect = document.getElementById("admin-question-select");
@@ -782,6 +808,8 @@ function populateAdminQuestions() {
             qSelect.value = currentQtagName;
         }
 
+        updateAdminPartialCreditIndicator(data.items[currentQtagName]);
+
         // <-- REQUIRED to sync Admin → Grade
         displayAdminCurrent();
     });
@@ -799,6 +827,8 @@ function displayAdminQuestion(unit, qtag) {
     fetch(`/unit/${unit}`).then(r => r.json()).then(data => {
         const q = data.items[qtag];
         if (!q) return;
+
+        updateAdminPartialCreditIndicator(q);
 
         document.getElementById("admin-question-text").innerHTML = q.question_text || "";
         document.getElementById("admin-solution-text").innerHTML = q.solution || "";
