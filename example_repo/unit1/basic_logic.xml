@@ -183,7 +183,8 @@
 
             No explanation is required.
         ]]></grading_notes>
-        <grade>false</grade>
+        <grade>true</grade>
+        <partial_credit>true</partial_credit>
         <parts>
             <part>
                 <part_label>all</part_label>

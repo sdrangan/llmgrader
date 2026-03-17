@@ -18,7 +18,7 @@ from openai import APITimeoutError
 
 from concurrent.futures import ThreadPoolExecutor
 
-from typing import Literal
+from typing import Union, Literal
 from llmgrader.services.parselatex import parse_latex_soln
 import sys
 from markupsafe import Markup
@@ -41,25 +41,18 @@ def log_std(msg: str):
 
 from pydantic import BaseModel
 
+
+
+
 class GradeResult(BaseModel):
     """
     Data model for the grading result.
     """
-    result: Literal["pass", "fail", "error"]
-    full_explanation: str   
+    result: Union[Literal["pass", "fail", "error"], float]
+    full_explanation: str
     feedback: str
+    scores: list[float] | None = None  # Optional list of scores for partial credit grading
 
-
-
-def strip_code_fences(text):
-    text = text.strip()
-    if text.startswith("```"):
-        # remove first fence
-        text = text.split("```", 1)[1].strip()
-        # remove closing fence if present
-        if "```" in text:
-            text = text.rsplit("```", 1)[0].strip()
-    return text
 
 
 def strip_code_block_leading_newlines(html_text):
@@ -591,6 +584,13 @@ class Grader:
                     grade = grade_elem.text.strip().lower() == 'true'
                 else:
                     grade = True  # Default to true if not specified
+
+                # Extract partial_credit element (boolean)
+                partial_credit_elem = question.find('partial_credit')
+                if partial_credit_elem is not None and partial_credit_elem.text:
+                    partial_credit = partial_credit_elem.text.strip().lower() == 'true'
+                else:
+                    partial_credit = False
                 
                 # Extract parts
                 parts = []
@@ -636,6 +636,7 @@ class Grader:
                     'grading_notes': grading_notes,
                     'parts': parts,
                     'grade': grade,
+                    'partial_credit': partial_credit,
                     'preferred_model': preferred_model
                 }
                 
@@ -686,88 +687,268 @@ class Grader:
     
 
     
-    def build_task_prompt(self, question_text, ref_solution, grading_notes, student_soln, part_label="all"):
+    def build_task_prompt(
+        self,
+        question_text : str,
+        ref_solution : str,
+        grading_notes : str,
+        student_soln : str,
+        part_label: str = "all",
+        partial_credit: bool = False,
+        part_labels: list[str] | None = None,
+        max_points: list[int] | None = None,
+    ):
+        """
+        Build the grading prompt sent to the language model.
 
-        if part_label == "all":
-            # Whole-question grading
-            task_top = textwrap.dedent("""
-                Your task is to grade a student's solution to an engineering problem.
-                                       
-                You will be given: 
-                - HTML version of the question, 
-                - HTML version of a reference solution that is correct,
-                - Plain text grading notes, and
-                - Plain text student solution.  
-                                       
-                You are to provide the following fields in the response:
-                                       
-                - "result": "pass", "fail", or "error"
-                - "full_explanation": a detailed explanation of your grading reasoning
-                - "feedback": concise (up to 5 sentences), student-facing guidance that helps the student improve,
-                    without revealing the reference solution or grading notes.
-                                       
-                Follow these steps exactly:
+        Parameters
+        ----------
+        question_text: str
+            The question text in HTML format.
+        ref_solution: str
+            The reference solution text.
+        grading_notes: str
+            Instructor grading notes used to guide evaluation.
+        student_soln: str
+            The student's submitted solution text.
+        part_label: str
+            The specific part being graded, or "all" for whole-question grading.
+        partial_credit: bool
+            Whether the question is configured to allow partial credit.
+        part_labels: list[str] | None
+            Ordered list of part labels defined for the question.
+        max_points: list[int] | None
+            Ordered list of maximum point values corresponding to part_labels.
 
-                1. Read the question, reference solution, grading notes, and student solution.
-                2. Carefully compare the student solution to the reference solution, 
-                   using the grading notes as guidance.
+        Returns
+        -------
+        str
+            The full prompt text to send to the grading model.
+        """
+        prompt = textwrap.dedent("""
+            Your task is to grade a student's solution to an engineering problem.
+
+            You will be given:
+            - HTML version of the question,
+            - HTML version of a correct reference solution,
+            - Plain text grading notes, and
+            - Plain text student solution.
+        """)
+
+        multi_part = part_labels is not None and len(part_labels) > 1
+
+        if partial_credit:
+            if not part_labels or not max_points or len(part_labels) != len(max_points):
+                partial_credit = False
+
+        # ---------- Mode 1: partial credit, multi-part, grade ALL ----------
+        if partial_credit and multi_part and part_label == "all":
+            prompt += "\nThis question allows partial credit. It has multiple parts.\n"
+            prompt += "The parts and their maximum scores are:\n\n"
+            for lbl, pts in zip(part_labels, max_points):
+                prompt += f"- ({lbl}): max_score = {pts}\n"
+
+            prompt += textwrap.dedent("""
                 
-                """)
-        else:
-            # Part-specific grading
-            task_top = textwrap.dedent("""
-                Your task is to grade **part ({part_label})** of a multi-part engineering problem.
-                You will be given the entire question, the entire reference solution, and the entire
-                student solution. Students may mix parts together or refer to earlier parts. Ignore
-                all parts except the one you are asked to grade.
-                                       
-                You are to provide the following fields in the response:
-                - "result": "pass", "fail", or "error" (applies to part ({part_label}) only)
-                - "full_explanation": a detailed explanation of your grading reasoning
-                - "feedback": concise (up to 5 sentences), student-facing guidance that helps the student improve,
-                   without revealing the reference solution or grading notes.
-                        
-                Follow these steps exactly:
+                You must return a JSON object with the following fields:
+
+                - "scores": a list of numeric values, one for each part, in the exact order above.
+                Each score must be between 0 and the maximum score for that part.
+                - "full_explanation": a detailed explanation of your grading reasoning.
+                - "feedback": concise (up to 5 sentences), student-facing guidance that helps the
+                student improve without revealing the reference solution or grading notes.
+
+                Follow these steps:
+
+                1. For each part, carefully identify the student's answer for that part. Students may
+                write answers out of order or embed multiple parts together. Use your judgment to
+                isolate the portion corresponding to each part.
+                2. Compare the student's work for each part to the corresponding part in the reference
+                solution, using the grading notes as guidance.
+                3. In "full_explanation", explain your reasoning step by step, describing what is correct
+                and what is incorrect for each part.
+                4. Based on your reasoning and the grading notes, assign a numeric score to each part,
+                between 0 and that part's maximum score. Place these scores in the "scores" list in
+                the exact order given above.
+                5. In "feedback", provide concise, student-facing guidance that helps the student improve,
+                without revealing the reference solution or grading notes.
+
+                Important rules:
+                - Do not return part labels.
+                - Do not return maximum scores.
+                - Do not compute or return the total score; the backend will sum the scores.
+                - Return only valid JSON with no surrounding text.
+            """)
+
+        # ---------- Mode 2: partial credit,  multi-part,  grading one part ----------
+        elif partial_credit and multi_part:
+            idx = part_labels.index(part_label)
+            max_score = max_points[idx]
+
+            prompt += f"\nThis question allows partial credit. You are grading only part ({part_label}).\n"
+            prompt += f"The maximum score for this part is {max_score} points.\n\n"
+
+            prompt += textwrap.dedent(f"""
+                You must return a JSON object with the following fields:
+
+                - "result": the numeric score for this part, between 0 and {max_score}.
+                - "full_explanation": a detailed explanation of your grading reasoning for this part.
+                - "feedback": concise (up to 5 sentences), student-facing guidance that helps the
+                student improve without revealing the reference solution or grading notes.
+
+                Follow these steps:
 
                 1. Extract the student's answer for part ({part_label}) from the student solution.
                 Students may write answers out of order or embed multiple parts together. Use your
                 judgment to isolate the portion corresponding to part ({part_label}).
-
                 2. Compare the student's solution for part ({part_label}) to the corresponding part in the
-                reference solution to determine correctness, using the grading notes as guidance.
-            """).format(part_label=part_label)
-
-        task_end = textwrap.dedent("""
-            3. In "full_explanation", first work through your reasoning step by step, explaining what is correct and what is incorrect.
-            4. After you have completed your reasoning, decide the overall correctness:
-            - If the solution is correct, set "result" to "pass".
-            - If the solution is incorrect, set "result" to "fail".
-            - If you cannot grade due to missing or inconsistent information, set "result" to "error".
-            5. In "feedback", provide concise (up to 5 sentences), student-facing guidance that helps the student improve,
+                reference solution, using the grading notes as guidance.
+                3. In "full_explanation", work through your reasoning step by step, explaining what is
+                correct and what is incorrect.
+                4. Based on your reasoning and the grading notes, decide how many points (from 0 to
+                {max_score}) the student earns for this part and set "result" to that numeric value.
+                5. In "feedback", provide concise, student-facing guidance that helps the student improve,
                 without revealing the reference solution or grading notes.
 
-            -------------------------
-            QUESTION (HTML):
-            {question_text}
+                Important rules:
+                - Do not return scores for other parts.
+                - Do not return a list of scores.
+                - Return only valid JSON with no surrounding text.
+            """)
+        # ---------- Mode 3: partial credit,  single part ----------
+        elif partial_credit:
+            max_score = max_points[0]
 
-            REFERENCE SOLUTION:
-            {ref_solution}
+            prompt += "\nThis question allows partial credit. It has a single part.\n"
+            prompt += f"The maximum score for this question is {max_score} points.\n\n"
 
-            GRADING NOTES:
-            {grading_notes}
+            prompt += textwrap.dedent(f"""
+                You must return a JSON object with the following fields:
 
-            STUDENT SOLUTION:
-            {student_soln}
-        """)
+                - "result": the numeric score for this question, between 0 and {max_score}.
+                - "full_explanation": a detailed explanation of your grading reasoning.
+                - "feedback": concise (up to 5 sentences), student-facing guidance that helps the
+                student improve without revealing the reference solution or grading notes.
 
-        task = task_top + task_end.format(
-            question_text=question_text,
-            ref_solution=ref_solution,
-            grading_notes=grading_notes,
-            student_soln=student_soln
-        )
+                Follow these steps:
 
-        return task
+                1. Read the student's solution carefully.
+                2. Compare the student's solution to the reference solution, using the grading notes as guidance.
+                3. In "full_explanation", work through your reasoning step by step, explaining what is
+                correct and what is incorrect.
+                4. Based on your reasoning and the grading notes, decide how many points (from 0 to
+                {max_score}) the student earns and set "result" to that numeric value.
+                5. In "feedback", provide concise, student-facing guidance that helps the student improve,
+                without revealing the reference solution or grading notes.
+
+                Important rules:
+                - Do not return a list of scores.
+                - Return only valid JSON with no surrounding text.
+            """)
+
+
+        # ---------- Mode 4: binary, multi-part, grade ALL ----------
+        elif not partial_credit and multi_part and part_label == "all":
+            prompt += textwrap.dedent("""
+                This question is configured for binary grading (no partial credit).
+
+                You must return a JSON object with the following fields:
+
+                - "result": "pass", "fail", or "error"
+                - "full_explanation": a detailed explanation of your grading reasoning.
+                - "feedback": concise (up to 5 sentences), student-facing guidance that helps the
+                student improve without revealing the reference solution or grading notes.
+
+                Follow these steps:
+
+                1. For each part, carefully identify the student's answer for that part. Students may
+                write answers out of order or embed multiple parts together. Use your judgment to
+                isolate the portion corresponding to each part.
+                2. Compare the student's work for each part to the corresponding part in the reference
+                solution, using the grading notes as guidance.
+                3. In "full_explanation", work through your reasoning step by step, explaining what is
+                correct and what is incorrect for each part.
+                4. After you have completed your reasoning, decide the overall correctness:
+                - If all parts are correct, set "result" to "pass".
+                - If any part is incorrect, set "result" to "fail".
+                - If you cannot grade due to missing or inconsistent information, set "result" to "error".
+                5. In "feedback", provide concise, student-facing guidance that helps the student improve,
+                without revealing the reference solution or grading notes.
+
+                Important rules:
+                - Do not return part scores.
+                - Return only valid JSON with no surrounding text.
+            """)
+
+        
+        elif multi_part:
+            prompt += f"\nThis question is configured for binary grading. You are grading only part ({part_label}).\n\n"
+
+            prompt += textwrap.dedent(f"""
+                You must return a JSON object with the following fields:
+
+                - "result": "pass", "fail", or "error"
+                - "full_explanation": a detailed explanation of your grading reasoning for this part.
+                - "feedback": concise (up to 5 sentences), student-facing guidance that helps the
+                student improve without revealing the reference solution or grading notes.
+
+                Follow these steps:
+
+                1. Extract the student's answer for part ({part_label}) from the student solution.
+                Students may write answers out of order or embed multiple parts together. Use your
+                judgment to isolate the portion corresponding to part ({part_label}).
+                2. Compare the student's solution for part ({part_label}) to the corresponding part in the
+                reference solution, using the grading notes as guidance.
+                3. In "full_explanation", work through your reasoning step by step, explaining what is
+                correct and what is incorrect.
+                4. After you have completed your reasoning, decide the correctness for this part:
+                - If the solution is correct, set "result" to "pass".
+                - If the solution is incorrect, set "result" to "fail".
+                - If you cannot grade due to missing or inconsistent information, set "result" to "error".
+                5. In "feedback", provide concise, student-facing guidance that helps the student improve,
+                without revealing the reference solution or grading notes.
+
+                Important rules:
+                - Do not return part scores.
+                - Return only valid JSON with no surrounding text.
+            """)
+
+
+        else:  # Mode 6: binary, single-part question
+            prompt += "\nThis question is configured for binary grading (no partial credit).\n\n"
+
+            prompt += textwrap.dedent("""
+                You must return a JSON object with the following fields:
+
+                - "result": "pass", "fail", or "error"
+                - "full_explanation": a detailed explanation of your grading reasoning.
+                - "feedback": concise (up to 5 sentences), student-facing guidance that helps the
+                student improve without revealing the reference solution or grading notes.
+
+                Follow these steps:
+
+                1. Read the student's solution carefully.
+                2. Compare the student's solution to the reference solution, using the grading notes as guidance.
+                3. In "full_explanation", work through your reasoning step by step, explaining what is
+                correct and what is incorrect.
+                4. After you have completed your reasoning, decide the overall correctness:
+                - If the solution is correct, set "result" to "pass".
+                - If the solution is incorrect, set "result" to "fail".
+                - If you cannot grade due to missing or inconsistent information, set "result" to "error".
+                5. In "feedback", provide concise, student-facing guidance that helps the student improve,
+                without revealing the reference solution or grading notes.
+
+                Important rules:
+                - Return only valid JSON with no surrounding text.
+            """)
+
+        prompt += "\n\n--- QUESTION HTML ---\n" + question_text
+        prompt += "\n\n--- REFERENCE SOLUTION HTML ---\n" + ref_solution
+        prompt += "\n\n--- GRADING NOTES ---\n" + grading_notes
+        prompt += "\n\n--- STUDENT SOLUTION ---\n" + student_soln
+
+        return prompt
+
 
     def _make_llm_caller(self, provider, model, api_key, task, timeout):
         """
@@ -956,6 +1137,9 @@ class Grader:
             solution : str, 
             grading_notes: str, 
             student_soln : str, 
+            partial_credit: bool = False,
+            part_labels: list[str] | None = None,
+            max_points: list[int] | None = None,
             part_label: str="all",
             unit_name: str = "",
             qtag: str = "",
@@ -976,6 +1160,12 @@ class Grader:
             The grading notes text.
         student_soln: str
             The student's solution text.
+        partial_credit: bool
+            Whether partial credit grading is enabled for this question.
+        part_labels: list[str] | None
+            The ordered list of part labels defined for the question.
+        max_points: list[int] | None
+            The ordered list of maximum points for each part.
         part_label: str
             The part label to grade (or "all" for whole question).
         unit_name: str
@@ -1007,11 +1197,25 @@ class Grader:
         # Start measuring time
         t0 = time.time()
 
+        log_std(
+            f"partial_credit={partial_credit}, part_labels={part_labels}, "
+            f"max_points={max_points}"
+        )
+
         
         # ---------------------------------------------------------
         # 1. Build the task prompt
         # ---------------------------------------------------------
-        task = self.build_task_prompt(question_text, solution, grading_notes, student_soln, part_label=part_label)
+        task = self.build_task_prompt(
+            question_text,
+            solution,
+            grading_notes,
+            student_soln,
+            part_label=part_label,
+            partial_credit=partial_credit,
+            part_labels=part_labels,
+            max_points=max_points,
+        )
 
         # ---------------------------------------------------------
         # 2. Write task prompt to scratch/task.txt
@@ -1025,7 +1229,6 @@ class Grader:
         # ---------------------------------------------------------
 
         # Create the OpenAI LLM client
-        print('API key: ', api_key)
         if not api_key or not api_key.strip():
             admin_key, reason = self.get_admin_key(model)
             if admin_key is None:
@@ -1105,6 +1308,47 @@ class Grader:
                 # IMPORTANT: do NOT overwrite grade here
                 executor.shutdown(wait=False, cancel_futures=True)
 
+        # Debug mode:  Since we have not yet implemented partial credit grading, we convert any "scores" list in the respone
+        # to a 'pass' or 'fail' result for backward compatibility with the frontend. This allows us to test the 
+        # partial credit prompt structure.
+
+        # First check grade['result'] is already one of 'pass', 'fail', or 'error' (the expected values for binary grading).
+        # If so we can skip the conversion and return the grade as is. 
+        if grade.get('result') not in ['pass', 'fail', 'error']:
+            if part_label == 'all':
+                max_points_part = sum(max_points) if max_points else 0
+            else:
+                max_points_part = 0
+                if part_labels and max_points:
+                    try:
+                        part_index = part_labels.index(part_label)
+                        max_points_part = max_points[part_index]
+                    except (ValueError, IndexError):
+                        max_points_part = 0
+
+            raw_result = grade.get('result')
+            if isinstance(raw_result, (int, float)) and not isinstance(raw_result, bool):
+                score_part = float(raw_result)
+            else:
+                raw_scores = grade.get('scores', [])
+                if isinstance(raw_scores, list):
+                    score_part = sum(
+                        float(score)
+                        for score in raw_scores
+                        if isinstance(score, (int, float)) and not isinstance(score, bool)
+                    )
+                else:
+                    score_part = 0
+
+            log_std(
+                f"Converting numeric grade to pass/fail: score_part={score_part}, "
+                f"max_points_part={max_points_part}, part_label={part_label}"
+            )
+            grade['result'] = 'pass' if score_part >= max_points_part else 'fail'
+
+        # TODO:  Append the scores to the full explanation 
+        if 'scores' in grade:
+            grade['full_explanation'] += f"\n\n[Debug] Scores received: {grade['scores']}"
 
         # ---------------------------------------------------------
         # 4. Save raw response to scratch/resp.json

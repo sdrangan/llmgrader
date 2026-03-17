@@ -147,6 +147,10 @@ class APIController:
             ref_problem = qdata["question_text"]
             ref_solution = qdata["solution"]
             grading_notes = qdata["grading_notes"]
+            partial_credit = qdata.get("partial_credit", False)
+            parts = qdata.get("parts", [])
+            part_labels = [part.get("part_label", "all") for part in parts]
+            max_points = [part.get("points", 0) for part in parts]
 
             # Save grader inputs for debugging
             safe_qtag = qtag.replace(" ", "_").replace("/", "_")
@@ -185,6 +189,9 @@ class APIController:
                 solution=ref_solution,
                 grading_notes=grading_notes,
                 student_soln=student_soln,
+                partial_credit=partial_credit,
+                part_labels=part_labels,
+                max_points=max_points,
                 part_label=part_label,
                 unit_name=unit,
                 qtag=qtag,
