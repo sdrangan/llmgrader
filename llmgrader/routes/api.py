@@ -147,6 +147,7 @@ class APIController:
             ref_problem = qdata["question_text"]
             ref_solution = qdata["solution"]
             grading_notes = qdata["grading_notes"]
+            required = qdata.get("required", True)
             partial_credit = qdata.get("partial_credit", False)
             parts = qdata.get("parts", [])
             part_labels = [part.get("part_label", "all") for part in parts]
@@ -189,6 +190,7 @@ class APIController:
                 solution=ref_solution,
                 grading_notes=grading_notes,
                 student_soln=student_soln,
+                required=required,
                 partial_credit=partial_credit,
                 part_labels=part_labels,
                 max_points=max_points,

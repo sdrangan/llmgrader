@@ -443,6 +443,7 @@ textarea {
     align-items: center;
     justify-content: center;
     gap: 12px;
+    flex-wrap: wrap;
 }
 
 #grade-status {
@@ -465,6 +466,18 @@ textarea {
     border: 1px solid #bbb;
 }
 
+.grade-requirement {
+    padding: 6px 12px;
+    border-radius: 4px;
+    font-weight: bold;
+    font-size: 0.9em;
+    text-align: center;
+    white-space: nowrap;
+    background: #f4f0fa;
+    color: #57068c;
+    border: 1px solid #c7b5dd;
+}
+
 .status-not-graded {
     background: #ccc;
     color: #333;
@@ -483,6 +496,11 @@ textarea {
 .status-error {
     color: orange;
     font-weight: bold;
+}
+
+.status-partial {
+    background: #fff1c2;
+    color: #8a5a00;
 }
 
 .dashboard-link {
@@ -864,16 +882,16 @@ textarea {
         padding: 4px 8px;
     }
 
-    #mobile-grade-button-container,
-    #mobile-grade-result-container {
-        flex: 1;
+    #mobile-grade-button-container {
+        flex: 0 0 auto;
     }
 
-    #mobile-grade-result-container .grade-status-container {
-        width: 100%;
+    #mobile-grade-status,
+    #mobile-grade-points {
+        flex: 1 1 0;
     }
 
-    #grade-points {
+    #grade-requirement {
         display: none;
     }
 

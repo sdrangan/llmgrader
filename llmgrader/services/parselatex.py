@@ -267,7 +267,7 @@ def parse_grade_schema(schema_path: str) -> dict:
                 qtag: {
                     "id": str,
                     "grading_notes": str | None,
-                    "grade": bool,
+                    "required": bool,
                     "parts": [...],
                     "preferred_model": str | None
                 },
@@ -298,7 +298,9 @@ def parse_grade_schema(schema_path: str) -> dict:
 
         # --- 3. Extract other fields (optional but useful) ---
         grading_notes_node = qnode.find("grading_notes")
-        grade_node = qnode.find("grade")
+        required_node = qnode.find("required")
+        if required_node is None:
+            required_node = qnode.find("grade")
         preferred_model_node = qnode.find("preferred_model")
 
         if grading_notes_node is None:
@@ -323,7 +325,7 @@ def parse_grade_schema(schema_path: str) -> dict:
         schema_dict[qtag] = {
             "id": qnode.get("id"),
             "grading_notes": grading_notes,
-            "grade": (grade_node.text.strip().lower() == "true") if grade_node is not None else False,
+            "required": (required_node.text.strip().lower() == "true") if required_node is not None else False,
             "parts": parts_list,
             "preferred_model": preferred_model_node.text.strip() if preferred_model_node is not None else None
             #"xml_node": qnode,   # keep original node for future updates

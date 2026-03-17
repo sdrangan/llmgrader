@@ -69,8 +69,8 @@ class GradeResult(BaseModel):
     result : Literal["pass", "fail", "error", "partial"]
         - If partial_credit is False and grading a specific part or single-part question, the field is filled by the grader and then copied to `result_parts` for consistency.  
         The grader should return "pass", "fail", or "error" in this case, but not "partial". 
-        - In all other cases, the field is derived post-grader by the backend with "pass" if all values in `result_parts == 'pass'`.  If any `result_parts == 'error'`, the result is "error".  
-        Otherwise, `result='fail'` if any `result_parts == 'fail'` and no parts are 'error'. 
+        - In all other cases, the field is derived post-grader by the backend as follows:   If any(result_parts == 'error'), the result is "error".  
+        Else if all(result_parts == 'pass') , the result is "pass", else if all(results_parts=='fail'), result = "fail", else result='partial'.  . 
     points : float | None
         When partial_credit==True and  grading a specific part or single-part question, the grader returns the points awarded for that part.  
         This value is copied post-grader to the appropriate position in `point_parts` for consistency.
@@ -83,7 +83,7 @@ class GradeResult(BaseModel):
     max_point_parts: float | list[float] | None
     point_parts: float | list[float] | None
     result_parts: Literal["pass", "fail", "error", "partial"] | list[Literal["pass", "fail", "error", "partial"]]
-    result: Literal["pass", "fail", "error"]
+    result: Literal["pass", "fail", "error", "partial"]
     full_explanation: str
     feedback: str
     points: float | None = None
@@ -160,6 +160,8 @@ class Grader:
         "unit_name": "TEXT",
         "qtag": "TEXT",
         "part_label": "TEXT",
+        "required": "INTEGER",
+        "partial_credit": "INTEGER",
         "question_text": "TEXT",
         "ref_soln": "TEXT",
         "grading_notes": "TEXT",
@@ -220,6 +222,8 @@ class Grader:
         "ref_soln": "html",
         "unit_name": "text",
         "qtag": "text",
+        "required": "bool",
+        "partial_credit": "bool",
         "model": "text",
         "timeout": "text",
         "latency_ms": "text",
@@ -287,6 +291,8 @@ class Grader:
         columns = [row[1] for row in cursor.fetchall()]
 
         new_columns = {
+            "required": "INTEGER",
+            "partial_credit": "INTEGER",
             "max_point_parts_json": "TEXT",
             "point_parts_json": "TEXT",
             "result_parts_json": "TEXT",
@@ -388,7 +394,7 @@ class Grader:
         Parameters
         ----------
         fmt: str
-            The format type: "short_datetime", "html", "wrap80", or "text"
+            The format type: "short_datetime", "html", "wrap80", "bool", or "text"
         value:
             The value to format
             
@@ -404,6 +410,13 @@ class Grader:
                 return datetime.fromisoformat(str(value)).strftime("%Y-%m-%d %H:%M")
             except (ValueError, AttributeError):
                 return str(value)
+        elif fmt == "bool":
+            normalized = str(value).strip().lower()
+            if normalized in {"1", "true"}:
+                return "true"
+            if normalized in {"0", "false"}:
+                return "false"
+            return str(value)
         elif fmt == "html":
             return Markup(str(value))
         elif fmt == "wrap80":
@@ -644,12 +657,14 @@ class Grader:
                 grading_notes_elem = question.find('grading_notes')
                 grading_notes = clean_cdata(grading_notes_elem.text if grading_notes_elem is not None else '')
                 
-                # Extract grade element (boolean)
-                grade_elem = question.find('grade')
-                if grade_elem is not None and grade_elem.text:
-                    grade = grade_elem.text.strip().lower() == 'true'
+                # Extract required element (boolean). Fall back to legacy <grade>.
+                required_elem = question.find('required')
+                if required_elem is None:
+                    required_elem = question.find('grade')
+                if required_elem is not None and required_elem.text:
+                    required = required_elem.text.strip().lower() == 'true'
                 else:
-                    grade = True  # Default to true if not specified
+                    required = True  # Default to true if not specified
 
                 # Extract partial_credit element (boolean)
                 partial_credit_elem = question.find('partial_credit')
@@ -701,7 +716,7 @@ class Grader:
                     'solution': solution,
                     'grading_notes': grading_notes,
                     'parts': parts,
-                    'grade': grade,
+                    'required': required,
                     'partial_credit': partial_credit,
                     'preferred_model': preferred_model
                 }
@@ -715,7 +730,7 @@ class Grader:
                 "solution",
                 "grading_notes",
                 "parts",
-                "grade",
+                "required",
             ]
             
             # Check that every question has the required fields
@@ -1087,12 +1102,16 @@ class Grader:
                     return "error"
                 if all(part_result == "pass" for part_result in result_parts_value):
                     return "pass"
-                return "fail"
+                if all(part_result == "fail" for part_result in result_parts_value):
+                    return "fail"
+                return "partial"
             if result_parts_value == "error":
                 return "error"
             if result_parts_value == "pass":
                 return "pass"
-            return "fail"
+            if result_parts_value == "fail":
+                return "fail"
+            return "partial"
 
         def append_result_table(
             explanation: str,
@@ -1432,6 +1451,7 @@ class Grader:
             solution : str, 
             grading_notes: str, 
             student_soln : str, 
+            required: bool = True,
             partial_credit: bool = False,
             part_labels: list[str] | None = None,
             max_points: list[int] | None = None,
@@ -1455,6 +1475,8 @@ class Grader:
             The grading notes text.
         student_soln: str
             The student's solution text.
+        required: bool
+            Whether the question is required for submission/export workflows.
         partial_credit: bool
             Whether partial credit grading is enabled for this question.
         part_labels: list[str] | None
@@ -1641,6 +1663,8 @@ class Grader:
             part_label=part_label,
             unit_name=unit_name,
             qtag=qtag,
+            required=required,
+            partial_credit=partial_credit,
             model=model,
             timeout=timeout,
             latency_ms=latency_ms,

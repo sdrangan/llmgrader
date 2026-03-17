@@ -179,5 +179,6 @@ example_repo/soln_package/
 example_repo/*.zip
 **/example_repo/autograder
 **/example_repo/autograder/
+docs/key.txt
 local_data/
 

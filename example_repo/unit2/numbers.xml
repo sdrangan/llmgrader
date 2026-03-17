@@ -50,7 +50,7 @@
             - No explanation is required if the decimal values are correct.
 
         ]]></grading_notes>
-        <grade>false</grade>
+        <required>false</required>
         <parts>
             <part>
                 <part_label>a</part_label>
@@ -135,7 +135,7 @@
             No explanation is required as long as the final decimal values are correct.
         ]]></grading_notes>
 
-        <grade>false</grade>
+        <required>false</required>
 
         <parts>
             <part>
@@ -191,7 +191,7 @@
             Students may compute partial sums in any order.
             No explanation is required as long as the final answer W = 10 is correct.
         ]]></grading_notes>
-        <grade>false</grade>
+        <required>false</required>
         <parts>
             <part>
                 <part_label>all</part_label>
@@ -267,7 +267,7 @@
             No explanation is required as long as the final decimal values are correct.
         ]]></grading_notes>
 
-        <grade>false</grade>
+        <required>false</required>
 
         <parts>
             <part>
@@ -358,7 +358,7 @@
         - It is acceptable to compute values in any order as long as the final decimal answers are correct.
         - No explanation is required if the final numerical values are correct.
         ]]></grading_notes>
-        <grade>false</grade>
+        <required>false</required>
 
         <parts>
             <part>
@@ -580,7 +580,7 @@
             - Any correct Qm.n implementation of \(y = ax + b\) is acceptable.
             - No explanation is required if the final integer values and SystemVerilog expression are correct.
         ]]></grading_notes>
-        <grade>true</grade>
+        <required>true</required>
         <parts>
             <part>
                 <part_label>a</part_label>
@@ -670,7 +670,7 @@
             - Any correct implementation of full-precision multiply, shift, overflow detection, and saturation is acceptable.
             - No explanation is required if the SystemVerilog code is correct.
         ]]></grading_notes>
-        <grade>true</grade>
+        <required>true</required>
         <parts>
             <part>
                 <part_label>all</part_label>

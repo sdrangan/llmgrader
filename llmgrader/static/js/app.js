@@ -32,8 +32,20 @@ function populateModelSelect() {
 
 // sessionState[unitName][qtag] = {
 //     student_solution: "...",
+//     selected_part: "all",
+//     required: true,
+//     partial_credit: false,
 //     parts: {
-//         [part_label]: { feedback: "", explanation: "", grade_status: "" }
+//         [part_label]: {
+//             result: "",
+//             points: null,
+//             max_points: null,
+//             point_parts: null,
+//             max_point_parts: null,
+//             result_parts: null,
+//             feedback: "",
+//             full_explanation: ""
+//         }
 //     }
 // }
 let sessionState = {};
@@ -109,8 +121,14 @@ function getSessionData(unitName, qtag) {
     if (!sessionState[unitName][qtag]) {
         sessionState[unitName][qtag] = {
             student_solution: "",
+            selected_part: "all",
+            required: true,
+            partial_credit: false,
             parts: {}
         };
+    }
+    if (!sessionState[unitName][qtag].selected_part) {
+        sessionState[unitName][qtag].selected_part = "all";
     }
     // Ensure parts object exists
     if (!sessionState[unitName][qtag].parts) {
@@ -119,17 +137,66 @@ function getSessionData(unitName, qtag) {
     return sessionState[unitName][qtag];
 }
 
+function syncQuestionMetadataToSession(unitName, items) {
+    let changed = false;
+    Object.entries(items || {}).forEach(([qtag, qdata]) => {
+        const sessionData = getSessionData(unitName, qtag);
+        const required = qdata?.required !== false;
+        const partialCredit = qdata?.partial_credit === true;
+
+        if (sessionData.required !== required) {
+            sessionData.required = required;
+            changed = true;
+        }
+        if (sessionData.partial_credit !== partialCredit) {
+            sessionData.partial_credit = partialCredit;
+            changed = true;
+        }
+    });
+
+    if (changed) {
+        saveSessionState();
+    }
+}
+
+function createEmptyCachedGradeResult() {
+    return {
+        result: "",
+        points: null,
+        max_points: null,
+        point_parts: null,
+        max_point_parts: null,
+        result_parts: null,
+        feedback: "",
+        full_explanation: ""
+    };
+}
+
+function getCachedPartResult(sessionData, partLabel) {
+    const cachedPart = sessionData.parts?.[partLabel];
+    if (!cachedPart) {
+        return null;
+    }
+
+    return {
+        result: cachedPart.result ?? cachedPart.grade_status ?? "",
+        points: cachedPart.points ?? cachedPart.grade_points ?? null,
+        max_points: cachedPart.max_points ?? cachedPart.grade_max_points ?? null,
+        point_parts: cachedPart.point_parts ?? null,
+        max_point_parts: cachedPart.max_point_parts ?? null,
+        result_parts: cachedPart.result_parts ?? null,
+        feedback: cachedPart.feedback ?? "",
+        full_explanation: cachedPart.full_explanation ?? cachedPart.explanation ?? ""
+    };
+}
+
 function updateSessionData(unitName, qtag, updates, partLabel = null) {
     const data = getSessionData(unitName, qtag);
     
     // If partLabel is provided, update the part-specific data
     if (partLabel) {
         if (!data.parts[partLabel]) {
-            data.parts[partLabel] = {
-                feedback: "",
-                explanation: "",
-                grade_status: ""
-            };
+            data.parts[partLabel] = createEmptyCachedGradeResult();
         }
         Object.assign(data.parts[partLabel], updates);
     } else {
@@ -371,6 +438,77 @@ function autoExpand(el) {
     el.style.height = el.scrollHeight + "px";
 }
 
+function formatGradeNumber(value) {
+    if (value === null || value === undefined || value === "") {
+        return "--";
+    }
+    const num = Number(value);
+    if (!Number.isFinite(num)) {
+        return String(value);
+    }
+    return Number.isInteger(num) ? String(num) : String(num);
+}
+
+function getGradeStatusText(result) {
+    return result === "pass" ? "Correct" :
+        result === "fail" ? "Incorrect" :
+        result === "partial" ? "Partial" :
+        result === "error" ? "Error" :
+        "Not graded";
+}
+
+function getGradeStatusClass(result) {
+    return result === "pass" ? "status-correct" :
+        result === "fail" ? "status-incorrect" :
+        result === "partial" ? "status-partial" :
+        result === "error" ? "status-error" :
+        "status-not-graded";
+}
+
+function getQuestionMaxPoints(qdata, partLabel) {
+    const parts = qdata?.parts || [];
+    if (parts.length === 0) {
+        return null;
+    }
+    if (!partLabel || partLabel === "all") {
+        return parts.reduce((sum, part) => sum + Number(part.points || 0), 0);
+    }
+    const matchedPart = parts.find(part => part.part_label === partLabel);
+    return matchedPart ? Number(matchedPart.points || 0) : null;
+}
+
+function setGradeSummaryDisplay({ result = "", points = null, maxPoints = null, requiredLabel = "" }) {
+    const statusText = getGradeStatusText(result);
+    const statusClass = getGradeStatusClass(result);
+    const scoreText = maxPoints === null || maxPoints === undefined || maxPoints === ""
+        ? formatGradeNumber(points)
+        : `${formatGradeNumber(points)} / ${formatGradeNumber(maxPoints)}`;
+
+    const gradeStatus = document.getElementById("grade-status");
+    const mobileGradeStatus = document.getElementById("mobile-grade-status");
+    const gradePoints = document.getElementById("grade-points");
+    const mobileGradePoints = document.getElementById("mobile-grade-points");
+    const gradeRequirement = document.getElementById("grade-requirement");
+
+    if (gradeStatus) {
+        gradeStatus.textContent = statusText;
+        gradeStatus.className = `${statusClass} flex-content`;
+    }
+    if (mobileGradeStatus) {
+        mobileGradeStatus.textContent = statusText;
+        mobileGradeStatus.className = statusClass;
+    }
+    if (gradePoints) {
+        gradePoints.textContent = scoreText;
+    }
+    if (mobileGradePoints) {
+        mobileGradePoints.textContent = scoreText;
+    }
+    if (gradeRequirement) {
+        gradeRequirement.textContent = requiredLabel;
+    }
+}
+
 function escapeHtml(text) {
     return String(text)
         .replaceAll("&", "&amp;")
@@ -445,7 +583,6 @@ function initializeGradeViewMobile() {
     showMobilePanel("question");
     moveSolutionTextareaTo("mobile-solution-container");
     moveGradeButtonTo("mobile-grade-button-container");
-    moveGradeStatusTo("mobile-grade-result-container");
     mirrorQuestionWhenReady();
     mirrorFeedbackWhenReady();
 
@@ -788,6 +925,7 @@ async function loadUnit(unitName) {
     currentUnitName = unitName;
     currentUnitQtags = data.qtags;
     currentUnitItems = data.items;
+    syncQuestionMetadataToSession(unitName, data.items);
 
     // Prune stale qtags from session state
     pruneSessionState(unitName, data.qtags);
@@ -812,21 +950,16 @@ function restorePartUI(qtag, partLabel) {
     const sessionData = getSessionData(currentUnitName, qtag);
     
     // Get part-specific data if available
-    let partData = null;
-    if (partLabel && partLabel !== "all" && sessionData.parts[partLabel]) {
-        partData = sessionData.parts[partLabel];
-    } else if (partLabel === "all" && sessionData.parts["all"]) {
-        partData = sessionData.parts["all"];
-    }
+    const partKey = partLabel === "all" ? "all" : partLabel;
+    const partData = partKey ? getCachedPartResult(sessionData, partKey) : null;
     
     const explanationBox = document.getElementById("full-explanation-box");
     const feedbackBox = document.getElementById("feedback-box");
-    const gradeStatus = document.getElementById("grade-status");
     
     // Restore from part-specific data if available
     if (partData) {
-        if (partData.explanation) {
-            renderMarkdownInto(explanationBox, partData.explanation);
+        if (partData.full_explanation) {
+            renderMarkdownInto(explanationBox, partData.full_explanation);
         } else {
             renderMarkdownInto(explanationBox, "Not yet graded. No explanation yet.");
         }
@@ -837,27 +970,22 @@ function restorePartUI(qtag, partLabel) {
             renderMarkdownInto(feedbackBox, "Not yet graded. No feedback yet.");
         }
         
-        if (partData.grade_status) {
-            gradeStatus.textContent = 
-                partData.grade_status === "pass" ? "Correct" :
-                partData.grade_status === "fail" ? "Incorrect" :
-                partData.grade_status === "error" ? "Error" :
-                partData.grade_status;
-            gradeStatus.className = 
-                partData.grade_status === "pass" ? "status-correct" :
-                partData.grade_status === "fail" ? "status-incorrect" :
-                partData.grade_status === "error" ? "status-error" :
-                "status-not-graded";
-        } else {
-            gradeStatus.textContent = "";
-            gradeStatus.className = "status-not-graded";
-        }
+        setGradeSummaryDisplay({
+            result: partData.result || "",
+            points: partData.points ?? null,
+            maxPoints: partData.max_points ?? getQuestionMaxPoints(currentUnitItems[qtag], partLabel),
+            requiredLabel: currentUnitItems[qtag]?.required === false ? "optional" : "required"
+        });
     } else {
         // No part data available - show default state
         renderMarkdownInto(explanationBox, "Not yet graded. No explanation yet.");
         renderMarkdownInto(feedbackBox, "Not yet graded. No feedback yet.");
-        gradeStatus.textContent = "";
-        gradeStatus.className = "status-not-graded";
+        setGradeSummaryDisplay({
+            result: "",
+            points: null,
+            maxPoints: getQuestionMaxPoints(currentUnitItems[qtag], partLabel),
+            requiredLabel: currentUnitItems[qtag]?.required === false ? "optional" : "required"
+        });
     }
 }
 
@@ -933,26 +1061,20 @@ function displayQuestion(qtag) {
         partSelect.appendChild(opt);
     });
 
+    const savedPart = sessionData.selected_part || "all";
+    const validPartValues = new Set(["all", ...parts.map(p => p.part_label)]);
+    partSelect.value = validPartValues.has(savedPart) ? savedPart : "all";
+
     // Add event listener for part selection changes
     partSelect.onchange = () => {
+        updateSessionData(currentUnitName, qtag, {
+            selected_part: partSelect.value
+        });
         restorePartUI(qtag, partSelect.value);
     };
 
     // Restore grading UI from session state for the currently selected part
     restorePartUI(qtag, partSelect.value);
-
-    // Update grade points/optional display
-    const gradePoints = document.getElementById("grade-points");
-    if (qdata.grade === false) {
-        gradePoints.textContent = "optional";
-    } else if (qdata.grade === true) {
-        const totalPoints = (qdata.parts || []).reduce((sum, part) => {
-            return sum + parseInt(part.points || 0, 10);
-        }, 0);
-        gradePoints.textContent = `${totalPoints} points`;
-    } else {
-        gradePoints.textContent = "";
-    }
 }
 
 
@@ -1069,24 +1191,21 @@ async function gradeCurrentQuestion() {
     gradeBtn.disabled = false;
     gradeBtn.textContent = "Grade";
 
-    const gradeStatusText = 
-        data.result === "pass" ? "Correct" :
-        data.result === "fail" ? "Incorrect" :
-        "Error";
-
-    const gradeStatusClass =
-        data.result === "pass" ? "status-correct" :
-        data.result === "fail" ? "status-incorrect" :
-        "status-error";
-
-    document.getElementById("grade-status").textContent = gradeStatusText;
-    document.getElementById("grade-status").className = gradeStatusClass;
+    setGradeSummaryDisplay({
+        result: data.result || "",
+        points: data.points ?? null,
+        maxPoints: data.max_points ?? getQuestionMaxPoints(currentUnitItems[qtag], selectedPart),
+        requiredLabel: currentUnitItems[qtag]?.required === false ? "optional" : "required"
+    });
     renderMarkdownInto(document.getElementById("feedback-box"), data.feedback);
     renderMarkdownInto(document.getElementById("full-explanation-box"), data.full_explanation);
 
     // Save student solution at qtag level
     updateSessionData(currentUnitName, qtag, {
-        student_solution: studentSolution
+        student_solution: studentSolution,
+        selected_part: selectedPart,
+        required: currentUnitItems[qtag]?.required !== false,
+        partial_credit: currentUnitItems[qtag]?.partial_credit === true
     });
 
     // Save grading results per part
@@ -1094,9 +1213,14 @@ async function gradeCurrentQuestion() {
     // or handle it differently based on your requirements
     const partToSave = selectedPart === "all" ? "all" : selectedPart;
     updateSessionData(currentUnitName, qtag, {
+        result: data.result || "",
+        points: data.points ?? null,
+        max_points: data.max_points ?? null,
+        point_parts: data.point_parts ?? null,
+        max_point_parts: data.max_point_parts ?? null,
+        result_parts: data.result_parts ?? null,
         feedback: data.feedback || "",
-        explanation: data.full_explanation || "",
-        grade_status: data.result || ""
+        full_explanation: data.full_explanation || ""
     }, partToSave);
 }
 
