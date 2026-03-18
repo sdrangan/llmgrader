@@ -22,6 +22,7 @@ from typing import Union, Literal
 from llmgrader.services.parselatex import parse_latex_soln
 import sys
 from markupsafe import Markup
+from pydantic import ValidationError
 
 
 import sys
@@ -151,7 +152,75 @@ def clean_cdata(text: str) -> str:
     return text
 
 
+def summarize_tool_calls(response) -> str:
+    """
+    Summarize tool activity from an OpenAI Responses API object.
+    """
+    def get_value(obj, key, default=None):
+        if obj is None:
+            return default
+        if isinstance(obj, dict):
+            return obj.get(key, default)
+        return getattr(obj, key, default)
+
+    summary = []
+
+    for item in get_value(response, "output", []) or []:
+        item_type = get_value(item, "type")
+
+        if item_type == "reasoning":
+            summary.append("- reasoning")
+            continue
+
+        if item_type == "web_search_call":
+            action = get_value(item, "action", {})
+            action_type = get_value(action, "type")
+
+            if action_type == "search":
+                query = get_value(action, "query")
+                if query:
+                    summary.append(f"- web_search: {query}")
+                else:
+                    summary.append("- web_search")
+            elif action_type == "open_page":
+                url = get_value(action, "url")
+                if url:
+                    summary.append(f"- open_page: {url}")
+                else:
+                    summary.append("- open_page")
+            else:
+                summary.append("- web_search_call")
+            continue
+
+        if item_type == "message":
+            summary.append("- message (final answer)")
+
+    return "\n".join(summary)
+
+
+def normalize_json_response_text(text: str) -> str:
+    """
+    Normalize model output so JSON parsing can tolerate fenced or wrapped content.
+    """
+    normalized = (text or "").strip()
+    if not normalized:
+        return normalized
+
+    if normalized.startswith("```"):
+        normalized = re.sub(r"^```(?:json)?\s*", "", normalized, flags=re.IGNORECASE)
+        normalized = re.sub(r"\s*```$", "", normalized).strip()
+
+    start = normalized.find("{")
+    end = normalized.rfind("}")
+    if start != -1 and end != -1 and end >= start:
+        return normalized[start:end + 1]
+
+    return normalized
+
+
 class Grader:
+    SUPPORTED_TOOLS = ["web_search"]
+
     # Database schema definition for submissions table
     DB_SCHEMA = {
         "timestamp": "TEXT NOT NULL",
@@ -182,6 +251,7 @@ class Grader:
         "points": "REAL",
         "max_points": "REAL",
         "result_parts_json": "TEXT",
+        "tools_json": "TEXT",
     }
 
     # Field formatting rules for submission detail view
@@ -230,6 +300,7 @@ class Grader:
         "timed_out": "text",
         "tokens_in": "text",
         "tokens_out": "text",
+        "tools_json": "text",
     }
 
     
@@ -296,6 +367,7 @@ class Grader:
             "max_point_parts_json": "TEXT",
             "point_parts_json": "TEXT",
             "result_parts_json": "TEXT",
+            "tools_json": "TEXT",
             "points": "REAL",
             "max_points": "REAL",
         }
@@ -672,6 +744,20 @@ class Grader:
                     partial_credit = partial_credit_elem.text.strip().lower() == 'true'
                 else:
                     partial_credit = False
+
+                tools = []
+                for tool_elem in question.findall('tool'):
+                    if tool_elem.text is None:
+                        continue
+                    tool_name = tool_elem.text.strip()
+                    if not tool_name:
+                        continue
+                    if tool_name not in self.SUPPORTED_TOOLS:
+                        log.write(
+                            f"Warning: question {qtag} in unit {name} requested unsupported tool '{tool_name}'; ignoring.\n"
+                        )
+                        continue
+                    tools.append(tool_name)
                 
                 # Extract parts
                 parts = []
@@ -718,6 +804,7 @@ class Grader:
                     'parts': parts,
                     'required': required,
                     'partial_credit': partial_credit,
+                    'tools': tools,
                     'preferred_model': preferred_model
                 }
                 
@@ -828,6 +915,12 @@ class Grader:
             Text fields such as "full_explanation" and "feedback" may use Markdown,
             including paragraphs, lists, and tables.
         """)
+        json_requirement = textwrap.dedent("""
+            Important rules:
+            - Return only the requested fields.
+            - Do not include any extra fields, labels, maximum-point values, or computed totals.
+            - Return exactly one valid JSON object and nothing else. Do not include code fences, markdown, comments, explanations, or any text before or after the JSON object.
+        """).strip()
 
         multi_part = part_labels is not None and len(part_labels) > 1
         max_points_part = None
@@ -856,15 +949,15 @@ class Grader:
             for lbl, pts in zip(part_labels, max_points):
                 prompt += f"- ({lbl}): max_points = {pts}\n"
 
-            prompt += textwrap.dedent("""
+            prompt += textwrap.dedent(f"""
                 
                 You must return a JSON object with the following fields:
 
                 - "point_parts": a list of numeric values, one for each part, in the exact order above.
                 Each point value must be between 0 and the maximum points for that part.
                 - "full_explanation": a detailed explanation of your grading reasoning.
-                - "feedback": concise (up to 5 sentences), student-facing guidance that helps the
-                student improve without revealing the reference solution or grading notes.
+                - "feedback": concise (up to 5 sentences, unless otherwise specified in the grading notes), 
+                student-facing guidance that helps the student improve without revealing the reference solution or grading notes.
 
                 Follow these steps:
 
@@ -881,12 +974,7 @@ class Grader:
                 5. In "feedback", provide concise, student-facing guidance that helps the student improve,
                 without revealing the reference solution or grading notes.
 
-                Important rules:
-                - Do not return part labels.
-                - Do not return maximum points.
-                - Do not compute or return the total points; the backend will sum the points.
-                - Do not return result, result_parts, max_point_parts, or max_points.
-                - Return only valid JSON with no surrounding text.
+                {json_requirement}
             """)
 
         # ---------- Mode 2: partial credit,  multi-part,  grading one part ----------
@@ -919,11 +1007,7 @@ class Grader:
                 5. In "feedback", provide concise, student-facing guidance that helps the student improve,
                 without revealing the reference solution or grading notes.
 
-                Important rules:
-                - Do not return points for other parts.
-                - Do not return a list of points.
-                - Do not return result, result_parts, max_point_parts, point_parts, or max_points.
-                - Return only valid JSON with no surrounding text.
+                {json_requirement}
             """)
         # ---------- Mode 3: partial credit,  single part ----------
         elif partial_credit:
@@ -951,10 +1035,7 @@ class Grader:
             5. In "feedback", provide concise, student-facing guidance that helps the student improve,
             without revealing the reference solution or grading notes.
 
-            Important rules:
-            - Do not return a list of points.
-            - Do not return result, result_parts, max_point_parts, point_parts, or max_points.
-            - Return only valid JSON with no surrounding text.
+            {json_requirement}
             """)
 
 
@@ -964,7 +1045,7 @@ class Grader:
             for lbl in part_labels:
                 prompt += f"- ({lbl})\n"
 
-            prompt += textwrap.dedent("""
+            prompt += textwrap.dedent(f"""
                 This question is configured for binary grading (no partial credit).
 
                 You must return a JSON object with the following fields:
@@ -989,10 +1070,7 @@ class Grader:
                 5. In "feedback", provide concise, student-facing guidance that helps the student improve,
                 without revealing the reference solution or grading notes.
 
-                Important rules:
-                - Do not return part points.
-                - Do not return aggregate result, max_point_parts, point_parts, points, or max_points.
-                - Return only valid JSON with no surrounding text.
+                {json_requirement}
             """)
 
         
@@ -1023,17 +1101,14 @@ class Grader:
                 5. In "feedback", provide concise, student-facing guidance that helps the student improve,
                 without revealing the reference solution or grading notes.
 
-                Important rules:
-                - Do not return part points.
-                - Do not return result_parts, max_point_parts, point_parts, points, or max_points.
-                - Return only valid JSON with no surrounding text.
+                {json_requirement}
             """)
 
 
         else:  # Mode 6: binary, single-part question
             prompt += "\nThis question is configured for binary grading (no partial credit).\n\n"
 
-            prompt += textwrap.dedent("""
+            prompt += textwrap.dedent(f"""
                 You must return a JSON object with the following fields:
 
                 - "result": "pass", "fail", or "error"
@@ -1054,9 +1129,7 @@ class Grader:
                 5. In "feedback", provide concise, student-facing guidance that helps the student improve,
                 without revealing the reference solution or grading notes.
 
-                Important rules:
-                - Do not return result_parts, max_point_parts, point_parts, points, or max_points.
-                - Return only valid JSON with no surrounding text.
+                {json_requirement}
             """)
 
         prompt += "\n\n--- QUESTION HTML ---\n" + question_text
@@ -1073,6 +1146,8 @@ class Grader:
         max_points_part: int | list[int] | None,
         part_labels: list[str] | None = None,
         part_label: str = "all",
+        tools: list[str] | None = None,
+        tool_call_summary: str | None = None,
     ) -> GradeResult:
         """
         Fill in derived GradeResult fields that are not returned directly by the grader.
@@ -1142,6 +1217,19 @@ class Grader:
                 return explanation + "\n" + "\n".join(table_lines)
             return "\n".join(table_lines).lstrip("\n")
 
+        def append_tool_summary(explanation: str, tool_names: list[str] | None, summary: str | None) -> str:
+            tool_names = tool_names or []
+            tools_line = f"Tools: {', '.join(tool_names)}" if tool_names else "Tools: None"
+
+            if summary:
+                summary_block = f"{tools_line}\nTool Summary:\n{summary}"
+            else:
+                summary_block = tools_line
+
+            if explanation:
+                return explanation + "\n\n" + summary_block
+            return summary_block
+
         def invalid_grade(message: str) -> GradeResult:
             explanation = full_explanation
             if explanation:
@@ -1194,7 +1282,11 @@ class Grader:
                     point_parts=point_parts,
                     result_parts=result_parts,
                     result=result,
-                    full_explanation=append_result_table(full_explanation, point_parts, max_points_part, result_parts),
+                    full_explanation=append_tool_summary(
+                        append_result_table(full_explanation, point_parts, max_points_part, result_parts),
+                        tools,
+                        tool_call_summary,
+                    ),
                     feedback=feedback,
                     points=points,
                     max_points=max_points_total,
@@ -1216,7 +1308,11 @@ class Grader:
                 point_parts=points_value,
                 result_parts=result_parts,
                 result=result,
-                full_explanation=append_result_table(full_explanation, points_value, max_points_part, result_parts),
+                full_explanation=append_tool_summary(
+                    append_result_table(full_explanation, points_value, max_points_part, result_parts),
+                    tools,
+                    tool_call_summary,
+                ),
                 feedback=feedback,
                 points=points_value,
                 max_points=max_points_total,
@@ -1241,7 +1337,11 @@ class Grader:
                 point_parts=point_parts,
                 result_parts=raw_result_parts,
                 result=result,
-                full_explanation=append_result_table(full_explanation, point_parts, max_points_part, raw_result_parts),
+                full_explanation=append_tool_summary(
+                    append_result_table(full_explanation, point_parts, max_points_part, raw_result_parts),
+                    tools,
+                    tool_call_summary,
+                ),
                 feedback=feedback,
                 points=float(sum(point_parts)),
                 max_points=max_points_total,
@@ -1257,14 +1357,18 @@ class Grader:
             point_parts=point_parts,
             result_parts=raw_result,
             result=raw_result,
-            full_explanation=append_result_table(full_explanation, point_parts, max_points_part, raw_result),
+            full_explanation=append_tool_summary(
+                append_result_table(full_explanation, point_parts, max_points_part, raw_result),
+                tools,
+                tool_call_summary,
+            ),
             feedback=feedback,
             points=point_parts,
             max_points=max_points_total,
         )
 
 
-    def _make_llm_caller(self, provider, model, api_key, task, timeout):
+    def _make_llm_caller(self, provider, model, api_key, task, timeout, tools=None):
         """
         Creates a function that calls the specified LLM provider with the given parameters.
         
@@ -1280,6 +1384,8 @@ class Grader:
             The input prompt to send to the LLM.
         timeout: float
             The timeout in seconds for the API call.
+        tools: list[str] | None
+            Built-in tool names enabled for the request.
 
         Returns
         -------
@@ -1293,15 +1399,39 @@ class Grader:
         """
         if provider == "openai":
             client = OpenAI(api_key=api_key)
+            requested_tools = [tool for tool in (tools or []) if tool in self.SUPPORTED_TOOLS]
 
             def call_openai():
-                resp = client.responses.parse(
-                    model=model,
-                    input=task,
-                    text_format=GraderRawResult,
-                    temperature=1 if model.startswith("gpt-5-mini") else 0,
-                    timeout=timeout
-                )
+                request_kwargs = {
+                    "model": model,
+                    "input": task,
+                    "temperature": 1 if model.startswith("gpt-5-mini") else 0,
+                    "timeout": timeout,
+                }
+
+                if "web_search" in requested_tools:
+                    request_kwargs["tools"] = [{"type": "web_search"}]
+                else:
+                    request_kwargs["text"] = {
+                        "format": {
+                            "type": "json_object"
+                        }
+                    }
+
+                resp = client.responses.create(**request_kwargs)
+
+                response_text = resp.output_text or ""
+                if not response_text.strip():
+                    raise ValueError("OpenAI response did not contain output_text.")
+
+                normalized_response_text = normalize_json_response_text(response_text)
+
+                try:
+                    parsed = GraderRawResult.model_validate_json(normalized_response_text)
+                except ValidationError as exc:
+                    raise ValueError(f"Failed to parse OpenAI JSON response: {exc}") from exc
+
+                tool_call_summary = summarize_tool_calls(resp)
 
                 # Get the total tokens used (input + output)
                 if resp.usage is not None:
@@ -1310,7 +1440,7 @@ class Grader:
                 else:
                     inputs_tokens = 0
                     output_tokens = 0
-                return resp.output_parsed, inputs_tokens, output_tokens
+                return parsed, inputs_tokens, output_tokens, tool_call_summary
             
             return call_openai
 
@@ -1341,7 +1471,7 @@ class Grader:
                 output_tokens = 0
 
                 # Parse using your existing GradeResult model
-                return GraderRawResult.model_validate_json(text), input_tokens, output_tokens
+                return GraderRawResult.model_validate_json(normalize_json_response_text(text)), input_tokens, output_tokens, None
 
             return call_hf
 
@@ -1453,6 +1583,7 @@ class Grader:
             student_soln : str, 
             required: bool = True,
             partial_credit: bool = False,
+            tools: list[str] | None = None,
             part_labels: list[str] | None = None,
             max_points: list[int] | None = None,
             part_label: str="all",
@@ -1479,6 +1610,8 @@ class Grader:
             Whether the question is required for submission/export workflows.
         partial_credit: bool
             Whether partial credit grading is enabled for this question.
+        tools: list[str] | None
+            Supported tool names requested by the question configuration.
         part_labels: list[str] | None
             The ordered list of part labels defined for the question.
         max_points: list[int] | None
@@ -1510,13 +1643,14 @@ class Grader:
         tokens_out = 0
         timed_out = False
         used_admin_key = False
+        tool_call_summary = None
     
         # Start measuring time
         t0 = time.time()
 
         log_std(
             f"partial_credit={partial_credit}, part_labels={part_labels}, "
-            f"max_points={max_points}"
+            f"max_points={max_points}, tools={tools}"
         )
 
         
@@ -1560,6 +1694,7 @@ class Grader:
                     max_points_part=max_points_part,
                     part_labels=part_labels,
                     part_label=part_label,
+                    tools=tools,
                 ).model_dump()
             api_key = admin_key
             used_admin_key = True
@@ -1572,7 +1707,7 @@ class Grader:
             
             # Create the API call function
             try:
-                call_llm = self._make_llm_caller(provider, model, api_key, task, timeout)
+                call_llm = self._make_llm_caller(provider, model, api_key, task, timeout, tools=tools)
             except Exception as e:
                 grade = {
                     "result": "error",
@@ -1590,7 +1725,7 @@ class Grader:
                 total_timeout = timeout + additional_timeout
                 
                 # Get the result with timeout
-                response, tokens_in, tokens_out = future.result(timeout=total_timeout)
+                response, tokens_in, tokens_out, tool_call_summary = future.result(timeout=total_timeout)
                 grade = response.model_dump()
                 log_std(f"Received response from {provider}.")
 
@@ -1637,6 +1772,8 @@ class Grader:
             max_points_part=max_points_part,
             part_labels=part_labels,
             part_label=part_label,
+            tools=tools,
+            tool_call_summary=tool_call_summary,
         ).model_dump()
 
         # ---------------------------------------------------------
@@ -1665,6 +1802,7 @@ class Grader:
             qtag=qtag,
             required=required,
             partial_credit=partial_credit,
+            tools_json=json.dumps(tools if tools is not None else []),
             model=model,
             timeout=timeout,
             latency_ms=latency_ms,

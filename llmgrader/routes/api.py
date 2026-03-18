@@ -149,6 +149,7 @@ class APIController:
             grading_notes = qdata["grading_notes"]
             required = qdata.get("required", True)
             partial_credit = qdata.get("partial_credit", False)
+            tools = qdata.get("tools", [])
             parts = qdata.get("parts", [])
             part_labels = [part.get("part_label", "all") for part in parts]
             max_points = [part.get("points", 0) for part in parts]
@@ -182,6 +183,9 @@ class APIController:
                 f.write("\n=== Model ===\n")
                 f.write(model + "\n")
 
+                f.write("\n=== Tools ===\n")
+                f.write(json.dumps(tools) + "\n")
+
             print(f"Sent grader input {fn}")
 
             # Call the grader
@@ -192,6 +196,7 @@ class APIController:
                 student_soln=student_soln,
                 required=required,
                 partial_credit=partial_credit,
+                tools=tools,
                 part_labels=part_labels,
                 max_points=max_points,
                 part_label=part_label,

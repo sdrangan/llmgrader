@@ -47,6 +47,7 @@ function populateModelSelect() {
 //     selected_part: "all",
 //     required: true,
 //     partial_credit: false,
+//     tools: [],
 //     parts: {
 //         [part_label]: {
 //             result: "",
@@ -138,6 +139,7 @@ function getSessionData(unitName, qtag) {
             selected_part: "all",
             required: true,
             partial_credit: false,
+            tools: [],
             parts: {}
         };
     }
@@ -148,6 +150,9 @@ function getSessionData(unitName, qtag) {
     if (!sessionState[unitName][qtag].parts) {
         sessionState[unitName][qtag].parts = {};
     }
+    if (!Array.isArray(sessionState[unitName][qtag].tools)) {
+        sessionState[unitName][qtag].tools = [];
+    }
     return sessionState[unitName][qtag];
 }
 
@@ -157,6 +162,7 @@ function syncQuestionMetadataToSession(unitName, items) {
         const sessionData = getSessionData(unitName, qtag);
         const required = qdata?.required !== false;
         const partialCredit = qdata?.partial_credit === true;
+        const tools = Array.isArray(qdata?.tools) ? [...qdata.tools] : [];
 
         if (sessionData.required !== required) {
             sessionData.required = required;
@@ -164,6 +170,11 @@ function syncQuestionMetadataToSession(unitName, items) {
         }
         if (sessionData.partial_credit !== partialCredit) {
             sessionData.partial_credit = partialCredit;
+            changed = true;
+        }
+        const existingTools = Array.isArray(sessionData.tools) ? sessionData.tools : [];
+        if (JSON.stringify(existingTools) !== JSON.stringify(tools)) {
+            sessionData.tools = tools;
             changed = true;
         }
     });
