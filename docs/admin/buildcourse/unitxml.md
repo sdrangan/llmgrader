@@ -30,6 +30,8 @@ A unit XML file has the following high‑level structure:
         <solution>...</solution>
         <grading_notes>...</grading_notes>
         <parts>...</parts>
+        <required>...</required>
+        <tool>...</tool>
         <preferred_model>...</preferred_model>
     </question>
 
@@ -66,6 +68,8 @@ A question typically contains:
 - `<solution>` — the reference solution (HTML allowed)
 - `<grading_notes>` — instructor notes for the grader
 - `<parts>` — optional breakdown of points
+- `<required>` — optional flag controlling whether the question is required in normal grading/export flows
+- `<tool>` — optional built-in tool request for the grader
 - `<preferred_model>` — optional model hint for the grader
 
 ---
@@ -119,6 +123,59 @@ Structure:
 | `points` | Yes | Points assigned to this part |
 
 If omitted, the grader treats the question as a single block worth the full `points`.
+
+---
+
+## ✅ `<required>` Element (Optional)
+
+Controls whether the question is treated as required by the grader and by submission/export workflows.
+
+Example:
+
+```xml
+<required>true</required>
+```
+
+Allowed values:
+
+- `true` — the question is required
+- `false` — the question is optional
+
+If omitted, the default is `true`.
+
+Use `false` for questions that should remain available in the unit but should not be enforced as part of the standard required set.
+
+---
+
+## 🔧 `<tool>` Element (Optional)
+
+Requests a built-in tool for the LLM grader when grading this question.
+
+Example:
+
+```xml
+<tool>web_search</tool>
+```
+
+You may include more than one `<tool>` element, but currently only one tool value is supported:
+
+- `web_search` — allows the model to search the web and open pages during grading
+
+Why use `web_search`:
+
+This is most commonly used to inspect a students GitHub repository say for projects.  The students
+can provide a GitHub URL and the grader can inspect and critique the files.
+Later we will use it for accessing programs written by the student and (with an python tool),
+running those programs.
+
+It can also be used:
+- when correctness depends on current external information rather than only the reference solution
+- when students must analyze live documentation, standards, product details, or public web resources
+- when you want the grader to verify claims against an authoritative source during evaluation
+
+Use it sparingly. Most questions should rely only on the provided question text, reference solution, and grading notes. Web search is most appropriate when the question genuinely depends on information outside the course package.
+
+If an unsupported tool value is provided, the grader ignores it and logs a warning during unit-package loading.
 
 ---
 
