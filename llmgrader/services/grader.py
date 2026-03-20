@@ -753,10 +753,22 @@ class Grader:
                 return text.replace("|", "\\|").strip()
 
             rubric_definitions = rubric_definitions or {}
+            uses_points = any(
+                isinstance(
+                    entry.model_dump() if hasattr(entry, "model_dump") else entry,
+                    dict,
+                )
+                and (
+                    (entry.model_dump() if hasattr(entry, "model_dump") else entry).get("point_awarded")
+                    is not None
+                )
+                for entry in rubric_eval_value.values()
+            )
+            value_header = "Points" if uses_points else "Outcome"
             rubric_lines = [
                 "",
                 "Rubric evaluation:",
-                "| Criteria | Points | Evaluation |",
+                f"| Criteria | {value_header} | Evaluation |",
                 "| --- | --- | --- |",
             ]
 
@@ -771,11 +783,15 @@ class Grader:
                 display_text = rubric_meta.get("display_text", rubric_id)
                 point_adjustment = rubric_meta.get("point_adjustment")
                 point_awarded = rubric_entry.get("point_awarded")
+                rubric_result = rubric_entry.get("result")
                 evidence = str(rubric_entry.get("evidence", "")).strip()
 
                 criteria_text = display_text if part == "all" else f"Part {part}: {display_text}"
 
-                points_text = f"{point_awarded} / {point_adjustment}"
+                if point_awarded is not None:
+                    points_text = f"{point_awarded} / {point_adjustment}"
+                else:
+                    points_text = str(rubric_result or "")
                 rubric_lines.append(
                     "| "
                     + table_cell(criteria_text)

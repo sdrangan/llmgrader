@@ -238,6 +238,56 @@ RUBRIC_TEMPLATES = {
 
         {json_requirement}
     """,
+    "partial_multi_single": """
+        This question allows partial credit. It has multiple parts, and you are grading only part ({part_label}).
+        Grade the student using the rubric items below as the primary scoring guide.
+
+        The maximum points for part ({part_label}) is {max_points_part} points.
+
+        Rubric items:
+        {rubric_items_block}
+
+        Rubric groups:
+        {rubric_groups_block}
+
+        Group semantics:
+        - A group with type "one_of" means at most one rubric item in that group should contribute points.
+        - If more than one item in a "one_of" group appears applicable, choose the single best-supported item and set the others to 0.0.
+
+        Scoring guidance:
+        - Evaluate only the student's work for part ({part_label}).
+        - Rubric items listed for part ({part_label}) or part "all" may be relevant here.
+        - Do not count the same evidence twice. If two rubric items are triggered by the same underlying mistake or the same underlying success, award both only if the rubric items clearly measure distinct requirements. Otherwise, apply only the most specific or best-supported rubric item and set the overlapping item to 0.0.
+        - If the condition is met and point_adjustment > 0, set "point_awarded" to a numeric value between 0 and point_adjustment.
+        - If the condition is met and point_adjustment < 0, set "point_awarded" to point_adjustment exactly (that is, a negative adjustment).
+        - If the condition is not met, set "point_awarded" to 0.0.
+        - Use the rubric items as the primary scoring mechanism.
+        - Final score rule for this part: {rubric_total_rule}
+        - If the rubric does not fully resolve the score for this part, use the grading notes and explain the judgment clearly.
+
+        You must return a JSON object with the following fields:
+
+        - "points": the final numeric score for part ({part_label}), between 0 and {max_points_part}.
+        - "rubric_eval": an object keyed by rubric id.
+        For each rubric id, return an object with:
+          - "evidence": concise factual evidence from the student's solution explaining whether the rubric condition is met. This text may be shown to the student, so it should be clear and professional, but your grading decision must still be based on comparison to the reference solution and grading notes.
+          - "point_awarded": the numeric adjustment awarded for that rubric item, following the scoring guidance above.
+        - "full_explanation": a concise grading summary for part ({part_label}). Do not repeat the full per-rubric detail already captured in "rubric_eval".
+        - "feedback": concise (up to 5 sentences), student-facing guidance derived from the rubric evaluation and focused on the most important strengths or mistakes that affected the score for this part.
+
+        Follow these steps:
+
+        1. Extract the student's answer for part ({part_label}) from the student solution. Students may write answers out of order or embed multiple parts together. Use your judgment to isolate the relevant work.
+        2. Compare the student's work for part ({part_label}) to the corresponding part in the reference solution, using the grading notes as guidance.
+        3. Evaluate each rubric item against the student's work and record concise evidence in "rubric_eval".
+        4. Before finalizing awards, check for overlapping rubric items that rely on the same evidence. Do not double count the same underlying mistake or success unless the rubric items clearly refer to distinct criteria.
+        5. Apply the rubric groups before deciding the awarded adjustments, especially any "one_of" groups.
+        6. Compute the final score for part ({part_label}) using this rule: {rubric_total_step}. Set "points" to that value.
+        7. In "full_explanation", summarize the grading judgment for this part briefly, referring to the major rubric findings without restating every rubric item.
+        8. In "feedback", give concise, student-facing guidance that is consistent with the rubric evaluation, emphasizes the main reasons for the score, and does not reveal the reference solution or hidden grading notes.
+
+        {json_requirement}
+    """,
     "partial_single": """
         This question allows partial credit. It has a single part.
         Grade the student using the rubric items below as the primary scoring guide.
@@ -287,6 +337,156 @@ RUBRIC_TEMPLATES = {
 
         {json_requirement}
     """,
+        "binary_multi_all": """
+                This question is configured for binary grading. It has multiple parts.
+                Grade the student using the rubric items below as the primary grading guide.
+
+                The parts are:
+                {part_points_block}
+
+                Rubric items:
+                {rubric_items_block}
+
+                Rubric groups:
+                {rubric_groups_block}
+
+                Group semantics:
+                - A group with type "one_of" means at most one rubric item in that group should be marked as applicable.
+                - If more than one item in a "one_of" group appears applicable, choose the single best-supported item and mark the others as not applicable.
+
+                Scoring guidance:
+                - Evaluate every rubric item exactly once and respect the rubric item's listed "part" field.
+                - A rubric item attached to a specific part should affect only that part's correctness judgment.
+                - A rubric item attached to part "all" may reflect work that spans multiple parts; when that happens, apply it only to the parts for which the evidence actually supports it.
+                - Do not count the same evidence twice. If two rubric items are triggered by the same underlying mistake or the same underlying success, mark both as applicable only if the rubric items clearly measure distinct requirements. Otherwise, apply only the most specific or best-supported rubric item and mark the overlapping item as not applicable.
+                - Use the rubric items as the primary grading mechanism.
+                - If the rubric does not fully resolve a part's result, use the grading notes and explain the judgment clearly.
+
+                You must return a JSON object with the following fields:
+
+                - "result_parts": a list with one value for each part, in the exact order listed above. Each value must be one of "pass", "fail", or "error".
+                - "rubric_eval": an object keyed by rubric id.
+                For each rubric id, return an object with:
+                    - "evidence": concise factual evidence from the student's solution explaining whether the rubric condition is met.
+                    - "result": one of "pass", "fail", "feedback", or "n/a".
+                Use:
+                    - "pass" when the rubric item is satisfied and supports correctness,
+                    - "fail" when the rubric item identifies a substantive mistake or an unmet required criterion,
+                    - "feedback" when the item is useful context but not decisive on its own,
+                    - "n/a" when the rubric item does not apply.
+                - "full_explanation": a concise grading summary that explains the per-part judgments at a high level. Do not repeat the full per-rubric detail already captured in "rubric_eval".
+                - "feedback": concise (up to 5 sentences, unless otherwise specified in the grading notes), student-facing guidance derived from the rubric evaluation.
+
+                Follow these steps:
+
+                1. For each part, identify the student's answer for that part. Students may write answers out of order or embed multiple parts together. Use your judgment to isolate the relevant work.
+                2. Compare the student's work for each part to the corresponding part in the reference solution, using the grading notes as guidance.
+                3. Evaluate each rubric item against the student's work and record concise evidence and a rubric-level result in "rubric_eval".
+                4. Before finalizing judgments, check for overlapping rubric items that rely on the same evidence. Do not double count the same underlying mistake or success unless the rubric items clearly refer to distinct criteria.
+                5. Apply the rubric groups before deciding the rubric-level results, especially any "one_of" groups.
+                6. Decide the correctness of each part and place the values in "result_parts" in the exact order listed above.
+                7. In "full_explanation", summarize the overall grading judgment briefly, emphasizing the part-level outcomes and the major rubric findings without restating every rubric item.
+                8. In "feedback", give concise, student-facing guidance that is consistent with the rubric evaluation and does not reveal the reference solution or hidden grading notes.
+
+                {json_requirement}
+        """,
+        "binary_multi_single": """
+                This question is configured for binary grading. It has multiple parts, and you are grading only part ({part_label}).
+                Grade the student using the rubric items below as the primary grading guide.
+
+                Rubric items:
+                {rubric_items_block}
+
+                Rubric groups:
+                {rubric_groups_block}
+
+                Group semantics:
+                - A group with type "one_of" means at most one rubric item in that group should be marked as applicable.
+                - If more than one item in a "one_of" group appears applicable, choose the single best-supported item and mark the others as not applicable.
+
+                Scoring guidance:
+                - Evaluate only the student's work for part ({part_label}).
+                - Rubric items listed for part ({part_label}) or part "all" may be relevant here.
+                - Do not count the same evidence twice. If two rubric items are triggered by the same underlying mistake or the same underlying success, mark both as applicable only if the rubric items clearly measure distinct requirements. Otherwise, apply only the most specific or best-supported rubric item and mark the overlapping item as not applicable.
+                - Use the rubric items as the primary grading mechanism.
+                - If the rubric does not fully resolve the result for this part, use the grading notes and explain the judgment clearly.
+
+                You must return a JSON object with the following fields:
+
+                - "result": one of "pass", "fail", or "error" for part ({part_label}).
+                - "rubric_eval": an object keyed by rubric id.
+                For each rubric id, return an object with:
+                    - "evidence": concise factual evidence from the student's solution explaining whether the rubric condition is met.
+                    - "result": one of "pass", "fail", "feedback", or "n/a".
+                Use:
+                    - "pass" when the rubric item is satisfied and supports correctness,
+                    - "fail" when the rubric item identifies a substantive mistake or an unmet required criterion,
+                    - "feedback" when the item is useful context but not decisive on its own,
+                    - "n/a" when the rubric item does not apply.
+                - "full_explanation": a concise grading summary for part ({part_label}). Do not repeat the full per-rubric detail already captured in "rubric_eval".
+                - "feedback": concise (up to 5 sentences), student-facing guidance derived from the rubric evaluation.
+
+                Follow these steps:
+
+                1. Extract the student's answer for part ({part_label}) from the student solution. Students may write answers out of order or embed multiple parts together. Use your judgment to isolate the relevant work.
+                2. Compare the student's work for part ({part_label}) to the corresponding part in the reference solution, using the grading notes as guidance.
+                3. Evaluate each rubric item against the student's work and record concise evidence and a rubric-level result in "rubric_eval".
+                4. Before finalizing judgments, check for overlapping rubric items that rely on the same evidence. Do not double count the same underlying mistake or success unless the rubric items clearly refer to distinct criteria.
+                5. Apply the rubric groups before deciding the rubric-level results, especially any "one_of" groups.
+                6. Decide the correctness for part ({part_label}) and set "result" to "pass", "fail", or "error".
+                7. In "full_explanation", summarize the grading judgment for this part briefly, referring to the major rubric findings without restating every rubric item.
+                8. In "feedback", give concise, student-facing guidance that is consistent with the rubric evaluation and does not reveal the reference solution or hidden grading notes.
+
+                {json_requirement}
+        """,
+        "binary_single": """
+                This question is configured for binary grading. It has a single part.
+                Grade the student using the rubric items below as the primary grading guide.
+
+                Rubric items:
+                {rubric_items_block}
+
+                Rubric groups:
+                {rubric_groups_block}
+
+                Group semantics:
+                - A group with type "one_of" means at most one rubric item in that group should be marked as applicable.
+                - If more than one item in a "one_of" group appears applicable, choose the single best-supported item and mark the others as not applicable.
+
+                Scoring guidance:
+                - Evaluate each rubric item against the student's solution.
+                - Do not count the same evidence twice. If two rubric items are triggered by the same underlying mistake or the same underlying success, mark both as applicable only if the rubric items clearly measure distinct requirements. Otherwise, apply only the most specific or best-supported rubric item and mark the overlapping item as not applicable.
+                - Use the rubric items as the primary grading mechanism.
+                - If the rubric does not fully resolve the result, use the grading notes and explain the judgment clearly.
+
+                You must return a JSON object with the following fields:
+
+                - "result": one of "pass", "fail", or "error".
+                - "rubric_eval": an object keyed by rubric id.
+                For each rubric id, return an object with:
+                    - "evidence": concise factual evidence from the student's solution explaining whether the rubric condition is met.
+                    - "result": one of "pass", "fail", "feedback", or "n/a".
+                Use:
+                    - "pass" when the rubric item is satisfied and supports correctness,
+                    - "fail" when the rubric item identifies a substantive mistake or an unmet required criterion,
+                    - "feedback" when the item is useful context but not decisive on its own,
+                    - "n/a" when the rubric item does not apply.
+                - "full_explanation": a concise grading summary for the overall question. Do not repeat the full per-rubric detail already captured in "rubric_eval".
+                - "feedback": concise (up to 5 sentences), student-facing guidance derived from the rubric evaluation.
+
+                Follow these steps:
+
+                1. Read the student's solution carefully.
+                2. Compare the student's solution to the reference solution, using the grading notes as guidance.
+                3. Evaluate each rubric item against the student's work and record concise evidence and a rubric-level result in "rubric_eval".
+                4. Before finalizing judgments, check for overlapping rubric items that rely on the same evidence. Do not double count the same underlying mistake or success unless the rubric items clearly refer to distinct criteria.
+                5. Apply the rubric groups before deciding the rubric-level results, especially any "one_of" groups.
+                6. Decide the overall correctness and set "result" to "pass", "fail", or "error".
+                7. In "full_explanation", summarize the grading judgment briefly, referring to the major rubric findings without restating every rubric item.
+                8. In "feedback", give concise, student-facing guidance that is consistent with the rubric evaluation and does not reveal the reference solution or hidden grading notes.
+
+                {json_requirement}
+        """,
 }
 
 
@@ -514,6 +714,7 @@ class PromptBuilder:
         return self._format_prompt_block(
             template,
             json_requirement=json_requirement,
+            part_label=part_label,
             max_points_part=max_points_part,
             part_points_block=part_points_block,
             rubric_items_block=rubric_items_block or "- None",
