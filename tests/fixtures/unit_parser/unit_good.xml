@@ -1,0 +1,64 @@
+<unit id="fixture_good" title="Fixture Good Unit" version="1.0">
+  <question qtag="q_partial" preferred_model="gpt-4.1-mini">
+    <question_text><![CDATA[
+    <p>Write the update.</p>
+    ]]></question_text>
+    <solution><![CDATA[
+    <p>Use Euler.</p>
+    ]]></solution>
+    <grading_notes><![CDATA[
+    Accept equivalent implementations.
+    ]]></grading_notes>
+    <required>false</required>
+    <partial_credit>true</partial_credit>
+    <tool>web_search</tool>
+    <rubrics>
+      <item id="correct_update" point_adjustment="1.5">
+        <display_text>Correct update</display_text>
+        <condition>Student uses the correct update equation.</condition>
+        <notes>Equivalent algebra is acceptable.</notes>
+      </item>
+    </rubrics>
+    <parts>
+      <part>
+        <part_label>all</part_label>
+        <points>2.5</points>
+      </part>
+    </parts>
+  </question>
+
+  <question qtag="q_binary">
+    <question_text><![CDATA[
+    <p>Compute the derivative.</p>
+    ]]></question_text>
+    <solution><![CDATA[
+    <p>The derivative is <code>a^x \ln(a)</code>.</p>
+    ]]></solution>
+    <grading_notes><![CDATA[
+    Any valid method is acceptable.
+    ]]></grading_notes>
+    <required>true</required>
+    <partial_credit>false</partial_credit>
+    <rubrics>
+      <item id="log_method" condition_type="positive" action="fail">
+        <display_text>Uses logarithms</display_text>
+        <condition>Student uses logarithms correctly.</condition>
+        <notes>This can be skipped if another method is correct.</notes>
+      </item>
+      <item id="exp_method" condition_type="positive" action="fail">
+        <display_text>Uses exponential form</display_text>
+        <condition>Student rewrites the function in exponential form correctly.</condition>
+      </item>
+      <group type="one_of">
+        <id>log_method</id>
+        <id>exp_method</id>
+      </group>
+    </rubrics>
+    <parts>
+      <part>
+        <part_label>all</part_label>
+        <points>3</points>
+      </part>
+    </parts>
+  </question>
+</unit>

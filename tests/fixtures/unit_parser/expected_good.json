@@ -1,0 +1,93 @@
+{
+  "units": {
+    "Fixture Good Unit": {
+      "q_partial": {
+        "qtag": "q_partial",
+        "question_text": "<p>Write the update.</p>",
+        "solution": "<p>Use Euler.</p>",
+        "grading_notes": "Accept equivalent implementations.",
+        "parts": [
+          {
+            "part_label": "all",
+            "points": 2.5
+          }
+        ],
+        "required": false,
+        "partial_credit": true,
+        "tools": [
+          "web_search"
+        ],
+        "rubrics": {
+          "correct_update": {
+            "condition": "Student uses the correct update equation.",
+            "display_text": "Correct update",
+            "notes": "Equivalent algebra is acceptable.",
+            "part": "all",
+            "point_adjustment": 1.5
+          }
+        },
+        "rubric_total": "sum_positive",
+        "rubric_groups": [],
+        "preferred_model": "gpt-4.1-mini"
+      },
+      "q_binary": {
+        "qtag": "q_binary",
+        "question_text": "<p>Compute the derivative.</p>",
+        "solution": "<p>The derivative is <code>a^x \\ln(a)</code>.</p>",
+        "grading_notes": "Any valid method is acceptable.",
+        "parts": [
+          {
+            "part_label": "all",
+            "points": 3.0
+          }
+        ],
+        "required": true,
+        "partial_credit": false,
+        "tools": [],
+        "rubrics": {
+          "log_method": {
+            "condition": "Student uses logarithms correctly.",
+            "display_text": "Uses logarithms",
+            "notes": "This can be skipped if another method is correct.",
+            "part": "all",
+            "condition_type": "positive",
+            "action": "fail"
+          },
+          "exp_method": {
+            "condition": "Student rewrites the function in exponential form correctly.",
+            "display_text": "Uses exponential form",
+            "notes": "",
+            "part": "all",
+            "condition_type": "positive",
+            "action": "fail"
+          }
+        },
+        "rubric_total": null,
+        "rubric_groups": [
+          {
+            "type": "one_of",
+            "ids": [
+              "log_method",
+              "exp_method"
+            ]
+          }
+        ],
+        "preferred_model": ""
+      }
+    }
+  },
+  "units_order": [
+    {
+      "type": "unit",
+      "name": "Fixture Good Unit"
+    }
+  ],
+  "units_list": [
+    "Fixture Good Unit"
+  ],
+  "xml_path_list": [
+    "unit_good.xml"
+  ],
+  "validation_errors": [],
+  "validation_alert": null
+}

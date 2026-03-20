@@ -10,6 +10,19 @@ let currentUnitName = null;         // current unit name
 let currentStudentSolutions = {};   // dict: qtag -> student solution
 let currentQtagName = null;
 let currentActiveView = null;
+let lastValidationAlert = null;
+
+function maybeShowValidationAlert(message) {
+    if (!message) {
+        lastValidationAlert = null;
+        return;
+    }
+    if (message === lastValidationAlert) {
+        return;
+    }
+    lastValidationAlert = message;
+    alert(message);
+}
 
 const MODEL_PROVIDER = {
     "gpt-4.1-mini": "openai",
@@ -908,7 +921,10 @@ document.addEventListener("DOMContentLoaded", () => {
 
 async function loadUnits() {
     const resp = await fetch("/units");
-    const items = await resp.json();
+    const payload = await resp.json();
+    const items = Array.isArray(payload) ? payload : (payload.items || []);
+
+    maybeShowValidationAlert(payload.validation_alert);
 
     const dropdown = document.getElementById("unit-select");
     dropdown.innerHTML = "";

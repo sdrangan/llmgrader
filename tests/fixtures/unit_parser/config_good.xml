@@ -1,0 +1,8 @@
+<llmgrader>
+  <units>
+    <unit>
+      <name>Fixture Good Unit</name>
+      <destination>unit_good.xml</destination>
+    </unit>
+  </units>
+</llmgrader>

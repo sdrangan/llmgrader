@@ -1,0 +1,15 @@
+<unit id="fixture_broken" title="Fixture Broken Unit" version="1.0">
+  <question qtag="q_bad_required">
+    <question_text>Question</question_text>
+    <solution>Solution</solution>
+    <grading_notes>Notes</grading_notes>
+    <required>1</required>
+    <partial_credit>false</partial_credit>
+    <parts>
+      <part>
+        <part_label>all</part_label>
+        <points>1</points>
+      </part>
+    </parts>
+  </question>
+</unit>

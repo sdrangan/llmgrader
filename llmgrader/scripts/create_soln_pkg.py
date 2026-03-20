@@ -16,6 +16,8 @@ import xml.etree.ElementTree as ET
 import argparse
 from pathlib import Path
 
+from llmgrader.services.unit_parser import UnitParser
+
 
 def main():
     # Parse command-line arguments
@@ -34,6 +36,16 @@ def main():
     # Verify config file exists
     if not config_path.exists():
         print(f"Error: Config file not found: {config_path}")
+        return 1
+
+    validation_errors = UnitParser.validate_course_package_config(str(config_path.resolve()))
+    if validation_errors:
+        print("Validation errors found in course package source files:")
+        print()
+        for error in validation_errors:
+            print(f"- {error}")
+        print()
+        print("Fix the XML validation errors above and rerun create_soln_pkg.")
         return 1
 
     # Parse the XML configuration

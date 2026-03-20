@@ -7,7 +7,9 @@ response = client.responses.create(
     model="gpt-5",
     tools=[{"type": "web_search"}],
     input=textwrap.dedent("""\
-        When is the NYU Spring break in 2026?
+        How does this project compare to the state-of-the-art in autograding? What are the key differences and advantages?
+        https://sdrangan.github.io/llmgrader/docs/
+        Is it worth considering using?
     """)
 )
 

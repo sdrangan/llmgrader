@@ -27,11 +27,14 @@ Each grading request uses only a small amount of model compute, so even frequent
 
 ## Which model to use?
 
-To the right of the **Grade** button, you will see a dropdown menu to select a model to use.  These are my findings so far:
+To the right of the **Grade** button, you will see a **gear box** that opens a preferences dialog.  Here you can select the model.  These are my findings so far:
 
 * `gpt-4.1.-mini`:  This is the fastest, about 10-20 seconds for a response.  On simple problems, this would be my choice.  But, on problems
 where the model has to reason over multiple clock cycles it makes mistakes.
 * `gpt-5-mini`:  This is slower, about 1-2 minutes for a response.  But, it can reason very well on more complex problems.
+* `gpt-5.4`:  This model is excellent and you will definitely notice the difference on complex grading such as
+project plans. 
 
-Both models are very cheap.  Less than a dollar for a million tokens. 
+Both `mini` models are very cheap.  Less than a dollar for a million tokens.  The `gpt-5.4` is about 2.5 times more expensive.
+Typical problems consume about 1000 tokens which is a fraction of a penny for the mini models.  Grading a simple project plan with a web retrieval takes about 10000 tokens (mostly input).  On `gpt-5.4` that will cost about 2 to 4 cents.
 

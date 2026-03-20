@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" elementFormDefault="qualified">
+  <xs:simpleType name="conditionTypeEnum">
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="positive"/>
+      <xs:enumeration value="negative"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:simpleType name="actionTypeEnum">
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="fail"/>
+      <xs:enumeration value="feedback"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:simpleType name="trueFalseEnum">
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="true"/>
+      <xs:enumeration value="false"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:simpleType name="rubricTotalEnum">
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="sum_positive"/>
+      <xs:enumeration value="sum_negative"/>
+      <xs:enumeration value="flexible"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:complexType name="richTextType" mixed="true">
+    <xs:sequence>
+      <xs:any minOccurs="0" maxOccurs="unbounded" processContents="skip"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="partType">
+    <xs:choice minOccurs="0" maxOccurs="unbounded">
+      <xs:element name="part_label" type="xs:string"/>
+      <xs:element name="points" type="xs:decimal"/>
+    </xs:choice>
+    <xs:attribute name="id" type="xs:string" use="optional"/>
+    <xs:attribute name="points" type="xs:decimal" use="optional"/>
+  </xs:complexType>
+
+  <xs:complexType name="rubricItemType">
+    <xs:choice minOccurs="0" maxOccurs="unbounded">
+      <xs:element name="display_text" type="richTextType"/>
+      <xs:element name="condition" type="richTextType"/>
+      <xs:element name="notes" type="richTextType" minOccurs="0"/>
+      <xs:element name="part" type="xs:string" minOccurs="0"/>
+    </xs:choice>
+    <xs:attribute name="id" type="xs:string" use="required"/>
+    <xs:attribute name="part" type="xs:string" use="optional"/>
+    <xs:attribute name="condition_type" type="conditionTypeEnum" use="optional"/>
+    <xs:attribute name="action" type="actionTypeEnum" use="optional"/>
+    <xs:attribute name="point_adjustment" type="xs:decimal" use="optional"/>
+  </xs:complexType>
+
+  <xs:complexType name="rubricGroupType">
+    <xs:sequence>
+      <xs:element name="id" type="xs:string" minOccurs="2" maxOccurs="unbounded"/>
+    </xs:sequence>
+    <xs:attribute name="type" type="xs:string" use="required"/>
+  </xs:complexType>
+
+  <xs:complexType name="questionType">
+    <xs:all>
+      <xs:element name="question_text" type="richTextType" minOccurs="0"/>
+      <xs:element name="solution" type="richTextType" minOccurs="0"/>
+      <xs:element name="grading_notes" type="richTextType" minOccurs="0"/>
+      <xs:element name="required" type="trueFalseEnum" minOccurs="0"/>
+      <xs:element name="partial_credit" type="xs:string" minOccurs="0"/>
+      <xs:element name="rubric_total" type="rubricTotalEnum" minOccurs="0"/>
+      <xs:element name="points" type="xs:decimal" minOccurs="0"/>
+      <xs:element name="tool" type="xs:string" minOccurs="0" maxOccurs="1"/>
+      <xs:element name="parts" minOccurs="1">
+        <xs:complexType>
+          <xs:sequence>
+            <xs:element name="part" type="partType" minOccurs="1" maxOccurs="unbounded"/>
+          </xs:sequence>
+        </xs:complexType>
+      </xs:element>
+      <xs:element name="rubrics" minOccurs="0">
+        <xs:complexType>
+          <xs:choice minOccurs="0" maxOccurs="unbounded">
+            <xs:element name="item" type="rubricItemType"/>
+            <xs:element name="group" type="rubricGroupType"/>
+          </xs:choice>
+        </xs:complexType>
+      </xs:element>
+    </xs:all>
+    <xs:attribute name="qtag" type="xs:string" use="required"/>
+    <xs:attribute name="preferred_model" type="xs:string" use="optional"/>
+  </xs:complexType>
+
+  <xs:element name="unit">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element name="question" type="questionType" minOccurs="0" maxOccurs="unbounded"/>
+      </xs:sequence>
+      <xs:attribute name="id" type="xs:string" use="optional"/>
+      <xs:attribute name="title" type="xs:string" use="optional"/>
+      <xs:attribute name="version" type="xs:string" use="optional"/>
+    </xs:complexType>
+  </xs:element>
+</xs:schema>

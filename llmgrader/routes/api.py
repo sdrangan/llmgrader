@@ -102,10 +102,11 @@ class APIController:
         @bp.get("/units")
         def units():
             units_order = getattr(self.grader, 'units_order', None)
-            if units_order:
-                return jsonify(units_order)
-            # Fallback: return plain unit list as structured items
-            return jsonify([{"type": "unit", "name": k} for k in self.grader.units.keys()])
+            payload = units_order if units_order else [{"type": "unit", "name": k} for k in self.grader.units.keys()]
+            return jsonify({
+                "items": payload,
+                "validation_alert": getattr(self.grader, 'unit_validation_alert', None),
+            })
 
         @bp.get("/unit/<unit_name>")
         def unit(unit_name):
@@ -147,12 +148,7 @@ class APIController:
             ref_problem = qdata["question_text"]
             ref_solution = qdata["solution"]
             grading_notes = qdata["grading_notes"]
-            required = qdata.get("required", True)
-            partial_credit = qdata.get("partial_credit", False)
             tools = qdata.get("tools", [])
-            parts = qdata.get("parts", [])
-            part_labels = [part.get("part_label", "all") for part in parts]
-            max_points = [part.get("points", 0) for part in parts]
 
             # Save grader inputs for debugging
             safe_qtag = qtag.replace(" ", "_").replace("/", "_")
@@ -190,15 +186,8 @@ class APIController:
 
             # Call the grader
             grade_result = self.grader.grade(
-                question_text=ref_problem,
-                solution=ref_solution,
-                grading_notes=grading_notes,
+                question_dict=qdata,
                 student_soln=student_soln,
-                required=required,
-                partial_credit=partial_credit,
-                tools=tools,
-                part_labels=part_labels,
-                max_points=max_points,
                 part_label=part_label,
                 unit_name=unit,
                 qtag=qtag,
@@ -214,7 +203,10 @@ class APIController:
         def reload_units():
             print("In /reload endpoint")
             self.grader.load_unit_pkg()
-            return jsonify({"status": "ok"})
+            return jsonify({
+                "status": "ok",
+                "validation_alert": getattr(self.grader, 'unit_validation_alert', None),
+            })
 
         @bp.get("/api/admin/preferences")
         def get_admin_preferences():
@@ -263,9 +255,13 @@ class APIController:
                 return {"error": "no file"}, 400
 
             f = request.files["file"]
-            self.grader.save_uploaded_file(f)
+            result = self.grader.save_uploaded_file(f)
 
-            return {"status": "ok"}
+            if isinstance(result, tuple):
+                payload, status_code = result
+                return jsonify(payload), status_code
+
+            return jsonify(result)
         
         @app.route("/admin/dbviewer", methods=["POST"])
         @self.require_admin

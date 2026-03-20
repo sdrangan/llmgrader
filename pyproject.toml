@@ -6,7 +6,8 @@ authors = [
     { name = "Your Name" }
 ]
 dependencies = [
-    "flask"
+    "flask",
+    "xmlschema>=3,<4"
 ]
 
 [build-system]
@@ -15,6 +16,9 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 include = ["llmgrader*"]
+
+[tool.setuptools.package-data]
+llmgrader = ["schemas/*.xsd"]
 
 [project.scripts]
 create_grading_json = "llmgrader.utils.create_grading_json:main"

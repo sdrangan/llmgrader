@@ -684,14 +684,36 @@ textarea {
 
 .text-box {
     white-space: pre-wrap;
+    overflow-x: auto;
+}
+
+.text-box ul,
+.text-box ol {
+    margin: 0.35em 0;
+    padding-left: 1.25em;
+}
+
+.text-box p + ul,
+.text-box p + ol {
+    margin-top: 0.2em;
+}
+
+.text-box li {
+    margin: 0.15em 0;
+}
+
+.text-box li p {
+    margin: 0;
 }
 
 .text-box table {
     white-space: normal;
     border-collapse: collapse;
     width: 100%;
+    min-width: 42rem;
     margin-top: 8px;
     font-size: 0.95rem;
+    table-layout: auto;
 }
 
 .text-box th,
@@ -700,6 +722,24 @@ textarea {
     padding: 6px 8px;
     text-align: left;
     vertical-align: top;
+}
+
+.text-box th:nth-child(1),
+.text-box td:nth-child(1) {
+    width: 11rem;
+}
+
+.text-box th:nth-child(2),
+.text-box td:nth-child(2) {
+    width: 6rem;
+    white-space: nowrap;
+}
+
+.text-box th:nth-child(3),
+.text-box td:nth-child(3) {
+    min-width: 16rem;
+    overflow-wrap: anywhere;
+    word-break: normal;
 }
 
 .text-box th {
@@ -857,6 +897,9 @@ textarea {
 
 .vertical-divider {
     width: 6px;
+    min-width: 6px;
+    flex: 0 0 6px;
+    align-self: stretch;
     cursor: col-resize;
     background-color: #ddd;
 }

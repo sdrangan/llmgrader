@@ -7,7 +7,6 @@ import os
 from urllib import response
 import pandas as pd
 from openai import OpenAI, APITimeoutError
-import xml.etree.ElementTree as ET
 import zipfile
 import re
 import sqlite3
@@ -22,11 +21,13 @@ from typing import Union, Literal
 from llmgrader.services.parselatex import parse_latex_soln
 import sys
 from markupsafe import Markup
-from pydantic import ValidationError
+from pydantic import ValidationError, ConfigDict, model_validator
 
 
 import sys
 from datetime import datetime, timezone
+from llmgrader.services.prompt import PromptBuilder
+from llmgrader.services.unit_parser import UnitParser
 
 def _ts():
     # timezone-aware UTC timestamp with millisecond precision
@@ -76,10 +77,39 @@ class GradeResult(BaseModel):
         When partial_credit==True and  grading a specific part or single-part question, the grader returns the points awarded for that part.  
         This value is copied post-grader to the appropriate position in `point_parts` for consistency.
         In all other cases, the value is derived post-grader by summing the point_parts.
+class RubricEvalItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    evidence: str
+    point_awarded: float | None = None
+    result: Literal["pass", "fail", "feedback", "n/a"] | None = None
+
+    @model_validator(mode="after")
+    def validate_outcome(self):
+        if self.point_awarded is None and self.result is None:
+            raise ValueError("rubric_eval items must include point_awarded or result.")
+        return self
+
+
     max_points : float | None
         The total maximum points for the question, i.e., sum(max_point_parts)
         The grader does not need to return this field since the backend will compute it.
-    result: Literal["pass", "fail", "error"] | list[Literal["pass", "fail", "error"]]
+    rubric_eval : dict[str, dict] | None
+    model_config = ConfigDict(extra="forbid")
+
+        For each rubric item id, the grader returns a dictionary for the assessment of 
+        each rubric item with the following fields:
+        rubric_eval[id]['evidence'] : str`
+            A concise description of the evidence observed in the student's solution as to why or why not
+            the condition of the rubric has been met.  
+        rubric_eval[id]['point_awarded'] : float
+    rubric_eval: dict[str, RubricEvalItem] | None = None
+            the point_adjustment specified for the rubric item in the XML.  If the condition is not met,
+            the point_awarded should be 0.  This fields is filled out only for partial_credit
+            grading.
+        rubric_eval[id]['result'] : "pass" | "fail" | "feedback" | "n/a"
+            The final recommended result in the case of binary grading.  
+            - 'fail' indicates that the rubric  
     """
     max_point_parts: float | list[float] | None
     point_parts: float | list[float] | None
@@ -89,6 +119,8 @@ class GradeResult(BaseModel):
     feedback: str
     points: float | None = None
     max_points: float | None
+    rubric_eval: dict[str, dict] | None = None
+
 
 
 class GraderRawResult(BaseModel):
@@ -101,56 +133,7 @@ class GraderRawResult(BaseModel):
     full_explanation: str
     feedback: str
     points: float | None = None
-
-
-
-def strip_code_block_leading_newlines(html_text):
-    """
-    Find <pre><code>...</code></pre> blocks and strip leading newlines from the code content.
-    
-    Args:
-        html_text: HTML text that may contain code blocks
-        
-    Returns:
-        HTML text with leading newlines removed from code blocks
-    """
-    def strip_newlines_match(match):
-        """Strip leading newlines from the code content in a regex match."""
-        code_content = match.group(1)
-        # Remove leading newlines (but preserve internal formatting)
-        stripped_code = code_content.lstrip('\n')
-        return f'<pre><code>{stripped_code}</code></pre>'
-    
-    # Pattern to match <pre><code>...</code></pre> blocks
-    # Uses non-greedy matching and DOTALL flag to handle multiline code
-    pattern = r'<pre><code>(.*?)</code></pre>'
-    result = re.sub(pattern, strip_newlines_match, html_text, flags=re.DOTALL)
-    
-    return result
-
-
-def clean_cdata(text: str) -> str:
-    """
-    Clean CDATA content from XML elements.
-    Removes leading newline, dedents, strips trailing whitespace, and cleans code blocks.
-    
-    Args:
-        text: Raw CDATA text content
-        
-    Returns:
-        Cleaned and dedented text
-    """
-    if not text:
-        return ""
-    # Remove a single leading newline if present
-    if text.startswith("\n"):
-        text = text[1:]
-    # Dedent and strip trailing whitespace
-    text = textwrap.dedent(text).strip()
-    # Strip leading newlines from code blocks
-    text = strip_code_block_leading_newlines(text)
-    return text
-
+    rubric_eval: dict[str, dict] | None = None
 
 def summarize_tool_calls(response) -> str:
     """
@@ -335,6 +318,12 @@ class Grader:
 
         # Initialize units dictionary
         self.units = {}
+        self.units_order = []
+        self.units_list = []
+        self.xml_path_list = []
+        self.unit_validation_errors = []
+        self.unit_validation_alert = None
+        self.prompt_builder = PromptBuilder()
 
         # Remove old scratch directory if it exists
         if os.path.exists(self.scratch_dir):
@@ -587,306 +576,60 @@ class Grader:
         # ---------------------------------------------------------
         if not self.units:
             print("[Upload] No units found after loading")
-            return {"error": "No valid units found. Check llmgrader_config.xml."}, 400
+            error_message = self.unit_validation_alert or "No valid units found. Check llmgrader_config.xml."
+            return {"error": error_message}, 400
 
         print(f"[Upload] Loaded {len(self.units)} unit(s): {list(self.units.keys())}")
 
-        return {"status": "ok"}
+        return {
+            "status": "ok",
+            "validation_alert": self.unit_validation_alert,
+        }
 
     def load_unit_pkg(self):
-        self.units = {}
+        parser = UnitParser(
+            scratch_dir=self.scratch_dir,
+            soln_pkg=self.soln_pkg,
+            supported_tools=self.SUPPORTED_TOOLS,
+        )
+        unit_package = parser.parse()
 
-        # Logging
-        fn = os.path.join(self.scratch_dir, "load_unit_pkg_log.txt")
-        log = open(fn, "w", encoding="utf-8")
-        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        log.write(f'Loading unit package at {now}\n')
-
-        # Set the solution package path.  If explicitly set in constructor, use it
-        if self.soln_pkg is not None:
-            soln_pkg_path = self.soln_pkg
-
-        else:
-            # Check unified storage root
-            storage_root = os.environ.get("LLMGRADER_STORAGE_PATH")
-
-            if storage_root:
-                soln_pkg_path = os.path.join(storage_root, "soln_pkg")
-            else:
-                # Local fallback
-                local_root = os.path.join(os.getcwd(), "local_data")
-                os.makedirs(local_root, exist_ok=True)
-                soln_pkg_path = os.path.join(local_root, "soln_pkg")
-
-        soln_pkg_path = os.path.abspath(soln_pkg_path)
-        os.makedirs(soln_pkg_path, exist_ok=True)
-        self.soln_pkg = soln_pkg_path
-
-        log.write(f'Using solution package path: {soln_pkg_path}\n')
-    
-
-        # Get the path to llmgrader_config.xml
-        llmgrader_config_path = os.path.join(soln_pkg_path, "llmgrader_config.xml")
-        if not os.path.exists(llmgrader_config_path):
-            log.write(f'llmgrader_config.xml not found in solution package: {llmgrader_config_path}\n')
+        if unit_package is None:
+            # Defensive: treat as empty package
+            self.soln_pkg = self.soln_pkg or None
             self.units = {}
-            log.close()
+            self.units_order = []
+            self.units_list = []
+            self.xml_path_list = []
+            self.unit_validation_errors = ["Unit package could not be loaded (None returned)"]
+            self.unit_validation_alert = "Unit package could not be loaded."
             return
 
-        
-        # Parse llmgrader_config.xml
-        try:
-            config_tree = ET.parse(llmgrader_config_path)
-            config_root = config_tree.getroot()
-            log.write(f'Successfully parsed llmgrader_config.xml\n')
-        except Exception as e:
-            log.write(f'Failed to parse llmgrader_config.xml: {e}\n')
-            self.units = {}
-            log.close()
-            return
-        
-        # Extract units from config
-        units_elem = config_root.find('units')
-        if units_elem is None:
-            log.write('No <units> section found in llmgrader_config.xml\n')
-            self.units = {}
-            log.close()
-            return
-        
-        # Build ordered list (sections + units) and parallel unit/path lists
-        self.units_order = []
-        self.units_list = []
-        self.xml_path_list = []
-
-        for child in units_elem:
-            if child.tag == 'section':
-                section_name = (child.text or '').strip()
-                self.units_order.append({"type": "section", "name": section_name})
-                log.write(f'Found section: {section_name}\n')
-            elif child.tag == 'unit':
-                name = child.findtext('name')
-                destination = child.findtext('destination')
-                if not name or not destination:
-                    log.write(f'Skipping unit: missing <name> or <destination> element\n')
-                    continue
-                self.units_order.append({"type": "unit", "name": name})
-                self.units_list.append(name)
-                self.xml_path_list.append(destination)
-                log.write(f'Found unit in config: {name} -> {destination}\n')
-
-        if not self.units_list:
-            log.write('No <unit> elements found in llmgrader_config.xml\n')
-            self.units = {}
-            log.close()
-            return
-
-        units = {}
-
-        # Loop over each unit and specified solution file
-        for name, xml_path in zip(self.units_list, self.xml_path_list):
-
-
-            xml_path = os.path.normpath(xml_path)
-            xml_path = os.path.join(soln_pkg_path, xml_path)
-
-            log.write(f'Processing unit: {name}\n')
-            log.write(f'  XML file: {xml_path}\n')
-
-            # Check that the path exists
-            if not os.path.exists(xml_path):
-                log.write(f"Skipping unit {name}: file {xml_path} does not exist.\n")
-                continue
-
-            # Parse the XML file
-            try:
-                tree = ET.parse(xml_path)
-                root = tree.getroot()
-            except Exception as e:
-                log.write(f"Skipping unit {name}: failed to parse XML: {e}\n")
-                continue
-
-            # Build unit_dict from XML
-            unit_dict = {}
-            
-            for question in root.findall('question'):
-                qtag = question.get('qtag')
-                if not qtag:
-                    log.write(f"Skipping question in unit {name}: missing qtag attribute\n")
-                    continue
-                
-                # Extract preferred_model attribute
-                preferred_model = question.get('preferred_model', '')
-                
-                # Extract question_text element (CDATA)
-                question_text_elem = question.find('question_text')
-                question_text = clean_cdata(question_text_elem.text if question_text_elem is not None else '')
-                
-                # Extract solution element (CDATA)
-                solution_elem = question.find('solution')
-                solution = clean_cdata(solution_elem.text if solution_elem is not None else '')
-                
-                # Extract grading_notes element (CDATA)
-                grading_notes_elem = question.find('grading_notes')
-                grading_notes = clean_cdata(grading_notes_elem.text if grading_notes_elem is not None else '')
-                
-                # Extract required element (boolean). Fall back to legacy <grade>.
-                required_elem = question.find('required')
-                if required_elem is None:
-                    required_elem = question.find('grade')
-                if required_elem is not None and required_elem.text:
-                    required = required_elem.text.strip().lower() == 'true'
-                else:
-                    required = True  # Default to true if not specified
-
-                # Extract partial_credit element (boolean)
-                partial_credit_elem = question.find('partial_credit')
-                if partial_credit_elem is not None and partial_credit_elem.text:
-                    partial_credit = partial_credit_elem.text.strip().lower() == 'true'
-                else:
-                    partial_credit = False
-
-                tools = []
-                for tool_elem in question.findall('tool'):
-                    if tool_elem.text is None:
-                        continue
-                    tool_name = tool_elem.text.strip()
-                    if not tool_name:
-                        continue
-                    if tool_name not in self.SUPPORTED_TOOLS:
-                        log.write(
-                            f"Warning: question {qtag} in unit {name} requested unsupported tool '{tool_name}'; ignoring.\n"
-                        )
-                        continue
-                    tools.append(tool_name)
-                
-                # Extract parts
-                parts = []
-                parts_elem = question.find('parts')
-                if parts_elem is not None:
-                    for part in parts_elem.findall('part'):
-                        part_id = part.get('id')
-                        part_label_elem = part.find('part_label')
-                        points_elem = part.find('points')
-                        
-                        # Use id attribute as part_label if part_label element not found
-                        if part_label_elem is not None and part_label_elem.text:
-                            part_label = part_label_elem.text.strip()
-                        elif part_id:
-                            part_label = part_id
-                        else:
-                            part_label = 'all'
-                        
-                        # Get points
-                        if points_elem is not None and points_elem.text:
-                            try:
-                                points = int(points_elem.text.strip())
-                            except ValueError:
-                                points = 0
-                        elif part.get('points'):
-                            try:
-                                points = int(part.get('points'))
-                            except ValueError:
-                                points = 0
-                        else:
-                            points = 0
-                        
-                        parts.append({
-                            'part_label': part_label,
-                            'points': points
-                        })
-                
-                # Build question dictionary
-                question_dict = {
-                    'qtag': qtag,
-                    'question_text': question_text,
-                    'solution': solution,
-                    'grading_notes': grading_notes,
-                    'parts': parts,
-                    'required': required,
-                    'partial_credit': partial_credit,
-                    'tools': tools,
-                    'preferred_model': preferred_model
-                }
-                
-                unit_dict[qtag] = question_dict
-
-            # Validate the unit_dict has required fields
-            required_fields = [
-                "qtag",
-                "question_text",
-                "solution",
-                "grading_notes",
-                "parts",
-                "required",
-            ]
-            
-            # Check that every question has the required fields
-            valid_questions = {}
-            for qtag in unit_dict:
-                qdict = unit_dict[qtag]
-                missing_fields = [field for field in required_fields if field not in qdict]
-                if missing_fields:
-                    log.write(f"Skipping question {qtag} in unit {name}: missing required fields: {missing_fields}\n")
-                    continue
-                valid_questions[qtag] = qdict
-                
-            # Update unit_dict with only valid questions
-            unit_dict = valid_questions
-            
-            if len(unit_dict) == 0:
-                log.write(f"Skipping unit {name}: no valid questions found\n")
-                continue
-                
-            # Log questions found
-            log.write(f"Unit {name} successfully loaded with questions:\n")
-            for qtag in unit_dict:
-                log.write(f"  qtag={qtag} \n")
-
-            units[name] = unit_dict
-
-
-        self.units = units
-
-        if len(self.units) == 0:
-            log.write("No valid directories units found.\n")    
-         
-        log.close()
-    
-    
-
+        self.soln_pkg = unit_package.soln_pkg_path
+        self.units = unit_package.units
+        self.units_order = unit_package.units_order
+        self.units_list = unit_package.units_list
+        self.xml_path_list = unit_package.xml_path_list
+        self.unit_validation_errors = unit_package.validation_errors
+        self.unit_validation_alert = unit_package.validation_alert
     
     def build_task_prompt(
         self,
-        question_text : str,
-        ref_solution : str,
-        grading_notes : str,
+        question_dict: dict,
         student_soln : str,
         part_label: str = "all",
-        partial_credit: bool = False,
-        part_labels: list[str] | None = None,
-        max_points: list[int] | None = None,
     ) -> tuple[str, int | list[int] | None]:
         """
         Build the grading prompt sent to the language model.
 
         Parameters
         ----------
-        question_text: str
-            The question text in HTML format.
-        ref_solution: str
-            The reference solution text.
-        grading_notes: str
-            Instructor grading notes used to guide evaluation.
+        question_dict: dict
+            The question configuration dictionary loaded from the unit package.
         student_soln: str
             The student's submitted solution text.
         part_label: str
             The specific part being graded, or "all" for whole-question grading.
-        partial_credit: bool
-            Whether the question is configured to allow partial credit.
-        part_labels: list[str] | None
-            Ordered list of part labels defined for the question.
-        max_points: list[int] | None
-            Ordered list of maximum point values corresponding to part_labels.
 
         Returns
         -------
@@ -900,244 +643,7 @@ class Grader:
             the maximum points for that part.  Note that this field is returned even if partial_credit is False,
             since the maximum points may still be relevant for grading and feedback.
         """
-        prompt = textwrap.dedent("""
-            Your task is to grade a student's solution to an engineering problem.
-
-            You will be given:
-            - HTML version of the question,
-            - HTML version of a correct reference solution,
-            - Plain text grading notes, and
-            - Plain text student solution.
-
-            Return only the fields explicitly requested below.
-            The backend will compute derived fields such as max_point_parts, max_points,
-            aggregate result, aggregate points, and any fields not explicitly requested.
-            Text fields such as "full_explanation" and "feedback" may use Markdown,
-            including paragraphs, lists, and tables.
-        """)
-        json_requirement = textwrap.dedent("""
-            Important rules:
-            - Return only the requested fields.
-            - Do not include any extra fields, labels, maximum-point values, or computed totals.
-            - Return exactly one valid JSON object and nothing else. Do not include code fences, markdown, comments, explanations, or any text before or after the JSON object.
-        """).strip()
-
-        multi_part = part_labels is not None and len(part_labels) > 1
-        max_points_part = None
-
-        if max_points is not None:
-            if multi_part and part_label == "all":
-                max_points_part = max_points
-            elif max_points:
-                if multi_part and part_labels:
-                    try:
-                        part_index = part_labels.index(part_label)
-                        max_points_part = max_points[part_index]
-                    except (ValueError, IndexError):
-                        max_points_part = None
-                else:
-                    max_points_part = max_points[0]
-
-        if partial_credit:
-            if not part_labels or not max_points or len(part_labels) != len(max_points):
-                partial_credit = False
-
-        # ---------- Mode 1: partial credit, multi-part, grade ALL ----------
-        if partial_credit and multi_part and part_label == "all":
-            prompt += "\nThis question allows partial credit. It has multiple parts.\n"
-            prompt += "The parts and their maximum points are:\n\n"
-            for lbl, pts in zip(part_labels, max_points):
-                prompt += f"- ({lbl}): max_points = {pts}\n"
-
-            prompt += textwrap.dedent(f"""
-                
-                You must return a JSON object with the following fields:
-
-                - "point_parts": a list of numeric values, one for each part, in the exact order above.
-                Each point value must be between 0 and the maximum points for that part.
-                - "full_explanation": a detailed explanation of your grading reasoning.
-                - "feedback": concise (up to 5 sentences, unless otherwise specified in the grading notes), 
-                student-facing guidance that helps the student improve without revealing the reference solution or grading notes.
-
-                Follow these steps:
-
-                1. For each part, carefully identify the student's answer for that part. Students may
-                write answers out of order or embed multiple parts together. Use your judgment to
-                isolate the portion corresponding to each part.
-                2. Compare the student's work for each part to the corresponding part in the reference
-                solution, using the grading notes as guidance.
-                3. In "full_explanation", explain your reasoning step by step, describing what is correct
-                and what is incorrect for each part.
-                4. Based on your reasoning and the grading notes, assign a numeric score to each part,
-                between 0 and that part's maximum points. Place these point values in the "point_parts" list in
-                the exact order given above.
-                5. In "feedback", provide concise, student-facing guidance that helps the student improve,
-                without revealing the reference solution or grading notes.
-
-                {json_requirement}
-            """)
-
-        # ---------- Mode 2: partial credit,  multi-part,  grading one part ----------
-        elif partial_credit and multi_part:
-            idx = part_labels.index(part_label)
-            max_points_part = max_points[idx]
-
-            prompt += f"\nThis question allows partial credit. You are grading only part ({part_label}).\n"
-            prompt += f"The maximum points for this part is {max_points_part} points.\n\n"
-
-            prompt += textwrap.dedent(f"""
-                You must return a JSON object with the following fields:
-
-                - "points": the numeric points for this part, between 0 and {max_points_part}.
-                - "full_explanation": a detailed explanation of your grading reasoning for this part.
-                - "feedback": concise (up to 5 sentences), student-facing guidance that helps the
-                student improve without revealing the reference solution or grading notes.
-
-                Follow these steps:
-
-                1. Extract the student's answer for part ({part_label}) from the student solution.
-                Students may write answers out of order or embed multiple parts together. Use your
-                judgment to isolate the portion corresponding to part ({part_label}).
-                2. Compare the student's solution for part ({part_label}) to the corresponding part in the
-                reference solution, using the grading notes as guidance.
-                3. In "full_explanation", work through your reasoning step by step, explaining what is
-                correct and what is incorrect.
-                4. Based on your reasoning and the grading notes, decide how many points (from 0 to
-                {max_points_part}) the student earns for this part and set "points" to that numeric value.
-                5. In "feedback", provide concise, student-facing guidance that helps the student improve,
-                without revealing the reference solution or grading notes.
-
-                {json_requirement}
-            """)
-        # ---------- Mode 3: partial credit,  single part ----------
-        elif partial_credit:
-            max_points_question = max_points[0]
-
-            prompt += "\nThis question allows partial credit. It has a single part.\n"
-            prompt += f"The maximum points for this question is {max_points_question} points.\n\n"
-
-            prompt += textwrap.dedent(f"""
-            You must return a JSON object with the following fields:
-
-            - "points": the numeric points for this question, between 0 and {max_points_question}.
-            - "full_explanation": a detailed explanation of your grading reasoning.
-            - "feedback": concise (up to 5 sentences), student-facing guidance that helps the
-            student improve without revealing the reference solution or grading notes.
-
-            Follow these steps:
-
-            1. Read the student's solution carefully.
-            2. Compare the student's solution to the reference solution, using the grading notes as guidance.
-            3. In "full_explanation", work through your reasoning step by step, explaining what is
-            correct and what is incorrect.
-            4. Based on your reasoning and the grading notes, decide how many points (from 0 to
-            {max_points_question}) the student earns and set "points" to that numeric value.
-            5. In "feedback", provide concise, student-facing guidance that helps the student improve,
-            without revealing the reference solution or grading notes.
-
-            {json_requirement}
-            """)
-
-
-        # ---------- Mode 4: binary, multi-part, grade ALL ----------
-        elif not partial_credit and multi_part and part_label == "all":
-            prompt += "\nThis question has multiple parts. The parts are:\n\n"
-            for lbl in part_labels:
-                prompt += f"- ({lbl})\n"
-
-            prompt += textwrap.dedent(f"""
-                This question is configured for binary grading (no partial credit).
-
-                You must return a JSON object with the following fields:
-
-                - "result_parts": a list with one value for each part, in the same order as the parts above.
-                Each value must be one of "pass", "fail", or "error".
-                - "full_explanation": a detailed explanation of your grading reasoning.
-                - "feedback": concise (up to 5 sentences), student-facing guidance that helps the
-                student improve without revealing the reference solution or grading notes.
-
-                Follow these steps:
-
-                1. For each part, carefully identify the student's answer for that part. Students may
-                write answers out of order or embed multiple parts together. Use your judgment to
-                isolate the portion corresponding to each part.
-                2. Compare the student's work for each part to the corresponding part in the reference
-                solution, using the grading notes as guidance.
-                3. In "full_explanation", work through your reasoning step by step, explaining what is
-                correct and what is incorrect for each part.
-                4. After you have completed your reasoning, decide the correctness of each part and place
-                the corresponding values in "result_parts" in the exact part order above.
-                5. In "feedback", provide concise, student-facing guidance that helps the student improve,
-                without revealing the reference solution or grading notes.
-
-                {json_requirement}
-            """)
-
-        
-        elif multi_part:
-            prompt += f"\nThis question is configured for binary grading. You are grading only part ({part_label}).\n\n"
-
-            prompt += textwrap.dedent(f"""
-                You must return a JSON object with the following fields:
-
-                - "result": "pass", "fail", or "error"
-                - "full_explanation": a detailed explanation of your grading reasoning for this part.
-                - "feedback": concise (up to 5 sentences), student-facing guidance that helps the
-                student improve without revealing the reference solution or grading notes.
-
-                Follow these steps:
-
-                1. Extract the student's answer for part ({part_label}) from the student solution.
-                Students may write answers out of order or embed multiple parts together. Use your
-                judgment to isolate the portion corresponding to part ({part_label}).
-                2. Compare the student's solution for part ({part_label}) to the corresponding part in the
-                reference solution, using the grading notes as guidance.
-                3. In "full_explanation", work through your reasoning step by step, explaining what is
-                correct and what is incorrect.
-                4. After you have completed your reasoning, decide the correctness for this part:
-                - If the solution is correct, set "result" to "pass".
-                - If the solution is incorrect, set "result" to "fail".
-                - If you cannot grade due to missing or inconsistent information, set "result" to "error".
-                5. In "feedback", provide concise, student-facing guidance that helps the student improve,
-                without revealing the reference solution or grading notes.
-
-                {json_requirement}
-            """)
-
-
-        else:  # Mode 6: binary, single-part question
-            prompt += "\nThis question is configured for binary grading (no partial credit).\n\n"
-
-            prompt += textwrap.dedent(f"""
-                You must return a JSON object with the following fields:
-
-                - "result": "pass", "fail", or "error"
-                - "full_explanation": a detailed explanation of your grading reasoning.
-                - "feedback": concise (up to 5 sentences), student-facing guidance that helps the
-                student improve without revealing the reference solution or grading notes.
-
-                Follow these steps:
-
-                1. Read the student's solution carefully.
-                2. Compare the student's solution to the reference solution, using the grading notes as guidance.
-                3. In "full_explanation", work through your reasoning step by step, explaining what is
-                correct and what is incorrect.
-                4. After you have completed your reasoning, decide the overall correctness:
-                - If the solution is correct, set "result" to "pass".
-                - If the solution is incorrect, set "result" to "fail".
-                - If you cannot grade due to missing or inconsistent information, set "result" to "error".
-                5. In "feedback", provide concise, student-facing guidance that helps the student improve,
-                without revealing the reference solution or grading notes.
-
-                {json_requirement}
-            """)
-
-        prompt += "\n\n--- QUESTION HTML ---\n" + question_text
-        prompt += "\n\n--- REFERENCE SOLUTION HTML ---\n" + ref_solution
-        prompt += "\n\n--- GRADING NOTES ---\n" + grading_notes
-        prompt += "\n\n--- STUDENT SOLUTION ---\n" + student_soln
-
-        return prompt, max_points_part
+        return self.prompt_builder.build_task_prompt(question_dict, student_soln, part_label)
 
     def grade_post_process(
         self,
@@ -1146,6 +652,8 @@ class Grader:
         max_points_part: int | list[int] | None,
         part_labels: list[str] | None = None,
         part_label: str = "all",
+        rubrics: dict[str, dict] | None = None,
+        rubric_total: str | None = None,
         tools: list[str] | None = None,
         tool_call_summary: str | None = None,
     ) -> GradeResult:
@@ -1154,6 +662,7 @@ class Grader:
         """
         full_explanation = str(raw_grade.get("full_explanation", ""))
         feedback = str(raw_grade.get("feedback", ""))
+        rubric_eval = raw_grade.get("rubric_eval")
 
         def total_max_points(value):
             if isinstance(value, list):
@@ -1189,7 +698,7 @@ class Grader:
             return "partial"
 
         def append_result_table(
-            explanation: str,
+            text: str,
             point_parts_value,
             max_point_parts_value,
             result_parts_value,
@@ -1207,14 +716,14 @@ class Grader:
 
             table_lines = [
                 "",
-                "| part_label | points | max_points | result |",
+                "| Part | points | max_points | result |",
                 "| --- | --- | --- | --- |",
             ]
             for row_label, row_point, row_max_point, row_result in zip(row_labels, row_points, row_max_points, row_results):
                 table_lines.append(f"| {row_label} | {row_point} | {row_max_point} | {row_result} |")
 
-            if explanation:
-                return explanation + "\n" + "\n".join(table_lines)
+            if text:
+                return text + "\n" + "\n".join(table_lines)
             return "\n".join(table_lines).lstrip("\n")
 
         def append_tool_summary(explanation: str, tool_names: list[str] | None, summary: str | None) -> str:
@@ -1229,6 +738,61 @@ class Grader:
             if explanation:
                 return explanation + "\n\n" + summary_block
             return summary_block
+
+        def append_rubric_feedback(
+            feedback_text: str,
+            rubric_eval_value,
+            rubric_definitions: dict[str, dict] | None,
+        ) -> str:
+            if not isinstance(rubric_eval_value, dict) or not rubric_eval_value:
+                return feedback_text
+
+            def table_cell(value) -> str:
+                text = str(value if value is not None else "")
+                text = " ".join(text.splitlines())
+                return text.replace("|", "\\|").strip()
+
+            rubric_definitions = rubric_definitions or {}
+            rubric_lines = [
+                "",
+                "Rubric evaluation:",
+                "| Criteria | Points | Evaluation |",
+                "| --- | --- | --- |",
+            ]
+
+            for rubric_id, rubric_entry in rubric_eval_value.items():
+                if hasattr(rubric_entry, "model_dump"):
+                    rubric_entry = rubric_entry.model_dump()
+                if not isinstance(rubric_entry, dict):
+                    continue
+
+                rubric_meta = rubric_definitions.get(rubric_id, {})
+                part = rubric_meta.get("part", "all")
+                display_text = rubric_meta.get("display_text", rubric_id)
+                point_adjustment = rubric_meta.get("point_adjustment")
+                point_awarded = rubric_entry.get("point_awarded")
+                evidence = str(rubric_entry.get("evidence", "")).strip()
+
+                criteria_text = display_text if part == "all" else f"Part {part}: {display_text}"
+
+                points_text = f"{point_awarded} / {point_adjustment}"
+                rubric_lines.append(
+                    "| "
+                    + table_cell(criteria_text)
+                    + " | "
+                    + table_cell(points_text)
+                    + " | "
+                    + table_cell(evidence or "None")
+                    + " |"
+                )
+
+            if len(rubric_lines) == 4:
+                return feedback_text
+
+            appendix = "\n".join(rubric_lines)
+            if feedback_text:
+                return feedback_text + "\n\n" + appendix.lstrip("\n")
+            return appendix.lstrip("\n")
 
         def invalid_grade(message: str) -> GradeResult:
             explanation = full_explanation
@@ -1248,27 +812,128 @@ class Grader:
                 result_parts=result_parts_value,
                 result="error",
                 full_explanation=explanation,
-                feedback=feedback,
+                feedback=append_rubric_feedback(feedback, rubric_eval, rubrics),
                 points=None,
                 max_points=total_max_points(max_points_part),
+                rubric_eval=rubric_eval,
             )
 
         max_points_total = total_max_points(max_points_part)
 
+        def rubric_points_total(rubric_eval_value, max_value: float | None, mode: str | None) -> float | None:
+            if not isinstance(rubric_eval_value, dict) or not rubric_eval_value:
+                return None
+            if mode == "flexible":
+                return None
+
+            total = 0.0
+            saw_numeric_award = False
+            for rubric_entry in rubric_eval_value.values():
+                if hasattr(rubric_entry, "model_dump"):
+                    rubric_entry = rubric_entry.model_dump()
+                if not isinstance(rubric_entry, dict):
+                    continue
+
+                point_awarded = rubric_entry.get("point_awarded")
+                if point_awarded is None:
+                    continue
+                if not isinstance(point_awarded, (int, float)) or isinstance(point_awarded, bool):
+                    return None
+
+                total += float(point_awarded)
+                saw_numeric_award = True
+
+            if not saw_numeric_award:
+                return None
+
+            if mode == "sum_negative" and max_value is not None:
+                total = float(max_value) + total
+
+            if max_value is None:
+                return total
+            return max(0.0, min(float(max_value), total))
+
+        def rubric_point_parts_total(
+            rubric_eval_value,
+            rubrics_value: dict[str, dict] | None,
+            labels: list[str] | None,
+            max_values: list[float] | None,
+            mode: str | None,
+        ) -> list[float] | None:
+            if mode == "flexible":
+                return None
+            if not isinstance(rubric_eval_value, dict) or not rubric_eval_value:
+                return None
+            if not isinstance(rubrics_value, dict) or not rubrics_value:
+                return None
+            if not labels or not max_values or len(labels) != len(max_values):
+                return None
+
+            if mode == "sum_negative":
+                point_parts_total = [float(value) for value in max_values]
+            else:
+                point_parts_total = [0.0 for _ in max_values]
+
+            saw_numeric_award = False
+            for rubric_id, rubric_entry in rubric_eval_value.items():
+                if hasattr(rubric_entry, "model_dump"):
+                    rubric_entry = rubric_entry.model_dump()
+                if not isinstance(rubric_entry, dict):
+                    continue
+
+                point_awarded = rubric_entry.get("point_awarded")
+                if point_awarded is None:
+                    continue
+                if not isinstance(point_awarded, (int, float)) or isinstance(point_awarded, bool):
+                    return None
+
+                rubric_data = rubrics_value.get(rubric_id)
+                if not isinstance(rubric_data, dict):
+                    continue
+
+                rubric_part = rubric_data.get("part", "all")
+                if rubric_part == "all":
+                    return None
+
+                try:
+                    part_index = labels.index(rubric_part)
+                except ValueError:
+                    return None
+
+                point_parts_total[part_index] += float(point_awarded)
+                saw_numeric_award = True
+
+            if not saw_numeric_award:
+                return None
+
+            return [
+                max(0.0, min(float(max_value), float(point_value)))
+                for point_value, max_value in zip(point_parts_total, max_values)
+            ]
+
         if partial_credit:
             if isinstance(max_points_part, list):
-                raw_point_parts = raw_grade.get("point_parts")
-                if not isinstance(raw_point_parts, list) or len(raw_point_parts) != len(max_points_part):
-                    return invalid_grade("Grader error: expected point_parts as a list matching the part structure.")
+                point_parts = rubric_point_parts_total(
+                    rubric_eval,
+                    rubrics,
+                    part_labels,
+                    max_points_part,
+                    rubric_total,
+                )
 
-                point_parts: list[float] = []
-                for point_value, max_value in zip(raw_point_parts, max_points_part):
-                    if not isinstance(point_value, (int, float)) or isinstance(point_value, bool):
-                        return invalid_grade("Grader error: all values in point_parts must be numeric.")
-                    point_value = float(point_value)
-                    if point_value < 0 or point_value > float(max_value):
-                        return invalid_grade("Grader error: point_parts contains a value outside the allowed range.")
-                    point_parts.append(point_value)
+                if point_parts is None:
+                    raw_point_parts = raw_grade.get("point_parts")
+                    if not isinstance(raw_point_parts, list) or len(raw_point_parts) != len(max_points_part):
+                        return invalid_grade("Grader error: expected point_parts as a list matching the part structure.")
+
+                    point_parts = []
+                    for point_value, max_value in zip(raw_point_parts, max_points_part):
+                        if not isinstance(point_value, (int, float)) or isinstance(point_value, bool):
+                            return invalid_grade("Grader error: all values in point_parts must be numeric.")
+                        point_value = float(point_value)
+                        if point_value < 0 or point_value > float(max_value):
+                            return invalid_grade("Grader error: point_parts contains a value outside the allowed range.")
+                        point_parts.append(point_value)
 
                 result_parts = [
                     classify_points(point_value, max_value)
@@ -1283,21 +948,29 @@ class Grader:
                     result_parts=result_parts,
                     result=result,
                     full_explanation=append_tool_summary(
-                        append_result_table(full_explanation, point_parts, max_points_part, result_parts),
+                        full_explanation,
                         tools,
                         tool_call_summary,
                     ),
-                    feedback=feedback,
+                    feedback=append_rubric_feedback(
+                        append_result_table(feedback, point_parts, max_points_part, result_parts),
+                        rubric_eval,
+                        rubrics,
+                    ),
                     points=points,
                     max_points=max_points_total,
+                    rubric_eval=rubric_eval,
                 )
 
-            raw_points = raw_grade.get("points")
-            if not isinstance(raw_points, (int, float)) or isinstance(raw_points, bool):
-                return invalid_grade("Grader error: expected numeric points for this grading mode.")
-
-            points_value = float(raw_points)
             scalar_max_points = max_points_total
+            points_value = rubric_points_total(rubric_eval, scalar_max_points, rubric_total)
+
+            if points_value is None:
+                raw_points = raw_grade.get("points")
+                if not isinstance(raw_points, (int, float)) or isinstance(raw_points, bool):
+                    return invalid_grade("Grader error: expected numeric points for this grading mode.")
+                points_value = float(raw_points)
+
             if scalar_max_points is not None and (points_value < 0 or points_value > scalar_max_points):
                 return invalid_grade("Grader error: points is outside the allowed range.")
 
@@ -1309,13 +982,18 @@ class Grader:
                 result_parts=result_parts,
                 result=result,
                 full_explanation=append_tool_summary(
-                    append_result_table(full_explanation, points_value, max_points_part, result_parts),
+                    full_explanation,
                     tools,
                     tool_call_summary,
                 ),
-                feedback=feedback,
+                feedback=append_rubric_feedback(
+                    append_result_table(feedback, points_value, max_points_part, result_parts),
+                    rubric_eval,
+                    rubrics,
+                ),
                 points=points_value,
                 max_points=max_points_total,
+                rubric_eval=rubric_eval,
             )
 
         valid_results = {"pass", "fail", "error"}
@@ -1338,13 +1016,18 @@ class Grader:
                 result_parts=raw_result_parts,
                 result=result,
                 full_explanation=append_tool_summary(
-                    append_result_table(full_explanation, point_parts, max_points_part, raw_result_parts),
+                    full_explanation,
                     tools,
                     tool_call_summary,
                 ),
-                feedback=feedback,
+                feedback=append_rubric_feedback(
+                    append_result_table(feedback, point_parts, max_points_part, raw_result_parts),
+                    rubric_eval,
+                    rubrics,
+                ),
                 points=float(sum(point_parts)),
                 max_points=max_points_total,
+                rubric_eval=rubric_eval,
             )
 
         raw_result = raw_grade.get("result")
@@ -1358,13 +1041,18 @@ class Grader:
             result_parts=raw_result,
             result=raw_result,
             full_explanation=append_tool_summary(
-                append_result_table(full_explanation, point_parts, max_points_part, raw_result),
+                full_explanation,
                 tools,
                 tool_call_summary,
             ),
-            feedback=feedback,
+            feedback=append_rubric_feedback(
+                append_result_table(feedback, point_parts, max_points_part, raw_result),
+                rubric_eval,
+                rubrics,
+            ),
             points=point_parts,
             max_points=max_points_total,
+            rubric_eval=rubric_eval,
         )
 
 
@@ -1577,15 +1265,8 @@ class Grader:
 
     def grade(
             self, 
-            question_text: str, 
-            solution : str, 
-            grading_notes: str, 
+            question_dict: dict,
             student_soln : str, 
-            required: bool = True,
-            partial_credit: bool = False,
-            tools: list[str] | None = None,
-            part_labels: list[str] | None = None,
-            max_points: list[int] | None = None,
             part_label: str="all",
             unit_name: str = "",
             qtag: str = "",
@@ -1598,24 +1279,10 @@ class Grader:
         
         Parameters
         ----------
-        question_text: str
-            The HTML question text.
-        solution: str
-            The reference solution text.
-        grading_notes: str
-            The grading notes text.
+        question_dict: dict
+            The question configuration dictionary loaded from the unit package.
         student_soln: str
             The student's solution text.
-        required: bool
-            Whether the question is required for submission/export workflows.
-        partial_credit: bool
-            Whether partial credit grading is enabled for this question.
-        tools: list[str] | None
-            Supported tool names requested by the question configuration.
-        part_labels: list[str] | None
-            The ordered list of part labels defined for the question.
-        max_points: list[int] | None
-            The ordered list of maximum points for each part.
         part_label: str
             The part label to grade (or "all" for whole question).
         unit_name: str
@@ -1637,50 +1304,35 @@ class Grader:
             The grading dictionary result containing 'result', 'full_explanation', and 'feedback'.
             Note the pydantic GradeResult model is converted to a dict before returning.
         """
-        # Initialize variables
+        question_text = str(question_dict.get("question_text", ""))
+        solution = str(question_dict.get("solution", ""))
+        grading_notes = str(question_dict.get("grading_notes", ""))
+        required = question_dict.get("required", True) is not False
+        partial_credit = question_dict.get("partial_credit", False) is True
+        tools = question_dict.get("tools", [])
+        parts = question_dict.get("parts", [])
+        rubrics = question_dict.get("rubrics", {})
+        rubric_total = question_dict.get("rubric_total")
+        part_labels = [part.get("part_label", "all") for part in parts]
+        max_points = [part.get("points", 0) for part in parts]
+        if not qtag:
+            qtag = str(question_dict.get("qtag", ""))
+
         grade = None
         tokens_in = 0
         tokens_out = 0
         timed_out = False
-        used_admin_key = False
         tool_call_summary = None
-    
-        # Start measuring time
+        used_admin_key = False
         t0 = time.time()
 
-        log_std(
-            f"partial_credit={partial_credit}, part_labels={part_labels}, "
-            f"max_points={max_points}, tools={tools}"
-        )
-
-        
-        # ---------------------------------------------------------
-        # 1. Build the task prompt
-        # ---------------------------------------------------------
         task, max_points_part = self.build_task_prompt(
-            question_text,
-            solution,
-            grading_notes,
+            question_dict,
             student_soln,
             part_label=part_label,
-            partial_credit=partial_credit,
-            part_labels=part_labels,
-            max_points=max_points,
         )
 
-        # ---------------------------------------------------------
-        # 2. Write task prompt to scratch/task.txt
-        # ---------------------------------------------------------
-        task_path = os.path.join(self.scratch_dir, "task.txt")
-        with open(task_path, "w", encoding="utf-8") as f:
-            f.write(task)
-
-        # ---------------------------------------------------------
-        # 3. Call the LLM API with timeout handling
-        # ---------------------------------------------------------
-
-        # Create the OpenAI LLM client
-        if not api_key or not api_key.strip():
+        if provider == "openai" and not api_key:
             admin_key, reason = self.get_admin_key(model)
             if admin_key is None:
                 token = self.api_key_walkthrough()
@@ -1694,12 +1346,12 @@ class Grader:
                     max_points_part=max_points_part,
                     part_labels=part_labels,
                     part_label=part_label,
+                    rubrics=rubrics,
+                    rubric_total=rubric_total,
                     tools=tools,
                 ).model_dump()
             api_key = admin_key
             used_admin_key = True
-        else:
-            used_admin_key = False
 
         # Only attempt API call if no error yet
         if grade is None:
@@ -1772,6 +1424,8 @@ class Grader:
             max_points_part=max_points_part,
             part_labels=part_labels,
             part_label=part_label,
+            rubrics=rubrics,
+            rubric_total=rubric_total,
             tools=tools,
             tool_call_summary=tool_call_summary,
         ).model_dump()
