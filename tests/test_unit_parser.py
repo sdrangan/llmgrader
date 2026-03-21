@@ -65,3 +65,19 @@ def test_parse_skips_invalid_units_and_sets_alert(tmp_path: Path) -> None:
     assert "failed validation" in package.validation_alert
     assert len(package.validation_errors) == 1
     assert "unit_broken.xml" in package.validation_errors[0]
+
+
+def test_parse_skips_semantically_invalid_rubric_units_and_sets_alert(tmp_path: Path) -> None:
+    _stage_package(tmp_path, "config_semantic_broken_unit.xml")
+
+    package = _make_parser(tmp_path).parse()
+
+    assert sorted(package.units.keys()) == ["Fixture Good Unit"]
+    assert package.units_order == [{"type": "unit", "name": "Fixture Good Unit"}]
+    assert package.units_list == ["Fixture Good Unit"]
+    assert package.xml_path_list == ["unit_good.xml"]
+    assert package.validation_alert is not None
+    assert "failed validation" in package.validation_alert
+    assert any("unit_semantic_broken.xml" in error for error in package.validation_errors)
+    assert any("does not allow rubric item" in error for error in package.validation_errors)
+    assert any("requires positive rubric items" in error for error in package.validation_errors)

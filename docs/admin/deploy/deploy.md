@@ -7,12 +7,13 @@ has_children: false
 
 # Deploying the LLM Grader on Render 
 
-Our next step is to launch the LLM grader to [Render](https://render.com/) using a GitHub repository and a persistent disk.
+## 🚀 Overview
+
+
+LLM grader is generally hosted on a server.  We suggest [Render](https://render.com/) 
+that can directly load from a GitHub repository and a persistent disk.
 Render handles the build, environment, and hosting automatically, so deployment is simple and repeatable.
 
----
-
-## 🚀 Overview
 
 A Render deployment consists of:
 
@@ -161,7 +162,10 @@ If you ever need to reset the grader:
 
 This does **not** affect your code deployment.
 
-
+Once you are deployed, you can [upload the course package](../buildcourse/upload.md)
 
 ---
-Next: Go to [uploading a solution package](./upload.md) for instructions on packaging and uploading units to the admin interface.
+
+Go to [setting the admin password](./password.md)
+
+

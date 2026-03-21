@@ -1,7 +1,7 @@
 ---
 title:  Creating HTML Files
 parent: Building a Course Package
-nav_order: 4
+nav_order: 5
 has_children: false
 ---
 
@@ -34,26 +34,26 @@ If the `--soln` option is not selected, the program will generate
 a **student-facing** HTML (no solutions shown). For example,
 
 ```bash
-create_qfile unit1/basic_logic.xml
+create_qfile unit1/calculus.xml
 ```
 produces an HTML file:
 
 ```bash
-unit1/basic_logic.html
+unit1/calculus.html
 ```
 
-If the `--pdf` option is selected, the output will be  `unit1/basic_logic.pdf` along
+If the `--pdf` option is selected, the output will be  `unit1/calculus.pdf` along
 with the HTML file.  Similarly, if the `--soln` option is selected:
 
 ```bash
 create_qfile --soln [--pdf] unit1/basic_logic.xml
 ```
 
-the program will generate `unit1/basic_logic_soln.html` and/or 
-`unit1/basic_logic_soln.pdf` which contains the questions and solutions.
+the program will generate `unit1/calculus_soln.html` and/or 
+`unit1/calculus_soln.pdf` which contains the questions and solutions.
 This version is intended for instructors, TA(s), or students after they have
 submitted their solution.
 
 ---
 
-Next:  Go to [deploying the autograder on Render](./deploy.md)
+Next:  Go to [uploading the solution package](./dupload.md)

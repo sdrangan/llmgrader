@@ -8,11 +8,13 @@ has_children: false
 # Unit XML Format 
 
 Each unit in the course is described by a **unit XML file**.
-This file defines the questions, reference solutions, grading notes, point assignments, and other metadata needed by the LLM grader.
-A complete example is available in the repository at:
+This file defines the questions, reference solutions, grading rubrics and notes, point assignments, and other metadata needed by the LLM grader.
+Two examples available in the repository at:
 
 ```
-llmgrader/example_repo/unit1/basic_logic.xml
+llmgrader/example_repo/unit1/unit1_calculus.xml
+llmgrader/example_repo/unit1/unit1_python.xml
+
 ```
 
 This document explains the structure and meaning of each element in the unit XML schema.
@@ -28,11 +30,13 @@ A unit XML file has the following high‑level structure:
     <question ...>
         <text>...</text>
         <solution>...</solution>
-        <grading_notes>...</grading_notes>
+
         <parts>...</parts>
         <required>...</required>
         <tool>...</tool>
         <preferred_model>...</preferred_model>
+        <rubrics>...</rubrics>
+        <grading_notes>...<grading_notes>
     </question>
 
     <!-- Additional <question> elements -->
@@ -47,7 +51,7 @@ The `<unit>` element is the root.  Each `<question>` element defines one questio
 
 | Attribute | Required | Description |
 |----------|----------|-------------|
-| `id` | Yes | A unique identifier for the unit (e.g., `unit1_basic_logic`) |
+| `id` | Yes | A unique identifier for the unit (e.g., `calculus`) |
 
 The `<unit>` element contains one or more `<question>` elements.
 
@@ -64,23 +68,26 @@ Each question is defined by a `<question>` block.
 
 A question typically contains:
 
-- `<text>` — the question prompt (HTML allowed)
+- `<question_text>` — the question prompt (HTML allowed)
 - `<solution>` — the reference solution (HTML allowed)
-- `<grading_notes>` — instructor notes for the grader
 - `<parts>` — optional breakdown of points
 - `<required>` — optional flag controlling whether the question is required in normal grading/export flows
 - `<tool>` — optional built-in tool request for the grader
 - `<preferred_model>` — optional model hint for the grader
+- `<rubrics>` — optional grading rubrics
+- `<grading_notes>` — instructor notes for the grader
+
+The `rubrics` and `grading_notes` elements are described in the [next section](./rubrics.md).
 
 ---
 
-## 📝 `<text>` Element
+## 📝 `<question_text>` Element
 
 Contains the question prompt.  HTML is allowed and often wrapped in CDATA:
 
 ```xml
 <text><![CDATA[
-    <p>Explain the propagation delay of this circuit.</p>
+    <p>Find the derivative of \( y = a e^{bx} \).</p>
 ]]></text>
 ```
 
@@ -93,17 +100,6 @@ This is what the grader uses to evaluate student responses.
 
 ---
 
-## 🧾 `<grading_notes>` Element
-
-Optional instructor‑only notes that help guide the grader’s reasoning.  
-These notes are not shown to students.  Examples include:
-
-- common misconceptions  
-- expected reasoning steps  
-- acceptable alternate answers  
-
----
-
 ## 🧩 `<parts>` Element (Optional)
 
 Breaks the question into sub‑components for partial credit.
@@ -112,8 +108,8 @@ Structure:
 
 ```xml
 <parts>
-    <part id="p1" points="5">Correct formula</part>
-    <part id="p2" points="5">Correct numeric evaluation</part>
+    <part id="a" points="5">Correct formula</part>
+    <part id="b" points="5">Correct numeric evaluation</part>
 </parts>
 ```
 
@@ -190,35 +186,6 @@ Example values:
 - `claude-3.5-sonnet`
 
 If omitted, the grader uses the system default.
-
----
-
-## 🧪 Validation Rules
-
-The grader enforces:
-
-- `<unit>` must contain at least one `<question>`
-- Each `<question>` must have:
-  - `qtag`
-  - `points`
-  - `<text>`
-  - `<solution>`
-- Points must be numeric
-- `<parts>` (if present) must sum to the question’s total points
-
-Malformed XML results in a clear error during upload.
-
----
-
-## 📚 Example Reference
-
-A complete, real‑world example is available at:
-
-```
-llmgrader/example_repo/unit1/basic_logic.xml
-```
-
-This is the best place to see the schema in action.
 
 ---
 

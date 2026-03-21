@@ -1,3 +1,10 @@
+---
+title:  Rubrics and Grading Notes
+parent: Building a Course Package
+nav_order: 4
+has_children: false
+---
+
 # Rubrics and Grading Notes
 
 ## Overview
@@ -13,15 +20,6 @@ In practice, rubrics work best when each item is:
 - non-overlapping, so the same mistake is not penalized multiple times unless
   that is intentional
 - phrased in terms of correctness or a recognizable misconception, not style
-
-One additional field is especially helpful for making rubric-based grading
-stable:
-
-- `part`, which indicates which part of a multipart problem the rubric item
-    applies to
-
-In rare cases, you may also want an explicit grouping mechanism for rubric items
-that should not be treated independently. That is described later in this page.
 
 The rubric structure should be different for the two grading modes:
 
@@ -52,71 +50,71 @@ alternative solutions are more likely to be rejected.
 ### Binary Example
 
 ```xml
-<question qtag="exponential_derivative" preferred_model="gpt-4.1-mini">
-    <question_text><![CDATA[
-    <p>Compute the derivative of \(y = a^x\) with respect to \(x\). Show your work.</p>
-    ]]></question_text>
+<question qtag="Exponential derivative" preferred_model="gpt-4.1-mini">
+        <question_text><![CDATA[
+        <p>Compute the derivative of \(y = a^x\) with respect to \(x\). Show your work.</p>
+        ]]></question_text>
 
-    <solution><![CDATA[
-    <p>There are two standard methods.</p>
+        <solution><![CDATA[
+        <p>There are two standard methods.</p>
 
-    <p>One method is to take the natural logarithm of both sides and then differentiate implicitly:</p>
+        <p>One method is to take the natural logarithm of both sides and then differentiate implicitly:</p>
 
-    <p class="math">
-        $$
-        \begin{aligned}
-        \ln(y) &= \ln(a^x) = x\ln(a) \\
-        \frac{y'}{y} &= \ln(a) \\
-        y' &= y\ln(a) = a^x\ln(a)
-        \end{aligned}
-        $$
-    </p>
+        <p class="math">
+        \[
+            \begin{aligned}
+            &\ln(y) = \ln(a^x) = x\ln(a) \\
+            &\implies \frac{y'}{y} = \ln(a) \\
+            &\implies y' = y\ln(a) = a^x \ln(a)
+            \end{aligned}
+        \]
+        </p>
 
-    <p>A second method is to write \(a^x = e^{x\ln(a)}\) and apply the chain rule:</p>
-
-    <p class="math">
-        $$
-        \begin{aligned}
-        y &= e^{x\ln(a)} \\
-        y' &= e^{x\ln(a)}\ln(a) = a^x\ln(a)
-        \end{aligned}
-        $$
-    </p>
-    ]]></solution>
-
-    <partial_credit>false</partial_credit>
-    <required>false</required>
-    <points>10</points>
-
-    <rubrics>
-        <item id="taking_logarithm" part="all" condition_type="positive" action="fail">
-            <display_text>Uses logarithmic method correctly</display_text>
-            <condition>Student takes the logarithm of both sides and differentiates correctly.</condition>
-            <notes>This rubric may be skipped if the student uses another valid method.</notes>
-        </item>
-
-        <item id="exponential_form" part="all" condition_type="positive" action="fail">
-            <display_text>Uses exponential-form method correctly</display_text>
-            <condition>Student rewrites the function as \(e^{x\ln(a)}\) and applies the chain rule correctly.</condition>
-            <notes>This rubric may be skipped if the student uses another valid method.</notes>
-        </item>
-
-        <item id="final_answer" part="all" condition_type="positive" action="fail">
-            <display_text>Correct final derivative</display_text>
-            <condition>Student gives the final derivative \(y' = a^x\ln(a)\).</condition>
-        </item>
-
-        <item id="polynomial_confusion" part="all" condition_type="negative" action="fail">
-            <display_text>Treats the expression like a polynomial</display_text>
-            <condition>Student differentiates as if \(a^x\) were a polynomial in \(x\), for example \(y' = xa^{x-1}\).</condition>
-        </item>
-
-        <item id="missing_justification" part="all" condition_type="negative" action="feedback">
-            <display_text>No supporting work</display_text>
-            <condition>Student states the correct answer but gives little or no supporting work.</condition>
-        </item>
-    </rubrics>
-</question>
+        <p>A second method is to write \(a^x\) as \(e^{x\ln(a)}\) and then apply the chain rule:</p>
+        \[
+            \begin{aligned}
+            &y = e^{x\ln(a)} \\
+            &y' = e^{x\ln(a)} \cdot \ln(a) = a^x \ln(a)
+            \end{aligned}
+        \]
+        </p>
+        ]]></solution>
+        <partial_credit>false</partial_credit>
+        <required>false</required>
+        <parts>
+             <part>
+                    <part_label>all</part_label>
+                    <points>10</points>
+                </part>
+        </parts>
+        <rubrics>
+            <item id="taking_logarithm" condition_type="positive" action="fail">
+                <display_text>Taking logarithm</display_text>
+                <condition>Student takes the logarithm of both sides to facilitate differentiation, which is a common and valid approach to this problem.</condition>
+                <notes> This rubric can be skipped if the student uses an alternative valid method, such as chain rule.
+                </notes>
+            </item>
+            <item id="exponential_form" condition_type="positive" action="fail">
+                <display_text>Write the function in exponential form</display_text>
+                <condition>Student correctly rewrites the function in terms of the natural exponential function and applies the chain rule to find the derivative.</condition>
+                <notes> This rubric can be skipped if the student uses an alternative valid method, such as taking logarithms.
+                </notes>
+            </item>
+            <item id="polynomial_confusion" condition_type="negative" action="fail">
+                <display_text>Polynomial confusion</display_text>
+                <condition>Student confuses the exponential function with a polynomial function, leading to incorrect differentiation, e.g. $y' = xa^{x-1}$</condition>
+             </item>
+             <item id="final_answer" condition_type="positive" action="fail">
+                <display_text>Final answer</display_text>
+                <condition>Student provides the correct derivative $y' = a^x \ln(a)$.</condition>
+            </item>
+            <group type="one_of">
+                <id>taking_logarithm</id>
+                <id>exponential_form</id>
+            </group>
+        </rubrics>
+        
+    </question>
 ```
 
 ### Binary Rubric Fields
@@ -148,8 +146,7 @@ Binary rubrics work poorly when:
 ## Rubrics for Partial-Credit Questions
 
 Partial-credit questions allow the student to earn some portion of the total
-points. In this mode, rubric items should describe **independent additions or
-deductions** to the score.
+points. In this mode, rubric items should describe **independent additions or deductions** to the score.
 
 Use partial-credit rubrics for things like:
 
@@ -164,14 +161,12 @@ adjust the score based on specific evidence.
 ### Partial-Credit Example
 
 ```xml
-<question qtag="ode_solver" preferred_model="gpt-4.1-mini">
+<question qtag="ODE Solver" preferred_model="gpt-5.4-mini">
     <question_text><![CDATA[
-    <p>Write a Python function that implements a first-order Euler solution to the ODE</p>
-
-    <p class="math">
-        $$
-        \frac{dx}{dt} = -a x(t) + b x(t)^2
-        $$
+    <p>Write a Python function that implements a first-order Euler solution to the ODE:
+    \[
+    \frac{dx}{dt} = -a\,x(t) + b\,x(t)^2
+    \]
     </p>
 
     <p>
@@ -194,13 +189,19 @@ adjust the score based on specific evidence.
     ]]></solution>
 
     <partial_credit>true</partial_credit>
-    <required>false</required>
-    <points>10</points>
+    <required>true</required>
+    <parts>
+        <part>
+            <part_label>all</part_label>
+            <points>10</points>
+        </part>
+    </parts>
 
     <rubrics>
-        <item id="arguments" part="all" point_adjustment="+3">
+        <item id="arguments" part="all" point_adjustment="+4">
             <display_text>Complete function interface</display_text>
-            <condition>Student includes the initial condition, model parameters, time step, and number of steps as inputs.</condition>
+            <condition>Student includes the initial condition, model parameters, time step, and number of 
+                steps as inputs.  If they supply some of the inputs but not all, award partial credit.</condition>
             <notes>Different variable names, argument order, and omission of type hints are acceptable.</notes>
         </item>
 
@@ -212,19 +213,14 @@ adjust the score based on specific evidence.
 
         <item id="returns_array" part="all" point_adjustment="+2">
             <display_text>Returns the full trajectory as an ndarray</display_text>
-            <condition>Student returns an array containing all iterates, not only the final value.</condition>
+            <condition>Student returns an array containing all iterates, not only the final value.  If returning a list, award only 1 point.</condition>
         </item>
-
-        <item id="uses_list" part="all" point_adjustment="-2">
-            <display_text>Uses a list instead of an ndarray</display_text>
-            <condition>Student stores the trajectory in a Python list rather than an <code>ndarray</code>.</condition>
-        </item>
-
         <item id="syntax_incorrect" part="all" point_adjustment="-2">
             <display_text>Minor Python syntax errors</display_text>
-            <condition>Student's solution has minor Python syntax errors that do not obscure the intended algorithm.</condition>
+            <condition>Student's solution has minor Python syntax errors that do not obscure the intended algorithm. </condition>
         </item>
     </rubrics>
+    <rubric_total>sum_positive</rubric_total> <!-- sets score exactly equal to the sum of point adjustments -->
 
     <grading_notes><![CDATA[
     Any mathematically correct Euler implementation that satisfies the specification should receive full credit.
@@ -258,22 +254,6 @@ Partial-credit rubrics work poorly when:
 - deductions are so large that the grader effectively reverts to binary grading
 - an item mixes multiple concepts, such as correctness, efficiency, and style
 
-## Part Field
-
-The `part` field is worth using even in a first implementation.
-
-### `part`
-
-Use `part` to scope a rubric item to one part of a multipart question.
-
-Examples:
-
-- `part="a"` means the rubric applies only to part (a)
-- `part="b"` means the rubric applies only to part (b)
-- `part="all"` means the rubric applies to the entire question
-
-This prevents the grader from accidentally applying a rubric item to the wrong
-part of a response.
 
 ## Avoiding Double Counting
 
@@ -307,22 +287,11 @@ group block under `<rubrics>`.
 
 ### Example: `one_of` Group
 
+You can see an example in the exponential derivative example above:
+
 ```xml
 <rubrics>
-    <item id="taking_logarithm" part="all" condition_type="positive" action="fail">
-        <display_text>Uses logarithmic method correctly</display_text>
-        <condition>Student takes the logarithm of both sides and differentiates correctly.</condition>
-    </item>
-
-    <item id="exponential_form" part="all" condition_type="positive" action="fail">
-        <display_text>Uses exponential-form method correctly</display_text>
-        <condition>Student rewrites the function as \(e^{x\ln(a)}\) and applies the chain rule correctly.</condition>
-    </item>
-
-    <item id="final_answer" part="all" condition_type="positive" action="fail">
-        <display_text>Correct final derivative</display_text>
-        <condition>Student gives the final derivative \(y' = a^x\ln(a)\).</condition>
-    </item>
+    ...
 
     <group type="one_of">
         <id>taking_logarithm</id>
@@ -353,14 +322,6 @@ Typical cases include:
 
 If the items are normally independent, do not group them.
 
-### Prompt Guidance for Groups
-
-If groups are present, the prompt should state:
-
-- Treat rubric items as independent unless they are explicitly listed in a group.
-- For a group with `type="one_of"`, satisfying any one listed item is sufficient.
-- Do not require all items in a `one_of` group.
-- Do not double count evidence across grouped items.
 
 ## Recommended Authoring Style
 

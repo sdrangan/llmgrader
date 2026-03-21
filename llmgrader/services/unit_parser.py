@@ -101,7 +101,158 @@ class UnitParser:
     @classmethod
     def validate_unit_file(cls, unit_path: str) -> list[str]:
         schema = cls._load_schema("unit.xsd")
-        return cls._format_schema_errors(unit_path, list(schema.iter_errors(unit_path)))
+        schema_errors = cls._format_schema_errors(unit_path, list(schema.iter_errors(unit_path)))
+        if schema_errors:
+            return schema_errors
+
+        try:
+            root = ET.parse(unit_path).getroot()
+        except Exception as exc:
+            return [f"{unit_path}: /: Failed to parse XML: {exc}"]
+
+        return cls._validate_unit_semantics(unit_path, root)
+
+    @staticmethod
+    def _question_path(qtag: str) -> str:
+        return f"/unit/question[@qtag='{qtag}']"
+
+    @staticmethod
+    def _parse_question_parts_for_validation(question: ET.Element) -> list[dict]:
+        parts: list[dict] = []
+        parts_elem = question.find("parts")
+        if parts_elem is None:
+            return parts
+
+        for part in parts_elem.findall("part"):
+            part_id = part.get("id")
+            part_label_elem = part.find("part_label")
+            points_elem = part.find("points")
+
+            if part_label_elem is not None and part_label_elem.text:
+                part_label = part_label_elem.text.strip()
+            elif part_id:
+                part_label = part_id
+            else:
+                part_label = "all"
+
+            points = 0.0
+            if points_elem is not None and points_elem.text:
+                try:
+                    points = float(points_elem.text.strip())
+                except ValueError:
+                    points = 0.0
+            elif part.get("points"):
+                try:
+                    points = float(part.get("points"))
+                except ValueError:
+                    points = 0.0
+
+            parts.append({"part_label": part_label, "points": points})
+
+        return parts
+
+    @staticmethod
+    def _parse_partial_credit_for_validation(question: ET.Element) -> bool:
+        partial_credit_elem = question.find("partial_credit")
+        if partial_credit_elem is not None and partial_credit_elem.text:
+            return partial_credit_elem.text.strip().lower() == "true"
+        return False
+
+    @staticmethod
+    def _parse_rubric_items_for_validation(question: ET.Element) -> list[dict]:
+        rubric_items: list[dict] = []
+        rubrics_elem = question.find("rubrics")
+        if rubrics_elem is None:
+            return rubric_items
+
+        for rubric_item in rubrics_elem.findall("item"):
+            item_id = (rubric_item.get("id") or "").strip() or "(unnamed rubric item)"
+            part = (rubric_item.get("part") or "").strip()
+            if not part:
+                part_elem = rubric_item.find("part")
+                if part_elem is not None and part_elem.text:
+                    part = part_elem.text.strip()
+            if not part:
+                part = "all"
+
+            point_adjustment = None
+            point_adjustment_attr = rubric_item.get("point_adjustment")
+            if point_adjustment_attr is not None:
+                try:
+                    point_adjustment = float(point_adjustment_attr)
+                except (TypeError, ValueError):
+                    point_adjustment = None
+
+            rubric_items.append(
+                {
+                    "id": item_id,
+                    "part": part,
+                    "point_adjustment": point_adjustment,
+                }
+            )
+
+        return rubric_items
+
+    @classmethod
+    def _validate_unit_semantics(cls, unit_path: str, root: ET.Element) -> list[str]:
+        validation_errors: list[str] = []
+
+        for question in root.findall("question"):
+            qtag = (question.get("qtag") or "").strip() or "(missing qtag)"
+            question_path = cls._question_path(qtag)
+            partial_credit = cls._parse_partial_credit_for_validation(question)
+            parts = cls._parse_question_parts_for_validation(question)
+            rubric_items = cls._parse_rubric_items_for_validation(question)
+            has_rubrics = bool(rubric_items)
+
+            rubric_total_elem = question.find("rubric_total")
+            rubric_total = None
+            if rubric_total_elem is not None and rubric_total_elem.text:
+                rubric_total = rubric_total_elem.text.strip()
+
+            effective_rubric_total = None
+            if partial_credit and has_rubrics:
+                effective_rubric_total = rubric_total or "sum_positive"
+
+            multi_part = len(parts) > 1
+            if not multi_part or effective_rubric_total not in {"sum_positive", "sum_negative"}:
+                continue
+
+            part_points = {part["part_label"]: float(part["points"]) for part in parts}
+
+            for rubric_item in rubric_items:
+                rubric_part = rubric_item["part"]
+                rubric_id = rubric_item["id"]
+
+                if rubric_part == "all":
+                    validation_errors.append(
+                        f"{unit_path}: {question_path}: rubric_total '{effective_rubric_total}' on a multi-part question does not allow rubric item '{rubric_id}' with part='all'."
+                    )
+                    continue
+
+                if rubric_part not in part_points:
+                    validation_errors.append(
+                        f"{unit_path}: {question_path}: rubric item '{rubric_id}' references unknown part '{rubric_part}'."
+                    )
+
+            if effective_rubric_total != "sum_positive":
+                continue
+
+            positive_sums = {part_label: 0.0 for part_label in part_points}
+            for rubric_item in rubric_items:
+                rubric_part = rubric_item["part"]
+                point_adjustment = rubric_item["point_adjustment"]
+                if rubric_part in positive_sums and point_adjustment is not None and point_adjustment > 0:
+                    positive_sums[rubric_part] += float(point_adjustment)
+
+            for part_label, max_points in part_points.items():
+                positive_sum = positive_sums.get(part_label, 0.0)
+                if abs(positive_sum - max_points) > 1e-9:
+                    validation_errors.append(
+                        f"{unit_path}: {question_path}: rubric_total 'sum_positive' requires positive rubric items for part '{part_label}' to sum to {max_points}, but found {positive_sum}."
+                    )
+
+        return validation_errors
 
     @classmethod
     def validate_course_package_config(cls, config_path: str) -> list[str]:

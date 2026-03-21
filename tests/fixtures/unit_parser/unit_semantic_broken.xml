@@ -1,0 +1,40 @@
+<unit id="fixture_semantic_broken" title="Fixture Semantic Broken Unit" version="1.0">
+  <question qtag="q_bad_rubric_total">
+    <question_text><![CDATA[
+    <p>Answer both parts.</p>
+    ]]></question_text>
+    <solution><![CDATA[
+    <p>Reference solution.</p>
+    ]]></solution>
+    <grading_notes><![CDATA[
+    Use the rubric exactly.
+    ]]></grading_notes>
+    <required>true</required>
+    <partial_credit>true</partial_credit>
+    <parts>
+      <part>
+        <part_label>a</part_label>
+        <points>3</points>
+      </part>
+      <part>
+        <part_label>b</part_label>
+        <points>2</points>
+      </part>
+    </parts>
+    <rubrics>
+      <item id="part_a_core" part="a" point_adjustment="2">
+        <display_text>Part a core work</display_text>
+        <condition>Student completes the main part a requirement.</condition>
+      </item>
+      <item id="global_bonus" part="all" point_adjustment="1">
+        <display_text>Global bonus</display_text>
+        <condition>Student shows globally good work.</condition>
+      </item>
+      <item id="part_b_core" part="b" point_adjustment="1">
+        <display_text>Part b core work</display_text>
+        <condition>Student completes the main part b requirement.</condition>
+      </item>
+    </rubrics>
+    <rubric_total>sum_positive</rubric_total>
+  </question>
+</unit>

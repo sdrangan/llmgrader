@@ -1,0 +1,12 @@
+<llmgrader>
+  <units>
+    <unit>
+      <name>Fixture Good Unit</name>
+      <destination>unit_good.xml</destination>
+    </unit>
+    <unit>
+      <name>Fixture Semantic Broken Unit</name>
+      <destination>unit_semantic_broken.xml</destination>
+    </unit>
+  </units>
+</llmgrader>
