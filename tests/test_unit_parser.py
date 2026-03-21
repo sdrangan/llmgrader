@@ -43,6 +43,14 @@ def test_validate_unit_file_accepts_demo_unit() -> None:
     assert errors == []
 
 
+def test_validate_unit_file_reports_line_number_for_schema_error() -> None:
+    errors = UnitParser.validate_unit_file(str(RESOURCE_DIR / "unit_broken.xml"))
+
+    assert len(errors) == 1
+    assert "line 6" in errors[0]
+    assert "/unit/question/required" in errors[0]
+
+
 def test_parse_matches_expected_snapshot_for_valid_package(tmp_path: Path) -> None:
     _stage_package(tmp_path, "config_good.xml")
 

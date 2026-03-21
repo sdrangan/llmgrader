@@ -2,6 +2,7 @@ import os
 import re
 import textwrap
 import xml.etree.ElementTree as ET
+import xml.parsers.expat as expat
 
 from dataclasses import dataclass
 from datetime import datetime
@@ -72,12 +73,79 @@ class UnitParser:
         return xmlschema.XMLSchema(cls._schema_path(schema_name))
 
     @staticmethod
+    def _path_with_optional_indices(stack: list[tuple[str, int]]) -> str:
+        parts = []
+        for depth, (tag, index) in enumerate(stack):
+            if depth == 0 or index == 1:
+                parts.append(tag)
+            else:
+                parts.append(f"{tag}[{index}]")
+        return "/" + "/".join(parts)
+
+    @classmethod
+    def _build_xml_line_lookup(cls, xml_path: str) -> dict[str, int]:
+        line_lookup: dict[str, int] = {}
+        ambiguous_paths: set[str] = set()
+        stack: list[tuple[str, int]] = []
+        sibling_counts: list[dict[str, int]] = []
+
+        parser = expat.ParserCreate()
+
+        def start_element(name: str, attrs):
+            if sibling_counts:
+                parent_counts = sibling_counts[-1]
+                index = parent_counts.get(name, 0) + 1
+                parent_counts[name] = index
+            else:
+                index = 1
+
+            stack.append((name, index))
+            sibling_counts.append({})
+
+            full_path = "/" + "/".join(f"{tag}[{tag_index}]" for tag, tag_index in stack)
+            normalized_path = cls._path_with_optional_indices(stack)
+            line_number = parser.CurrentLineNumber
+
+            line_lookup.setdefault(full_path, line_number)
+
+            if normalized_path in ambiguous_paths:
+                return
+            if normalized_path in line_lookup and line_lookup[normalized_path] != line_number:
+                ambiguous_paths.add(normalized_path)
+                line_lookup.pop(normalized_path, None)
+                return
+            line_lookup.setdefault(normalized_path, line_number)
+
+        def end_element(name: str):
+            if sibling_counts:
+                sibling_counts.pop()
+            if stack:
+                stack.pop()
+
+        parser.StartElementHandler = start_element
+        parser.EndElementHandler = end_element
+
+        with open(xml_path, "rb") as handle:
+            parser.Parse(handle.read(), True)
+
+        return line_lookup
+
+    @staticmethod
     def _format_schema_errors(xml_path: str, errors) -> list[str]:
+        try:
+            line_lookup = UnitParser._build_xml_line_lookup(xml_path)
+        except Exception:
+            line_lookup = {}
+
         formatted_errors = []
         for error in errors:
             location = getattr(error, "path", None) or "/"
             reason = getattr(error, "reason", None) or str(error)
-            formatted_errors.append(f"{xml_path}: {location}: {reason}")
+            line_number = line_lookup.get(location)
+            if line_number is not None:
+                formatted_errors.append(f"{xml_path}: line {line_number}: {location}: {reason}")
+            else:
+                formatted_errors.append(f"{xml_path}: {location}: {reason}")
         return formatted_errors
 
     @staticmethod
