@@ -13,6 +13,8 @@ import re
 import textwrap
 import xml.etree.ElementTree as ET
 
+from llmgrader.services.unit_parser import UnitParser
+
 
 def dedent_code_blocks(html_text):
     """
@@ -292,6 +294,16 @@ def main():
     )
     
     args = parser.parse_args()
+
+    validation_errors = UnitParser.validate_unit_file(os.path.abspath(args.input))
+    if validation_errors:
+        print('Validation errors found in input XML file:')
+        print()
+        for error in validation_errors:
+            print(f'- {error}')
+        print()
+        print('Fix the XML validation errors above and rerun create_qfile.')
+        return 1
     
     # Determine output filename
     if args.output:
@@ -322,6 +334,8 @@ def main():
         else:
             print('Failed to create PDF')
 
+    return 0
+
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

@@ -765,7 +765,14 @@ function setupAdminDropdowns() {
 
     // Populate units from currentUnitQtags data
     // We'll need to fetch units first
-    fetch("/units").then(r => r.json()).then(items => {
+    fetch("/units").then(r => r.json()).then(payload => {
+        const items = Array.isArray(payload) ? payload : (payload.items || []);
+
+        if (!Array.isArray(items)) {
+            console.error("Unexpected /units payload", payload);
+            return;
+        }
+
         unitSelect.innerHTML = items.map(item => {
             if (item.type === "section") {
                 return `<option value="" disabled style="font-weight:bold;color:#888">&mdash; ${item.name} &mdash;</option>`;
@@ -795,6 +802,8 @@ function setupAdminDropdowns() {
         if (unitNames.length > 0) {
             populateAdminQuestions();
         }
+    }).catch(err => {
+        console.error("Failed to load admin units", err);
     });
 }
 

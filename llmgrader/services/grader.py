@@ -310,7 +310,8 @@ class Grader:
         # Initialize field format
         Grader.initialize_field_format()
 
-         # Temporary database modification to add 'used_admin_key' column if it doesn't exist
+         # Temporary database modification to add  new columns
+         # if they do not exist
         self.temp_modify_db()
         
         # Initialize the database

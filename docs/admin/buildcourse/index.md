@@ -16,4 +16,5 @@ unit.
 - [HTML notes](htmlnotes.md)
 - [Package configuration](pkgconfig.md)
 - [Unit XML](unitxml.md)
+- [Rubrics and grading notes](./rubrics.md)
 - [Upload](upload.md)
