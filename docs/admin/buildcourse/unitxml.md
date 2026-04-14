@@ -86,10 +86,41 @@ The `rubrics` and `grading_notes` elements are described in the [next section](.
 Contains the question prompt.  HTML is allowed and often wrapped in CDATA:
 
 ```xml
-<text><![CDATA[
+<question_text><![CDATA[
     <p>Find the derivative of \( y = a e^{bx} \).</p>
-]]></text>
+]]></question_text>
 ```
+
+### Including Images in Question Text
+
+If your question requires a diagram or figure, place the image file in an
+`images/` directory **next to the unit XML file** in your source repository.
+The packaging tool (`create_soln_pkg`) automatically copies that directory into
+the solution package under the name `<destination-stem>_images/`.
+
+Reference the image in your `<question_text>` using the `/pkg_assets/` URL prefix:
+
+```xml
+<question_text><![CDATA[
+    <p>Consider the circuit shown below:</p>
+    <img src="/pkg_assets/unit1_basic_logic_images/circuit_diag.png" alt="Circuit diagram">
+    <p>Find the output for the given inputs.</p>
+]]></question_text>
+```
+
+The URL pattern is:
+
+```
+/pkg_assets/<destination-stem>_images/<filename>
+```
+
+where `<destination-stem>` is the `<destination>` value from `llmgrader_config.xml`
+with the `.xml` extension removed.  For example, if the destination is
+`unit1_basic_logic.xml`, images are served from `/pkg_assets/unit1_basic_logic_images/`.
+
+> **Note:** The `/pkg_assets/` path is served by the LLM Grader web application.
+> These URLs will not resolve when viewing a locally-generated HTML file
+> (e.g., from `create_qfile`) without a running server.
 
 ---
 

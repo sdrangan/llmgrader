@@ -4,7 +4,7 @@ import os
 import json
 from functools import wraps
 from flask import Blueprint, request, jsonify, make_response
-from flask import render_template, session, Response
+from flask import render_template, session, Response, send_from_directory
 import sqlite3
 import csv
 import io
@@ -207,6 +207,19 @@ class APIController:
                 "status": "ok",
                 "validation_alert": getattr(self.grader, 'unit_validation_alert', None),
             })
+
+        @bp.get("/pkg_assets/<path:filename>")
+        def pkg_assets(filename):
+            """Serve static assets (e.g. images) from the uploaded solution package.
+
+            Images referenced in unit XML as ``/pkg_assets/<dest_stem>_images/<file>``
+            are resolved here relative to the loaded solution-package directory.
+            ``send_from_directory`` prevents directory-traversal attacks.
+            """
+            soln_pkg = self.grader.soln_pkg
+            if not soln_pkg:
+                return jsonify({"error": "No package loaded"}), 404
+            return send_from_directory(soln_pkg, filename)
 
         @bp.get("/api/admin/preferences")
         def get_admin_preferences():

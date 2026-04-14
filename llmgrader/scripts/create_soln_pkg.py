@@ -121,8 +121,20 @@ def main():
 
         # Copy to output directory
         dest_full = output_dir / dest_filename
+        dest_full.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source_full, dest_full)
-        
+
+        # Copy adjacent images/ directory, if present, into a namespaced
+        # subdirectory to avoid collisions across units.
+        # Convention: source images/ -> <dest_stem>_images/ in the package.
+        # In unit XML, reference images as /pkg_assets/<dest_stem>_images/<file>.
+        dest_stem = Path(dest_filename).stem
+        images_source = source_full.parent / "images"
+        if images_source.is_dir():
+            images_dest = output_dir / f"{dest_stem}_images"
+            shutil.copytree(images_source, images_dest, dirs_exist_ok=True)
+            print(f"    Images: {images_source} -> {images_dest.relative_to(output_dir)}")
+
         copied_files.append((unit_name, source_path, dest_filename))
         print(f"  [{unit_name}]")
         print(f"    Source: {source_path}")

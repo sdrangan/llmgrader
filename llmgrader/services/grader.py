@@ -310,12 +310,12 @@ class Grader:
         # Initialize field format
         Grader.initialize_field_format()
 
-         # Temporary database modification to add  new columns
-         # if they do not exist
-        self.temp_modify_db()
-        
-        # Initialize the database
+        # Initialize the database first, then apply any missing-column migrations.
+        # init_db uses CREATE TABLE IF NOT EXISTS, so it is safe on both new and
+        # existing databases. temp_modify_db must run after so it can find the
+        # table when the DB is brand-new.
         self.init_db()
+        self.temp_modify_db()
 
         # Initialize units dictionary
         self.units = {}

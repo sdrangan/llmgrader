@@ -68,19 +68,31 @@ will look like:
 soln_package/
     llmgrader_config.xml
     unit1_basic_logic.xml
+    unit1_basic_logic_images/
+        circuit_diag.jpg
+        truth_table.png
     unit2_numbers.xml
+    unit2_numbers_images/
+        number_line.png
     ...
 ```
 
-In the future, we will permit the unit XML files and other assets,
-such as images, to reside in sub-folders within the package.
-But, for now, it is a single flat structure.
-When zipped, the archive contains these files at the root level (no nested folder):
+Unit XML files are placed at the root of the package.
+If a unit's source directory contains an `images/` subdirectory, its contents are copied
+into a namespaced subdirectory named `<destination-stem>_images/`.
+For example, images alongside `unit1/basic_logic.xml` are copied to
+`unit1_basic_logic_images/` (derived from the `<destination>` value `unit1_basic_logic.xml`).
+This naming scheme avoids collisions when multiple units contain identically-named image files.
+
+When zipped, the archive preserves this directory structure:
 
 ```
 llmgrader_config.xml
 unit1_basic_logic.xml
+unit1_basic_logic_images/circuit_diag.jpg
+unit1_basic_logic_images/truth_table.png
 unit2_numbers.xml
+unit2_numbers_images/number_line.png
 ```
 
 This package will be uploaded to the portal.
@@ -120,9 +132,11 @@ might reference these files like so:
 This shows the mapping clearly:
 
 - `<source>` points to the instructor’s local directory structure  
-- `<destination>` is the filename that will appear in the **flat** solution package (for now)
+- `<destination>` is the filename that will appear in the solution package
 
-Later, when nested directories and assets are supported, the `<destination>` paths can mirror the instructor repo structure (e.g., `unit1/basic_logic.xml`), allowing images and other files to be included naturally.
+No extra configuration is needed for images: if an `images/` subdirectory
+exists next to the source XML file, it is automatically included in the package
+under the `<destination-stem>_images/` name.
 
 
 
