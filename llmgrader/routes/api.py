@@ -218,7 +218,7 @@ class APIController:
             """
             soln_pkg = self.grader.soln_pkg
             if not soln_pkg:
-                return jsonify({"error": "No package loaded"}), 404
+                return jsonify({"error": "No solution package has been loaded"}), 404
             return send_from_directory(soln_pkg, filename)
 
         @bp.get("/api/admin/preferences")

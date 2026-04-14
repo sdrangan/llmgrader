@@ -27,7 +27,7 @@ def pkg_dir(tmp_path: Path) -> Path:
 
 
 @pytest.fixture()
-def client(tmp_path: Path, pkg_dir: Path, monkeypatch):
+def flask_test_client(tmp_path: Path, pkg_dir: Path, monkeypatch):
     scratch = tmp_path / "scratch"
     scratch.mkdir()
     # Redirect Grader storage so the DB is isolated to this test's tmp_path
@@ -38,18 +38,18 @@ def client(tmp_path: Path, pkg_dir: Path, monkeypatch):
         yield c
 
 
-def test_pkg_assets_returns_image(client, pkg_dir: Path) -> None:
-    resp = client.get("/pkg_assets/unit1_good_images/circuit.png")
+def test_pkg_assets_returns_image(flask_test_client, pkg_dir: Path) -> None:
+    resp = flask_test_client.get("/pkg_assets/unit1_good_images/circuit.png")
     assert resp.status_code == 200
     assert resp.data.startswith(b"\x89PNG")
 
 
-def test_pkg_assets_returns_404_for_missing_file(client) -> None:
-    resp = client.get("/pkg_assets/unit1_good_images/nonexistent.png")
+def test_pkg_assets_returns_404_for_missing_file(flask_test_client) -> None:
+    resp = flask_test_client.get("/pkg_assets/unit1_good_images/nonexistent.png")
     assert resp.status_code == 404
 
 
-def test_pkg_assets_blocks_directory_traversal(client) -> None:
+def test_pkg_assets_blocks_directory_traversal(flask_test_client) -> None:
     # Flask's send_from_directory raises 404 (or 400) for path traversal
-    resp = client.get("/pkg_assets/../../../etc/passwd")
+    resp = flask_test_client.get("/pkg_assets/../../../etc/passwd")
     assert resp.status_code in (400, 404)
