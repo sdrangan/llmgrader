@@ -293,14 +293,6 @@ async function loadView(name) {
         const response = await fetch(`/static/views/${name}.html`);
         const html = await response.text();
 
-        // Rescue any elements that were moved into the view container so they
-        // are not destroyed when view-container.innerHTML is replaced.
-        const gradeBtn = document.getElementById("grade-button");
-        const desktopBtnContainer = document.getElementById("desktop-grade-button-container");
-        if (gradeBtn && desktopBtnContainer && gradeBtn.parentElement !== desktopBtnContainer) {
-            desktopBtnContainer.appendChild(gradeBtn);
-        }
-
         document.getElementById("view-container").innerHTML = html;
 
         // Update global active view state
@@ -418,8 +410,7 @@ function initializeGradeViewDesktop() {
     const hDiv = document.querySelector(".divider");
     if (hDiv) hDiv.style.display = "";
 
-    moveSolutionTextareaTo("desktop-solution-container");
-    moveGradeButtonTo("desktop-grade-button-container");
+    moveSolutionComposerTo("desktop-solution-container");
     moveGradeStatusTo("desktop-grade-result-container");
 
     // Reattach horizontal divider (question/solution splitter)
@@ -624,18 +615,9 @@ function initializeGradeViewMobile() {
 
     // Show first panel
     showMobilePanel("question");
-    moveSolutionTextareaTo("mobile-solution-container");
-    moveGradeButtonTo("mobile-grade-button-container");
+    moveSolutionComposerTo("mobile-solution-container");
     mirrorQuestionWhenReady();
     mirrorFeedbackWhenReady();
-
-    // Auto-expand textarea as user types
-    const solTextarea = document.getElementById("student-solution");
-    if (solTextarea && !solTextarea._autoExpandAttached) {
-        solTextarea.addEventListener("input", () => autoExpand(solTextarea));
-        solTextarea._autoExpandAttached = true;
-    }
-    if (solTextarea) autoExpand(solTextarea);
 
     // Tab switching
     document.querySelectorAll(".mobile-tabs button").forEach(btn => {
@@ -656,6 +638,30 @@ function showMobilePanel(name) {
     document.querySelectorAll(".mobile-tabs button").forEach(btn => {
         btn.classList.toggle("active", btn.getAttribute("data-panel") === name);
     });
+}
+
+function moveSolutionComposerTo(containerId) {
+    const composer = document.getElementById("solution-composer");
+    const container = document.getElementById(containerId);
+    if (!composer || !container) return;
+    if (composer.parentElement !== container) {
+        container.appendChild(composer);
+    }
+    composer.style.display = "";
+
+    // Wire up auto-expand and keyboard shortcut (safe to call multiple times)
+    const solTextarea = document.getElementById("student-solution");
+    if (solTextarea && !solTextarea._composerBound) {
+        solTextarea._composerBound = true;
+        solTextarea.addEventListener("input", () => autoExpand(solTextarea));
+        solTextarea.addEventListener("keydown", (e) => {
+            if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+                e.preventDefault();
+                gradeCurrentQuestion();
+            }
+        });
+    }
+    if (solTextarea) autoExpand(solTextarea);
 }
 
 function moveSolutionTextareaTo(containerId) {
@@ -1101,9 +1107,6 @@ function displayQuestion(qtag) {
 
     // Wire auto-expand for browsers without field-sizing:content support
     if (isMobile()) {
-        // Force flex override via inline style (defeats any CSS specificity issue)
-        solBox.style.flex = "none";
-        solBox.style.overflow = "hidden";
         autoExpand(solBox);
         if (!solBox._autoExpandAttached) {
             solBox.addEventListener("input", () => {

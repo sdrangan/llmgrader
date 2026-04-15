@@ -1,6 +1,5 @@
 <div id="grade-view" class="app-view">
     <div id="mobile-grade-row" class="mobile-only">
-        <div id="mobile-grade-button-container"></div>
         <div id="mobile-grade-status" class="status-not-graded">Not graded</div>
         <div id="mobile-grade-points" class="grade-points"></div>
     </div>
@@ -41,12 +40,7 @@
                 <div id="grade-solution-panel" class="panel-container">
                     <h3>Your Solution</h3>
                     <div id="desktop-solution-container">
-                        <textarea id="student-solution" class="solution-textarea" placeholder="Enter solution here"></textarea>
-                        <div class="solution-attach-bar">
-                            <button id="solution-attach-btn" class="solution-attach-btn" title="Attach image">＋</button>
-                            <div id="solution-image-previews" class="solution-image-previews"></div>
-                        </div>
-                        <input type="file" id="solution-image-input" accept="image/*" multiple style="display:none">
+                        <!-- #solution-composer is moved here by JS on desktop -->
                     </div>
                 </div>
 
@@ -77,5 +71,18 @@
                 </div>
             </div>
         </div>
+    </div>
+
+    <!-- Shared solution composer: JS moves this between desktop/mobile containers -->
+    <div id="solution-composer" class="solution-composer" style="display:none">
+        <div id="solution-image-previews" class="solution-image-previews"></div>
+        <div class="solution-input-row">
+            <button id="solution-attach-btn" class="solution-attach-btn" title="Attach image">＋</button>
+            <textarea id="student-solution" class="solution-textarea"
+                placeholder="Type your answer here, or attach images with ＋"></textarea>
+            <button id="grade-button" class="solution-grade-btn"
+                onclick="gradeCurrentQuestion()">Grade</button>
+        </div>
+        <input type="file" id="solution-image-input" accept="image/*" multiple style="display:none">
     </div>
 </div>
