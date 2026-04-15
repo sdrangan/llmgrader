@@ -1,3 +1,4 @@
+import base64
 import json
 import shutil
 from pathlib import Path
@@ -89,3 +90,67 @@ def test_parse_skips_semantically_invalid_rubric_units_and_sets_alert(tmp_path: 
     assert any("unit_semantic_broken.xml" in error for error in package.validation_errors)
     assert any("does not allow rubric item" in error for error in package.validation_errors)
     assert any("requires positive rubric items" in error for error in package.validation_errors)
+
+
+def _stage_image_package(tmp_path: Path) -> Path:
+    """Stage the image-unit test package, including the PNG fixture."""
+    shutil.copy2(RESOURCE_DIR / "config_image_unit.xml", tmp_path / "llmgrader_config.xml")
+    shutil.copy2(RESOURCE_DIR / "unit_with_image.xml", tmp_path / "unit_with_image.xml")
+    shutil.copy2(RESOURCE_DIR / "soln_img.png", tmp_path / "soln_img.png")
+    # Also place the image where /pkg_assets/unit_images/ would resolve to.
+    unit_images_dir = tmp_path / "unit_images"
+    unit_images_dir.mkdir()
+    shutil.copy2(RESOURCE_DIR / "soln_img.png", unit_images_dir / "soln_img.png")
+    return tmp_path
+
+
+def test_solution_images_extracted_from_relative_src(tmp_path: Path) -> None:
+    """solution_images contains a data URI when the solution has a relative <img> src."""
+    _stage_image_package(tmp_path)
+
+    package = _make_parser(tmp_path).parse()
+    unit = package.units["Fixture Image Unit"]
+
+    images = unit["q_with_image"]["solution_images"]
+    assert len(images) == 1
+    assert images[0].startswith("data:image/png;base64,")
+
+    # Decoded content must match the original PNG bytes.
+    original = (RESOURCE_DIR / "soln_img.png").read_bytes()
+    _, encoded = images[0].split(",", 1)
+    assert base64.b64decode(encoded) == original
+
+
+def test_solution_images_extracted_from_pkg_assets_src(tmp_path: Path) -> None:
+    """solution_images contains a data URI when the solution uses a /pkg_assets/ src."""
+    _stage_image_package(tmp_path)
+
+    package = _make_parser(tmp_path).parse()
+    unit = package.units["Fixture Image Unit"]
+
+    images = unit["q_pkg_assets_image"]["solution_images"]
+    assert len(images) == 1
+    assert images[0].startswith("data:image/png;base64,")
+
+
+def test_solution_images_empty_when_no_img_tags(tmp_path: Path) -> None:
+    """solution_images is an empty list when the solution contains no <img> tags."""
+    _stage_image_package(tmp_path)
+
+    package = _make_parser(tmp_path).parse()
+    unit = package.units["Fixture Image Unit"]
+
+    assert unit["q_no_image"]["solution_images"] == []
+
+
+def test_solution_images_skips_missing_file(tmp_path: Path) -> None:
+    """A missing image file is silently skipped; solution_images stays empty."""
+    _stage_image_package(tmp_path)
+    # Remove the PNG so it cannot be found.
+    (tmp_path / "soln_img.png").unlink()
+
+    package = _make_parser(tmp_path).parse()
+    unit = package.units["Fixture Image Unit"]
+
+    # Relative-src question: image file is gone → empty list.
+    assert unit["q_with_image"]["solution_images"] == []

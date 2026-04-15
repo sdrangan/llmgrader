@@ -1,3 +1,5 @@
+import base64
+import mimetypes
 import os
 import re
 import textwrap
@@ -701,6 +703,66 @@ class UnitParser:
 
         return groups
 
+    @staticmethod
+    def _extract_solution_images(solution_html: str, soln_pkg_path: str, xml_path: str, log) -> list[str]:
+        """Extract images from solution HTML and return them as base64 data URIs.
+
+        Handles three kinds of ``src`` values found in ``<img>`` tags:
+
+        * ``data:`` URIs — passed through unchanged.
+        * ``/pkg_assets/<path>`` absolute URLs — resolved to
+          ``<soln_pkg_path>/<path>`` on disk.
+        * Relative paths — resolved relative to the directory that contains
+          ``xml_path``.
+
+        Files that cannot be found are skipped with a warning logged to
+        ``log``.
+        """
+        _MIME_MAP = {
+            ".png": "image/png",
+            ".jpg": "image/jpeg",
+            ".jpeg": "image/jpeg",
+            ".gif": "image/gif",
+            ".webp": "image/webp",
+            ".svg": "image/svg+xml",
+        }
+
+        srcs = re.findall(r'<img\b[^>]*\bsrc=["\']([^"\']+)["\']', solution_html, re.IGNORECASE)
+
+        data_uris: list[str] = []
+        xml_dir = os.path.dirname(os.path.abspath(xml_path))
+
+        for src in srcs:
+            # Already a data URI — use as-is.
+            if src.startswith("data:"):
+                data_uris.append(src)
+                continue
+
+            # Resolve the file path.
+            if src.startswith("/pkg_assets/"):
+                relative = src[len("/pkg_assets/"):]
+                file_path = os.path.join(soln_pkg_path, relative)
+            else:
+                file_path = os.path.join(xml_dir, src)
+
+            file_path = os.path.normpath(file_path)
+
+            if not os.path.isfile(file_path):
+                log.write(f"Warning: solution image not found, skipping: {file_path}\n")
+                continue
+
+            ext = os.path.splitext(file_path)[1].lower()
+            mime_type = _MIME_MAP.get(ext) or mimetypes.guess_type(file_path)[0] or "application/octet-stream"
+
+            try:
+                with open(file_path, "rb") as fh:
+                    encoded = base64.b64encode(fh.read()).decode("ascii")
+                data_uris.append(f"data:{mime_type};base64,{encoded}")
+            except OSError as exc:
+                log.write(f"Warning: could not read solution image {file_path}: {exc}\n")
+
+        return data_uris
+
     def parse(self) -> UnitPackageData:
         soln_pkg_path = self._resolve_solution_package_path()
         log_path = os.path.join(self.scratch_dir, "load_unit_pkg_log.txt")
@@ -821,6 +883,7 @@ class UnitParser:
 
                         solution_elem = question.find("solution")
                         solution = clean_cdata(solution_elem.text if solution_elem is not None else "")
+                        solution_images = self._extract_solution_images(solution, soln_pkg_path, xml_path, log)
 
                         grading_notes_elem = question.find("grading_notes")
                         grading_notes = clean_cdata(grading_notes_elem.text if grading_notes_elem is not None else "")
@@ -929,6 +992,7 @@ class UnitParser:
                             "qtag": qtag,
                             "question_text": question_text,
                             "solution": solution,
+                            "solution_images": solution_images,
                             "grading_notes": grading_notes,
                             "parts": parts,
                             "required": required,

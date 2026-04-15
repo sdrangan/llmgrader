@@ -1073,7 +1073,7 @@ class Grader:
         )
 
 
-    def _make_llm_caller(self, provider, model, api_key, task, timeout, tools=None, solution_images=None):
+    def _make_llm_caller(self, provider, model, api_key, task, timeout, tools=None, solution_images=None, ref_solution_images=None):
         """
         Creates a function that calls the specified LLM provider with the given parameters.
         
@@ -1092,8 +1092,11 @@ class Grader:
         tools: list[str] | None
             Built-in tool names enabled for the request.
         solution_images: list[str] | None
-            Optional list of base64 data URI strings to include as image content
-            alongside the text prompt (multimodal grading).
+            Optional list of base64 data URI strings representing images attached
+            by the student alongside their solution.
+        ref_solution_images: list[str] | None
+            Optional list of base64 data URI strings extracted from the reference
+            solution (e.g. from <img> tags in the <solution> CDATA block).
 
         Returns
         -------
@@ -1105,17 +1108,24 @@ class Grader:
                 input_tokens, output_tokens: int
                     Number of tokens used in the API call (input & output)
         """
-        images = solution_images or []
+        student_images = solution_images or []
+        ref_images = ref_solution_images or []
 
         if provider == "openai":
             client = OpenAI(api_key=api_key)
             requested_tools = [tool for tool in (tools or []) if tool in self.SUPPORTED_TOOLS]
 
-            # Build the input: multimodal list when images are present, plain string otherwise
-            if images:
-                task_hint = task + "\n\n--- STUDENT SOLUTION IMAGES ---\nSee attached images below."
+            # Build the input: multimodal list when any images are present, plain string otherwise
+            if ref_images or student_images:
+                task_hint = task
+                if ref_images:
+                    task_hint += "\n\n--- REFERENCE SOLUTION IMAGES ---\nSee reference solution images below."
+                if student_images:
+                    task_hint += "\n\n--- STUDENT SOLUTION IMAGES ---\nSee attached student images below."
                 openai_input = [{"type": "input_text", "text": task_hint}]
-                for data_uri in images:
+                for data_uri in ref_images:
+                    openai_input.append({"type": "input_image", "image_url": data_uri})
+                for data_uri in student_images:
                     openai_input.append({"type": "input_image", "image_url": data_uri})
             else:
                 openai_input = task
@@ -1169,11 +1179,20 @@ class Grader:
             url = f"https://router.huggingface.co/models/{hf_model}/v1/chat/completions"
             headers = {"Authorization": f"Bearer {api_key}"}
 
-            # Build message content: multimodal list when images are present
-            if images:
-                task_hint = task + "\n\n--- STUDENT SOLUTION IMAGES ---\nSee attached images below."
+            # Build message content: multimodal list when any images are present
+            if ref_images or student_images:
+                task_hint = task
+                if ref_images:
+                    task_hint += "\n\n--- REFERENCE SOLUTION IMAGES ---\nSee reference solution images below."
+                if student_images:
+                    task_hint += "\n\n--- STUDENT SOLUTION IMAGES ---\nSee attached student images below."
                 message_content = [{"type": "text", "text": task_hint}]
-                for data_uri in images:
+                for data_uri in ref_images:
+                    message_content.append({
+                        "type": "image_url",
+                        "image_url": {"url": data_uri}
+                    })
+                for data_uri in student_images:
                     message_content.append({
                         "type": "image_url",
                         "image_url": {"url": data_uri}
@@ -1410,6 +1429,7 @@ class Grader:
                     provider, model, api_key, task, timeout,
                     tools=tools,
                     solution_images=solution_images or [],
+                    ref_solution_images=question_dict.get("solution_images", []),
                 )
             except Exception as e:
                 grade = {
