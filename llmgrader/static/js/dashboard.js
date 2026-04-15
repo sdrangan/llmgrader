@@ -390,7 +390,10 @@ async function downloadSubmission() {
             const images = unitData[qtag]?.solution_images || [];
             images.forEach((dataUri, index) => {
                 const match = dataUri.match(/^data:([^;]+);base64,(.+)$/);
-                if (!match) return;
+                if (!match) {
+                    console.warn(`Skipping malformed solution image for ${qtag}[${index}]`);
+                    return;
+                }
                 const mimeType = match[1];
                 const b64data = match[2];
                 const ext = mimeType.split('/')[1] || 'png';
