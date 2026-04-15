@@ -361,6 +361,7 @@ class Grader:
             "point_parts_json": "TEXT",
             "result_parts_json": "TEXT",
             "tools_json": "TEXT",
+            "solution_image_paths_json": "TEXT",
             "points": "REAL",
             "max_points": "REAL",
         }
