@@ -408,6 +408,13 @@ class APIController:
                 
                 # Convert row to dictionary
                 row_dict = dict(row)
+
+                # Parse solution image paths before formatting
+                raw_image_paths_json = row_dict.get("solution_image_paths_json")
+                try:
+                    solution_image_paths = json.loads(raw_image_paths_json) if raw_image_paths_json else []
+                except (json.JSONDecodeError, TypeError):
+                    solution_image_paths = []
                 
                 # Format the row using grader's formatting rules
                 formatted_row = self.grader.format_db_entry(row_dict)
@@ -415,12 +422,28 @@ class APIController:
                 return render_template(
                     "admin_submission_detail.html",
                     row=formatted_row,
-                    sub_id=sub_id
+                    sub_id=sub_id,
+                    solution_image_paths=solution_image_paths,
                 )
                 
             except Exception as e:
                 return {"error": f"Error loading submission: {str(e)}"}, 500
-            
+
+        @app.route("/admin/soln_images/<path:filename>")
+        @self.require_admin
+        def serve_soln_image(filename):
+            """
+            Serve a student solution image stored in storage_path/soln_images/.
+            Only plain filenames are accepted; path separators are rejected.
+            """
+            import posixpath
+            # Reject any attempt to traverse directories
+            if posixpath.sep in filename or (os.sep != posixpath.sep and os.sep in filename):
+                return {"error": "Invalid filename"}, 400
+            images_dir = self.grader.get_soln_images_path()
+            return send_from_directory(images_dir, filename)
+
+
         @app.post("/api/admin-login")
         def api_admin_login():
             admin_password = os.environ.get("LLMGRADER_ADMIN_PASSWORD")
