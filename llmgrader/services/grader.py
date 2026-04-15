@@ -1115,18 +1115,19 @@ class Grader:
             client = OpenAI(api_key=api_key)
             requested_tools = [tool for tool in (tools or []) if tool in self.SUPPORTED_TOOLS]
 
-            # Build the input: multimodal list when any images are present, plain string otherwise
+            # Responses API expects top-level input items to be messages, not raw content parts.
             if ref_images or student_images:
                 task_hint = task
                 if ref_images:
                     task_hint += "\n\n--- REFERENCE SOLUTION IMAGES ---\nSee reference solution images below."
                 if student_images:
                     task_hint += "\n\n--- STUDENT SOLUTION IMAGES ---\nSee attached student images below."
-                openai_input = [{"type": "input_text", "text": task_hint}]
+                message_content = [{"type": "input_text", "text": task_hint}]
                 for data_uri in ref_images:
-                    openai_input.append({"type": "input_image", "image_url": data_uri})
+                    message_content.append({"type": "input_image", "image_url": data_uri})
                 for data_uri in student_images:
-                    openai_input.append({"type": "input_image", "image_url": data_uri})
+                    message_content.append({"type": "input_image", "image_url": data_uri})
+                openai_input = [{"role": "user", "content": message_content}]
             else:
                 openai_input = task
 
