@@ -1253,6 +1253,39 @@ function resizeAndEncodeImage(file) {
     });
 }
 
+async function addSolutionImagesFromFiles(files, unitName, qtag) {
+    if (!unitName || !qtag) return 0;
+
+    const imageFiles = Array.from(files || []).filter(file =>
+        file && typeof file.type === "string" && file.type.startsWith("image/")
+    );
+    if (imageFiles.length === 0) return 0;
+
+    const sessionData = getSessionData(unitName, qtag);
+    let addedCount = 0;
+
+    for (const file of imageFiles) {
+        if (sessionData.solution_images.length >= MAX_SOLUTION_IMAGES) {
+            alert(`You can attach at most ${MAX_SOLUTION_IMAGES} images per question.`);
+            break;
+        }
+        try {
+            const dataUri = await resizeAndEncodeImage(file);
+            sessionData.solution_images.push(dataUri);
+            addedCount += 1;
+        } catch (err) {
+            console.error("Failed to encode image:", err);
+        }
+    }
+
+    if (addedCount > 0) {
+        saveSessionState();
+        renderSolutionImagePreviews(unitName, qtag);
+    }
+
+    return addedCount;
+}
+
 /**
  * Render thumbnail previews for the current qtag's solution images.
  */
@@ -1295,6 +1328,7 @@ function renderSolutionImagePreviews(unitName, qtag) {
 function initSolutionImageAttach() {
     const attachBtn = document.getElementById("solution-attach-btn");
     const fileInput = document.getElementById("solution-image-input");
+    const solutionBox = document.getElementById("student-solution");
     if (!attachBtn || !fileInput) return;
     if (attachBtn._attachBound) return;
     attachBtn._attachBound = true;
@@ -1308,24 +1342,31 @@ function initSolutionImageAttach() {
         const dropdown = document.getElementById("question-number");
         if (!dropdown || !currentUnitName) return;
         const qtag = dropdown.value;
-        const sessionData = getSessionData(currentUnitName, qtag);
-
-        for (const file of Array.from(fileInput.files)) {
-            if (sessionData.solution_images.length >= MAX_SOLUTION_IMAGES) {
-                alert(`You can attach at most ${MAX_SOLUTION_IMAGES} images per question.`);
-                break;
-            }
-            try {
-                const dataUri = await resizeAndEncodeImage(file);
-                sessionData.solution_images.push(dataUri);
-            } catch (err) {
-                console.error("Failed to encode image:", err);
-            }
-        }
-
-        saveSessionState();
-        renderSolutionImagePreviews(currentUnitName, qtag);
+        await addSolutionImagesFromFiles(fileInput.files, currentUnitName, qtag);
     });
+
+    if (solutionBox && !solutionBox._imagePasteBound) {
+        solutionBox._imagePasteBound = true;
+        solutionBox.addEventListener("paste", async (event) => {
+            const clipboardItems = Array.from(event.clipboardData?.items || []);
+            const imageFiles = clipboardItems
+                .filter(item => item.kind === "file" && item.type.startsWith("image/"))
+                .map(item => item.getAsFile())
+                .filter(Boolean);
+
+            if (imageFiles.length === 0) {
+                return;
+            }
+
+            const dropdown = document.getElementById("question-number");
+            if (!dropdown || !currentUnitName) {
+                return;
+            }
+
+            event.preventDefault();
+            await addSolutionImagesFromFiles(imageFiles, currentUnitName, dropdown.value);
+        });
+    }
 }
 
 

@@ -612,10 +612,14 @@ textarea {
 
 /* Row containing +, textarea, Grade */
 .solution-input-row {
-    display: flex;
-    flex-direction: row;
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    grid-template-areas:
+        "textarea textarea textarea"
+        "attach . grade";
+    column-gap: 8px;
+    row-gap: 8px;
     align-items: stretch;
-    gap: 8px;
     flex: 1 1 auto;
     min-height: 0;
     min-width: 0;
@@ -624,7 +628,7 @@ textarea {
 
 /* Textarea inside the composer — borderless, fills available space */
 #student-solution {
-    flex: 1 1 auto;
+    grid-area: textarea;
     align-self: stretch;
     min-width: 0;
     min-height: 80px;
@@ -644,6 +648,7 @@ textarea {
 
 /* + attach button */
 .solution-attach-btn {
+    grid-area: attach;
     width: 32px;
     height: 32px;
     border-radius: 50%;
@@ -669,8 +674,10 @@ textarea {
 
 /* Grade button embedded in the composer */
 .solution-grade-btn {
+    grid-area: grade;
     flex-shrink: 0;
-    align-self: flex-end;
+    align-self: end;
+    justify-self: end;
     padding: 6px 16px;
     background: #57068c;
     color: #fff;
@@ -1220,7 +1227,6 @@ textarea {
     .solution-input-row {
         flex: none;
         min-height: auto;
-        align-items: flex-end;
         min-width: 0;
         width: 100%;
     }

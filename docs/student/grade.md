@@ -21,7 +21,7 @@ No mystery, no hidden steps — just a clean loop of *try → grade → improve*
 The solution entry area is a chat-style composer with three parts:
 
 - **＋ (attach) button** — attach one or more image files (photos, sketches, screenshots) to your answer.
-- **Text area** — type your answer here.  The area expands as you type.
+- **Text area** — type your answer here.  The area expands as you type, and if your cursor is in the box you can paste an image directly from the clipboard.
 - **Grade button** — submit your answer for grading.
 
 You can also press **Ctrl+Enter** (or **⌘+Enter** on Mac) to grade without reaching for the mouse.
@@ -34,6 +34,8 @@ If your answer includes hand-written work, circuit diagrams, or plots, attach th
 2. Select one or more image files from your device.
 3. Thumbnails appear above the text area confirming the images are attached.
 4. To remove an image before grading, click the **×** on its thumbnail.
+
+You can also paste an image from the clipboard while the text area is focused.  This is useful for screenshots or copied whiteboard work.
 
 Attached images are sent to the LLM along with your text, so the grader can see both.  Up to three images may be attached per question.
 
