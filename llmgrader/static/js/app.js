@@ -61,6 +61,7 @@ function populateModelSelect() {
 //     required: true,
 //     partial_credit: false,
 //     tools: [],
+//     solution_images: [],   // array of base64 data URI strings attached by the student
 //     parts: {
 //         [part_label]: {
 //             result: "",
@@ -138,7 +139,7 @@ function saveSessionState() {
         localStorage.setItem("llmgrader_session", JSON.stringify(sessionState));
         console.log("Session state saved to localStorage");
     } catch (e) {
-        console.error("Failed to save session state:", e);
+        console.warn("Failed to save session state (storage quota may be exceeded):", e);
     }
 }
 
@@ -153,7 +154,8 @@ function getSessionData(unitName, qtag) {
             required: true,
             partial_credit: false,
             tools: [],
-            parts: {}
+            parts: {},
+            solution_images: []
         };
     }
     if (!sessionState[unitName][qtag].selected_part) {
@@ -165,6 +167,9 @@ function getSessionData(unitName, qtag) {
     }
     if (!Array.isArray(sessionState[unitName][qtag].tools)) {
         sessionState[unitName][qtag].tools = [];
+    }
+    if (!Array.isArray(sessionState[unitName][qtag].solution_images)) {
+        sessionState[unitName][qtag].solution_images = [];
     }
     return sessionState[unitName][qtag];
 }
@@ -1090,6 +1095,10 @@ function displayQuestion(qtag) {
     solBox.value = sessionData.student_solution || 
                    currentStudentSolutions[qtag]?.solution || "";
 
+    // Restore solution image thumbnails and wire the attach button
+    initSolutionImageAttach();
+    renderSolutionImagePreviews(currentUnitName, qtag);
+
     // Wire auto-expand for browsers without field-sizing:content support
     if (isMobile()) {
         // Force flex override via inline style (defeats any CSS specificity issue)
@@ -1202,6 +1211,123 @@ function populateQuestionDropdown(qtags, selectedQtag = null) {
 
 //
 // ---------------------------
+//  SOLUTION IMAGE ATTACHMENTS
+// ---------------------------
+const MAX_SOLUTION_IMAGES = 5;
+const MAX_IMAGE_DIMENSION = 800; // px — longest side before encoding
+
+/**
+ * Resize an image File to at most MAX_IMAGE_DIMENSION on its longest side,
+ * then return a base64 data URI via a Promise.
+ */
+function resizeAndEncodeImage(file) {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = (evt) => {
+            const img = new Image();
+            img.onload = () => {
+                let { width, height } = img;
+                if (width > MAX_IMAGE_DIMENSION || height > MAX_IMAGE_DIMENSION) {
+                    if (width >= height) {
+                        height = Math.round((height / width) * MAX_IMAGE_DIMENSION);
+                        width = MAX_IMAGE_DIMENSION;
+                    } else {
+                        width = Math.round((width / height) * MAX_IMAGE_DIMENSION);
+                        height = MAX_IMAGE_DIMENSION;
+                    }
+                }
+                const canvas = document.createElement("canvas");
+                canvas.width = width;
+                canvas.height = height;
+                canvas.getContext("2d").drawImage(img, 0, 0, width, height);
+                resolve(canvas.toDataURL("image/jpeg", 0.85));
+            };
+            img.onerror = reject;
+            img.src = evt.target.result;
+        };
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+    });
+}
+
+/**
+ * Render thumbnail previews for the current qtag's solution images.
+ */
+function renderSolutionImagePreviews(unitName, qtag) {
+    const container = document.getElementById("solution-image-previews");
+    if (!container) return;
+    container.innerHTML = "";
+
+    const sessionData = getSessionData(unitName, qtag);
+    const images = sessionData.solution_images || [];
+
+    images.forEach((dataUri, index) => {
+        const wrapper = document.createElement("div");
+        wrapper.className = "solution-thumb-wrapper";
+
+        const img = document.createElement("img");
+        img.src = dataUri;
+        img.alt = `Attached image ${index + 1}`;
+        wrapper.appendChild(img);
+
+        const removeBtn = document.createElement("button");
+        removeBtn.className = "solution-thumb-remove";
+        removeBtn.textContent = "×";
+        removeBtn.title = "Remove image";
+        removeBtn.addEventListener("click", () => {
+            sessionData.solution_images.splice(index, 1);
+            saveSessionState();
+            renderSolutionImagePreviews(unitName, qtag);
+        });
+        wrapper.appendChild(removeBtn);
+
+        container.appendChild(wrapper);
+    });
+}
+
+/**
+ * Wire up the attach button and file input for solution images.
+ * Called once per grade-view load (guarded against double-binding).
+ */
+function initSolutionImageAttach() {
+    const attachBtn = document.getElementById("solution-attach-btn");
+    const fileInput = document.getElementById("solution-image-input");
+    if (!attachBtn || !fileInput) return;
+    if (attachBtn._attachBound) return;
+    attachBtn._attachBound = true;
+
+    attachBtn.addEventListener("click", () => {
+        fileInput.value = "";   // allow re-selecting the same file
+        fileInput.click();
+    });
+
+    fileInput.addEventListener("change", async () => {
+        const dropdown = document.getElementById("question-number");
+        if (!dropdown || !currentUnitName) return;
+        const qtag = dropdown.value;
+        const sessionData = getSessionData(currentUnitName, qtag);
+
+        for (const file of Array.from(fileInput.files)) {
+            if (sessionData.solution_images.length >= MAX_SOLUTION_IMAGES) {
+                alert(`You can attach at most ${MAX_SOLUTION_IMAGES} images per question.`);
+                break;
+            }
+            try {
+                const dataUri = await resizeAndEncodeImage(file);
+                sessionData.solution_images.push(dataUri);
+            } catch (err) {
+                console.error("Failed to encode image:", err);
+            }
+        }
+
+        saveSessionState();
+        renderSolutionImagePreviews(currentUnitName, qtag);
+    });
+}
+
+
+//
+// ---------------------------
 //  GRADE CURRENT QUESTION
 // ---------------------------
 async function gradeCurrentQuestion() {
@@ -1229,6 +1355,9 @@ async function gradeCurrentQuestion() {
     gradeBtn.disabled = true;
     gradeBtn.textContent = "Grading...";
 
+    const sessionData = getSessionData(currentUnitName, qtag);
+    const solutionImages = sessionData.solution_images || [];
+
     const resp = await fetch("/grade", {
         method: "POST",
         headers: {"Content-Type": "application/json"},
@@ -1240,7 +1369,8 @@ async function gradeCurrentQuestion() {
             model: model,
             api_key : apiKey,
             provider: provider,
-            timeout: timeout
+            timeout: timeout,
+            solution_images: solutionImages
         })
     });
 

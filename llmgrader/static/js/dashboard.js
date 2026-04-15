@@ -384,6 +384,23 @@ async function downloadSubmission() {
         zip.file('results.json', JSON.stringify(resultsJson, null, 2));
         zip.file('results.txt', resultsTxt);
 
+        // Add solution images as separate files: images/<qtag>/<index>.<ext>
+        const unitData = sessionState[unitName] || {};
+        Object.keys(unitData).forEach(qtag => {
+            const images = unitData[qtag]?.solution_images || [];
+            images.forEach((dataUri, index) => {
+                const match = dataUri.match(/^data:([^;]+);base64,(.+)$/);
+                if (!match) {
+                    console.warn(`Skipping malformed solution image for ${qtag}[${index}]`);
+                    return;
+                }
+                const mimeType = match[1];
+                const b64data = match[2];
+                const ext = mimeType.split('/')[1] || 'png';
+                zip.file(`images/${qtag}/${index}.${ext}`, b64data, { base64: true });
+            });
+        });
+
         const zipBlob = await zip.generateAsync({ type: 'blob' });
         const url = URL.createObjectURL(zipBlob);
         const a = document.createElement('a');

@@ -183,6 +183,21 @@
         </div>
     </div>
 
+    {% if solution_image_paths %}
+    <div class="field-section">
+        <h3>Student Solution Images</h3>
+        <div class="field-content" style="display: flex; flex-wrap: wrap; gap: 10px;">
+            {% for img_path in solution_image_paths %}
+            <a href="/admin/{{ img_path }}" target="_blank">
+                <img src="/admin/{{ img_path }}"
+                     alt="Student solution image"
+                     style="max-width: 300px; max-height: 300px; border: 1px solid #ddd; border-radius: 3px; cursor: pointer;">
+            </a>
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+
     <div class="field-section">
         <h3>Feedback</h3>
         <div class="field-content">

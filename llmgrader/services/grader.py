@@ -11,6 +11,8 @@ import zipfile
 import re
 import sqlite3
 import time
+import base64
+import uuid
 from datetime import datetime
 from concurrent.futures import TimeoutError as ThreadTimeoutError
 from openai import APITimeoutError
@@ -235,6 +237,7 @@ class Grader:
         "max_points": "REAL",
         "result_parts_json": "TEXT",
         "tools_json": "TEXT",
+        "solution_image_paths_json": "TEXT",
     }
 
     # Field formatting rules for submission detail view
@@ -358,6 +361,7 @@ class Grader:
             "point_parts_json": "TEXT",
             "result_parts_json": "TEXT",
             "tools_json": "TEXT",
+            "solution_image_paths_json": "TEXT",
             "points": "REAL",
             "max_points": "REAL",
         }
@@ -1073,7 +1077,7 @@ class Grader:
         )
 
 
-    def _make_llm_caller(self, provider, model, api_key, task, timeout, tools=None):
+    def _make_llm_caller(self, provider, model, api_key, task, timeout, tools=None, solution_images=None, ref_solution_images=None):
         """
         Creates a function that calls the specified LLM provider with the given parameters.
         
@@ -1091,6 +1095,12 @@ class Grader:
             The timeout in seconds for the API call.
         tools: list[str] | None
             Built-in tool names enabled for the request.
+        solution_images: list[str] | None
+            Optional list of base64 data URI strings representing images attached
+            by the student alongside their solution.
+        ref_solution_images: list[str] | None
+            Optional list of base64 data URI strings extracted from the reference
+            solution (e.g. from <img> tags in the <solution> CDATA block).
 
         Returns
         -------
@@ -1102,14 +1112,33 @@ class Grader:
                 input_tokens, output_tokens: int
                     Number of tokens used in the API call (input & output)
         """
+        student_images = solution_images or []
+        ref_images = ref_solution_images or []
+
         if provider == "openai":
             client = OpenAI(api_key=api_key)
             requested_tools = [tool for tool in (tools or []) if tool in self.SUPPORTED_TOOLS]
 
+            # Responses API expects top-level input items to be messages, not raw content parts.
+            if ref_images or student_images:
+                task_hint = task
+                if ref_images:
+                    task_hint += "\n\n--- REFERENCE SOLUTION IMAGES ---\nSee reference solution images below."
+                if student_images:
+                    task_hint += "\n\n--- STUDENT SOLUTION IMAGES ---\nSee attached student images below."
+                message_content = [{"type": "input_text", "text": task_hint}]
+                for data_uri in ref_images:
+                    message_content.append({"type": "input_image", "image_url": data_uri})
+                for data_uri in student_images:
+                    message_content.append({"type": "input_image", "image_url": data_uri})
+                openai_input = [{"role": "user", "content": message_content}]
+            else:
+                openai_input = task
+
             def call_openai():
                 request_kwargs = {
                     "model": model,
-                    "input": task,
+                    "input": openai_input,
                     "temperature": 1 if model.startswith("gpt-5-mini") else 0,
                     "timeout": timeout,
                 }
@@ -1155,11 +1184,32 @@ class Grader:
             url = f"https://router.huggingface.co/models/{hf_model}/v1/chat/completions"
             headers = {"Authorization": f"Bearer {api_key}"}
 
+            # Build message content: multimodal list when any images are present
+            if ref_images or student_images:
+                task_hint = task
+                if ref_images:
+                    task_hint += "\n\n--- REFERENCE SOLUTION IMAGES ---\nSee reference solution images below."
+                if student_images:
+                    task_hint += "\n\n--- STUDENT SOLUTION IMAGES ---\nSee attached student images below."
+                message_content = [{"type": "text", "text": task_hint}]
+                for data_uri in ref_images:
+                    message_content.append({
+                        "type": "image_url",
+                        "image_url": {"url": data_uri}
+                    })
+                for data_uri in student_images:
+                    message_content.append({
+                        "type": "image_url",
+                        "image_url": {"url": data_uri}
+                    })
+            else:
+                message_content = task
+
             def call_hf():
                 payload = {
                     "model": hf_model,
                     "messages": [
-                        {"role": "user", "content": task}
+                        {"role": "user", "content": message_content}
                     ],
                     "temperature": 0,
                 }
@@ -1290,7 +1340,8 @@ class Grader:
             provider : str = "openai",
             model: str="gpt-4.1-mini",
             api_key: str | None = None,
-            timeout: float = 20.) -> GradeResult:
+            timeout: float = 20.,
+            solution_images: list[str] | None = None) -> GradeResult:
         """
         Grades a student's solution using the OpenAI API.
         
@@ -1314,6 +1365,9 @@ class Grader:
             The API key (either OpenAI API key or Hugging Face token) to use for authentication.
         timeout: float
             The timeout in seconds for the API call.
+        solution_images: list[str] | None
+            Optional list of base64 data URI strings representing images attached
+            by the student alongside their solution.
 
         Returns
         -------
@@ -1376,7 +1430,12 @@ class Grader:
             
             # Create the API call function
             try:
-                call_llm = self._make_llm_caller(provider, model, api_key, task, timeout, tools=tools)
+                call_llm = self._make_llm_caller(
+                    provider, model, api_key, task, timeout,
+                    tools=tools,
+                    solution_images=solution_images or [],
+                    ref_solution_images=question_dict.get("solution_images", []),
+                )
             except Exception as e:
                 grade = {
                     "result": "error",
@@ -1455,7 +1514,12 @@ class Grader:
             f.write(json.dumps(grade, indent=2))
         
         # ---------------------------------------------------------
-        # 5. Log submission to database (ALWAYS happens)
+        # 5. Persist student solution images to storage_path/soln_images/
+        # ---------------------------------------------------------
+        saved_image_paths = self.save_solution_images(solution_images or [])
+
+        # ---------------------------------------------------------
+        # 6. Log submission to database (ALWAYS happens)
         # ---------------------------------------------------------
         t1 = time.time()
         latency_ms = int((t1 - t0) * 1000)
@@ -1489,7 +1553,8 @@ class Grader:
             tokens_in = tokens_in,
             tokens_out = tokens_out,
             timed_out=1 if timed_out else 0,
-            used_admin_key=used_admin_key
+            used_admin_key=used_admin_key,
+            solution_image_paths_json=json.dumps(saved_image_paths) if saved_image_paths else None,
         )
         
         return grade
@@ -1555,6 +1620,75 @@ class Grader:
         os.makedirs(pref_dir, exist_ok=True)
         admin_pref_path = os.path.join(pref_dir, "admin-config.json")
         return admin_pref_path
+
+    def get_soln_images_path(self) -> str:
+        """
+        Returns the full path to the directory where student solution images are stored.
+        Creates the directory if it does not exist.
+        """
+        storage = self.get_storage_path()
+        images_dir = os.path.join(storage, "soln_images")
+        os.makedirs(images_dir, exist_ok=True)
+        return images_dir
+
+    # Map from MIME subtype to file extension
+    _MIME_EXT = {
+        "png": "png",
+        "jpeg": "jpg",
+        "jpg": "jpg",
+        "gif": "gif",
+        "webp": "webp",
+    }
+
+    def save_solution_images(self, solution_images: list[str]) -> list[str]:
+        """
+        Persist a list of base64 data URI strings to storage_path/soln_images/.
+
+        Each image is saved as ``<uuid>.<ext>`` where the extension is derived
+        from the data URI MIME type (e.g. ``data:image/png;base64,...``).
+
+        Parameters
+        ----------
+        solution_images: list[str]
+            List of base64 data URI strings (may be empty).
+
+        Returns
+        -------
+        list[str]
+            Relative paths of the saved images, e.g. ``["soln_images/abc123.png"]``.
+            Returns an empty list if *solution_images* is empty.
+        """
+        if not solution_images:
+            return []
+
+        images_dir = self.get_soln_images_path()
+        saved_paths = []
+
+        for data_uri in solution_images:
+            try:
+                # data:image/<subtype>;base64,<data>
+                if not data_uri.startswith("data:"):
+                    print(f"[save_solution_images] Skipping non-data-URI string")
+                    continue
+
+                header, _, b64data = data_uri.partition(",")
+                # header looks like "data:image/png;base64"
+                mime_part = header.split(":")[1].split(";")[0]  # "image/png"
+                subtype = mime_part.split("/")[-1].lower()      # "png"
+                ext = self._MIME_EXT.get(subtype, "bin")
+
+                filename = f"{uuid.uuid4().hex}.{ext}"
+                filepath = os.path.join(images_dir, filename)
+
+                image_bytes = base64.b64decode(b64data)
+                with open(filepath, "wb") as f:
+                    f.write(image_bytes)
+
+                saved_paths.append(f"soln_images/{filename}")
+            except Exception as e:
+                print(f"[save_solution_images] Failed to save image: {e}")
+
+        return saved_paths
 
     def load_admin_preferences(self) -> dict:
         """

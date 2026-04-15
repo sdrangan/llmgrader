@@ -1,0 +1,9 @@
+<llmgrader>
+  <units>
+    <unit>
+      <name>Fixture Image Unit</name>
+      <source>unit_with_image.xml</source>
+      <destination>unit_with_image.xml</destination>
+    </unit>
+  </units>
+</llmgrader>

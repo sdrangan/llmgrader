@@ -20,6 +20,10 @@
 
   <assets>
     <asset>
+      <source>unit1/images/</source>
+      <destination>unit1_images</destination>
+    </asset>
+    <asset>
       <source>unit2/images/</source>
       <destination>unit2_images</destination>
     </asset>

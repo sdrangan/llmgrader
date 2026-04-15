@@ -5,6 +5,7 @@
         "qtag": "q_partial",
         "question_text": "<p>Write the update.</p>",
         "solution": "<p>Use Euler.</p>",
+        "solution_images": [],
         "grading_notes": "Accept equivalent implementations.",
         "parts": [
           {
@@ -34,6 +35,7 @@
         "qtag": "q_binary",
         "question_text": "<p>Compute the derivative.</p>",
         "solution": "<p>The derivative is <code>a^x \\ln(a)</code>.</p>",
+        "solution_images": [],
         "grading_notes": "Any valid method is acceptable.",
         "parts": [
           {

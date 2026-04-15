@@ -1,0 +1,54 @@
+<unit id="fixture_image" title="Fixture Image Unit" version="1.0">
+  <question qtag="q_with_image">
+    <question_text><![CDATA[
+    <p>Draw the graph.</p>
+    ]]></question_text>
+    <solution><![CDATA[
+    <p>The correct graph is shown below.</p>
+    <img src="soln_img.png" alt="Reference graph">
+    ]]></solution>
+    <required>true</required>
+    <partial_credit>false</partial_credit>
+    <parts>
+      <part>
+        <part_label>all</part_label>
+        <points>5</points>
+      </part>
+    </parts>
+  </question>
+
+  <question qtag="q_pkg_assets_image">
+    <question_text><![CDATA[
+    <p>Draw another graph.</p>
+    ]]></question_text>
+    <solution><![CDATA[
+    <p>See the reference image.</p>
+    <img src="/pkg_assets/unit_images/soln_img.png" alt="Reference graph">
+    ]]></solution>
+    <required>true</required>
+    <partial_credit>false</partial_credit>
+    <parts>
+      <part>
+        <part_label>all</part_label>
+        <points>5</points>
+      </part>
+    </parts>
+  </question>
+
+  <question qtag="q_no_image">
+    <question_text><![CDATA[
+    <p>No image here.</p>
+    ]]></question_text>
+    <solution><![CDATA[
+    <p>Plain text solution.</p>
+    ]]></solution>
+    <required>true</required>
+    <partial_credit>false</partial_credit>
+    <parts>
+      <part>
+        <part_label>all</part_label>
+        <points>5</points>
+      </part>
+    </parts>
+  </question>
+</unit>
