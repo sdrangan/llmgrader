@@ -570,11 +570,13 @@ textarea {
 
 /* The composer replaces the old textarea + attach-bar layout.
    It is a single container moved between desktop and mobile by JS. */
-#desktop-solution-container {
+#desktop-solution-container,
+#mobile-solution-container {
     display: flex;
     flex-direction: column;
     flex: 1 1 auto;
     min-height: 0;
+    min-width: 0;
     width: 100%;
     box-sizing: border-box;
 }
@@ -585,10 +587,12 @@ textarea {
     border: 1px solid #ccc;
     border-radius: 12px;
     background: #fff;
-    padding: 8px 10px;
+    padding: 6px 8px;
     gap: 6px;
     flex: 1 1 auto;
     min-height: 0;
+    min-width: 0;
+    width: 100%;
     box-shadow: 0 1px 4px rgba(0,0,0,0.07);
     box-sizing: border-box;
 }
@@ -610,17 +614,22 @@ textarea {
 .solution-input-row {
     display: flex;
     flex-direction: row;
-    align-items: flex-end;
+    align-items: stretch;
     gap: 8px;
     flex: 1 1 auto;
     min-height: 0;
+    min-width: 0;
+    width: 100%;
 }
 
 /* Textarea inside the composer — borderless, fills available space */
 #student-solution {
     flex: 1 1 auto;
+    align-self: stretch;
+    min-width: 0;
     min-height: 80px;
-    padding: 4px 2px;
+    width: 100%;
+    padding: 4px 0;
     border: none;
     outline: none;
     background: transparent;
@@ -631,7 +640,6 @@ textarea {
     overflow-y: auto;
     line-height: 1.5;
     box-sizing: border-box;
-    field-sizing: content;
 }
 
 /* + attach button */
@@ -1206,25 +1214,28 @@ textarea {
         flex: none;
         border-radius: 8px;
         min-height: auto;
+        width: 100%;
     }
 
     .solution-input-row {
         flex: none;
         min-height: auto;
         align-items: flex-end;
+        min-width: 0;
+        width: 100%;
     }
 
     #student-solution {
         width: 100%;
+        min-width: 0;
         min-height: 100px;
         resize: none;
         overflow-y: auto;
         box-sizing: border-box;
         font-size: 1rem;
         line-height: 1.4;
-        padding: 6px 2px;
+        padding: 6px 0;
         flex: 1 1 auto;
-        field-sizing: content;
     }
 }
 
