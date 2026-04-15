@@ -7,6 +7,7 @@ import xml.parsers.expat as expat
 from dataclasses import dataclass
 from datetime import datetime
 from importlib import resources
+from pathlib import PurePosixPath
 
 import xmlschema
 
@@ -179,6 +180,21 @@ class UnitParser:
             return [f"{unit_path}: /: Failed to parse XML: {exc}"]
 
         return cls._validate_unit_semantics(unit_path, root)
+
+    @staticmethod
+    def _validate_package_destination(destination_path: str) -> str | None:
+        normalized = (destination_path or "").strip().replace("\\", "/")
+        if not normalized:
+            return "Destination path must not be empty."
+
+        pure_path = PurePosixPath(normalized)
+        if pure_path.is_absolute() or re.match(r"^[A-Za-z]:/", normalized):
+            return "Destination path must be relative to the package root."
+
+        if any(part == ".." for part in pure_path.parts):
+            return "Destination path must not contain '..'."
+
+        return None
 
     @staticmethod
     def _question_path(qtag: str) -> str:
@@ -360,6 +376,33 @@ class UnitParser:
                 continue
 
             collected_errors.extend(cls.validate_unit_file(xml_path))
+
+        assets_elem = config_root.find("assets")
+        if assets_elem is None:
+            return collected_errors
+
+        for asset_index, asset_elem in enumerate(assets_elem.findall("asset"), start=1):
+            source_path = (asset_elem.findtext("source") or "").strip()
+            destination_path = (asset_elem.findtext("destination") or "").strip()
+            asset_label = destination_path or f"asset[{asset_index}]"
+
+            if not source_path:
+                collected_errors.append(
+                    f"{config_path}: /llmgrader/assets/asset[{asset_index}]: Asset '{asset_label}' is missing <source>."
+                )
+                continue
+
+            destination_error = cls._validate_package_destination(destination_path)
+            if destination_error:
+                collected_errors.append(
+                    f"{config_path}: /llmgrader/assets/asset[{asset_index}]: Asset '{asset_label}' has invalid <destination>: {destination_error}"
+                )
+
+            asset_source_path = os.path.abspath(os.path.join(config_dir, source_path))
+            if not os.path.exists(asset_source_path):
+                collected_errors.append(
+                    f"{asset_source_path}: /: Asset source referenced by '{asset_label}' does not exist."
+                )
 
         return collected_errors
 

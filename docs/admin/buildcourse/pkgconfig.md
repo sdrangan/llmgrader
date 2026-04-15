@@ -36,13 +36,15 @@ hwdesign-soln/
     llmgrader_config.xml        ← optional: some instructors keep it here
     unit1/
         basic_logic.xml
-        images/
+    images/
             circuit_diag.jpg
             truth_table.png
     unit2/
         numbers.xml
-        images/
+    figures/
             number_line.png
+  shared/
+    logic_symbols.svg
     unit3/
         alu.xml
 ```
@@ -51,7 +53,7 @@ In this example:
 
 - Each unit lives in its own directory (`unit1/`, `unit2/`, …)
 - The unit XML file is inside that directory  
-- Supporting assets (images, diagrams, etc.) live in subfolders such as `images/`
+- Supporting assets (images, diagrams, etc.) can live anywhere in the source repository
 - The `<source>` paths in `llmgrader_config.xml` refer to these locations
 
 But again, any directory structure is possible.
@@ -68,31 +70,37 @@ will look like:
 soln_package/
     llmgrader_config.xml
     unit1_basic_logic.xml
-    unit1_basic_logic_images/
+  unit1_assets/
         circuit_diag.jpg
         truth_table.png
     unit2_numbers.xml
-    unit2_numbers_images/
+  unit2_assets/
         number_line.png
+  shared_assets/
+    logic_symbols.svg
     ...
 ```
 
 Unit XML files are placed at the root of the package.
-If a unit's source directory contains an `images/` subdirectory, its contents are copied
-into a namespaced subdirectory named `<destination-stem>_images/`.
-For example, images alongside `unit1/basic_logic.xml` are copied to
-`unit1_basic_logic_images/` (derived from the `<destination>` value `unit1_basic_logic.xml`).
-This naming scheme avoids collisions when multiple units contain identically-named image files.
+Any explicit asset mappings from `llmgrader_config.xml` are copied into the package at
+the destination path you specify. This means the package layout is intentional and stable:
+authors choose the public asset paths directly instead of relying on a sibling `images/`
+directory convention.
+
+For backward compatibility, if a unit source directory contains an `images/` subdirectory
+and no equivalent explicit asset mapping is provided, the packaging tool still copies it to
+`<destination-stem>_images/` as before.
 
 When zipped, the archive preserves this directory structure:
 
 ```
 llmgrader_config.xml
 unit1_basic_logic.xml
-unit1_basic_logic_images/circuit_diag.jpg
-unit1_basic_logic_images/truth_table.png
+unit1_assets/circuit_diag.jpg
+unit1_assets/truth_table.png
 unit2_numbers.xml
-unit2_numbers_images/number_line.png
+unit2_assets/number_line.png
+shared_assets/logic_symbols.svg
 ```
 
 This package will be uploaded to the portal.
@@ -126,6 +134,23 @@ might reference these files like so:
       <destination>unit2_numbers.xml</destination>
     </unit>
   </units>
+
+  <assets>
+    <asset>
+      <source>unit1/images</source>
+      <destination>unit1_assets</destination>
+    </asset>
+
+    <asset>
+      <source>unit2/figures/number_line.png</source>
+      <destination>unit2_assets/number_line.png</destination>
+    </asset>
+
+    <asset>
+      <source>shared/logic_symbols.svg</source>
+      <destination>shared_assets/logic_symbols.svg</destination>
+    </asset>
+  </assets>
 </llmgrader>
 ```
 
@@ -133,10 +158,22 @@ This shows the mapping clearly:
 
 - `<source>` points to the instructor’s local directory structure  
 - `<destination>` is the filename that will appear in the solution package
+- `<assets>` defines additional package files and directories to copy
 
-No extra configuration is needed for images: if an `images/` subdirectory
-exists next to the source XML file, it is automatically included in the package
-under the `<destination-stem>_images/` name.
+Asset mappings may copy either a whole directory or a single file:
+
+- If `<source>` is a directory, its contents are copied under the destination directory.
+- If `<source>` is a file, it is copied to the exact destination path.
+
+In unit HTML, reference packaged assets with `/pkg_assets/<destination>`. For example,
+the asset above at `unit2_assets/number_line.png` is served as:
+
+```
+/pkg_assets/unit2_assets/number_line.png
+```
+
+The `<destination>` path must be relative to the package root. Absolute paths and
+paths containing `..` are rejected during validation.
 
 
 

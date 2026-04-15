@@ -16,7 +16,7 @@ RESOURCE_DIR = Path(__file__).parent / "fixtures" / "unit_parser"
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _build_source_repo(tmp_path: Path, *, with_images: bool) -> Path:
+def _build_source_repo(tmp_path: Path, *, with_images: bool, assets_xml: str = "") -> Path:
     """Create a minimal instructor source repo under tmp_path/source/."""
     source = tmp_path / "source"
 
@@ -29,7 +29,7 @@ def _build_source_repo(tmp_path: Path, *, with_images: bool) -> Path:
 
     config = source / "llmgrader_config.xml"
     config.write_text(
-        """\
+                f"""\
 <llmgrader>
   <units>
     <unit>
@@ -38,6 +38,7 @@ def _build_source_repo(tmp_path: Path, *, with_images: bool) -> Path:
       <destination>unit1_good.xml</destination>
     </unit>
   </units>
+    {assets_xml}
 </llmgrader>
 """,
         encoding="utf-8",
@@ -160,4 +161,97 @@ def test_package_images_dir_namespaced_by_destination_stem(
     pkg_dir = source / "soln_package"
     assert (pkg_dir / "pkg_unit1_images" / "figure.png").exists()
     assert (pkg_dir / "pkg_unit2_images" / "figure.png").exists()
+
+
+def test_package_with_explicit_asset_directory_copies_to_destination(
+        tmp_path: Path, monkeypatch
+) -> None:
+        assets_xml = """\
+<assets>
+    <asset>
+        <source>unit1/images</source>
+        <destination>unit1_assets</destination>
+    </asset>
+</assets>
+"""
+        source = _build_source_repo(tmp_path, with_images=True, assets_xml=assets_xml)
+
+        exit_code = _run_main(monkeypatch, source / "llmgrader_config.xml")
+
+        assert exit_code == 0
+
+        pkg_dir = source / "soln_package"
+        assert (pkg_dir / "unit1_assets" / "circuit.png").exists()
+        assert (pkg_dir / "unit1_assets" / "diagram.jpg").exists()
+
+
+def test_package_with_explicit_asset_file_copies_to_exact_destination(
+        tmp_path: Path, monkeypatch
+) -> None:
+        assets_xml = """\
+<assets>
+    <asset>
+        <source>shared/func.png</source>
+        <destination>unit1_assets/func.png</destination>
+    </asset>
+</assets>
+"""
+        source = _build_source_repo(tmp_path, with_images=False, assets_xml=assets_xml)
+        shared_dir = source / "shared"
+        shared_dir.mkdir()
+        (shared_dir / "func.png").write_bytes(b"\x89PNG\r\n")
+
+        exit_code = _run_main(monkeypatch, source / "llmgrader_config.xml")
+
+        assert exit_code == 0
+
+        pkg_dir = source / "soln_package"
+        assert (pkg_dir / "unit1_assets" / "func.png").exists()
+
+        zip_path = source / "soln_package.zip"
+        with zipfile.ZipFile(zip_path) as z:
+                names = set(z.namelist())
+
+        assert "unit1_assets/func.png" in names
+
+
+def test_package_rejects_asset_destination_path_traversal(
+        tmp_path: Path, monkeypatch
+) -> None:
+        assets_xml = """\
+<assets>
+    <asset>
+        <source>unit1/images</source>
+        <destination>../escape</destination>
+    </asset>
+</assets>
+"""
+        source = _build_source_repo(tmp_path, with_images=True, assets_xml=assets_xml)
+
+        exit_code = _run_main(monkeypatch, source / "llmgrader_config.xml")
+
+        assert exit_code == 1
+        assert not (source / "soln_package").exists()
+
+
+def test_package_warns_for_empty_asset_directory(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    assets_xml = """\
+<assets>
+    <asset>
+    <source>unit1/images</source>
+    <destination>unit1_assets</destination>
+    </asset>
+</assets>
+"""
+    source = _build_source_repo(tmp_path, with_images=False, assets_xml=assets_xml)
+    (source / "unit1" / "images").mkdir()
+
+    exit_code = _run_main(monkeypatch, source / "llmgrader_config.xml")
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert "Warning: Asset directory is empty:" in captured.out
+    assert (source / "soln_package" / "unit1_assets").is_dir()
 

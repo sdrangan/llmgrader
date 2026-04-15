@@ -17,4 +17,12 @@
       <destination>unit2_python.xml</destination>
     </unit>
   </units>
+
+  <assets>
+    <asset>
+      <source>unit2/images/</source>
+      <destination>unit2_images</destination>
+    </asset>
+  </assets>
+
 </llmgrader>

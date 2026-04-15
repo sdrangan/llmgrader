@@ -93,17 +93,31 @@ Contains the question prompt.  HTML is allowed and often wrapped in CDATA:
 
 ### Including Images in Question Text
 
-If your question requires a diagram or figure, place the image file in an
-`images/` directory **next to the unit XML file** in your source repository.
-The packaging tool (`create_soln_pkg`) automatically copies that directory into
-the solution package under the name `<destination-stem>_images/`.
+If your question requires a diagram or figure, add the file or directory to the
+`<assets>` section of `llmgrader_config.xml`. The unit XML should then reference
+the packaged asset path using the `/pkg_assets/` URL prefix.
+
+For example, if the config contains:
+
+```xml
+<assets>
+    <asset>
+        <source>unit1/images</source>
+        <destination>unit1_assets</destination>
+    </asset>
+    <asset>
+        <source>shared/func.png</source>
+        <destination>unit1_assets/func.png</destination>
+    </asset>
+</assets>
+```
 
 Reference the image in your `<question_text>` using the `/pkg_assets/` URL prefix:
 
 ```xml
 <question_text><![CDATA[
     <p>Consider the circuit shown below:</p>
-    <img src="/pkg_assets/unit1_basic_logic_images/circuit_diag.png" alt="Circuit diagram">
+        <img src="/pkg_assets/unit1_assets/circuit_diag.png" alt="Circuit diagram">
     <p>Find the output for the given inputs.</p>
 ]]></question_text>
 ```
@@ -111,16 +125,22 @@ Reference the image in your `<question_text>` using the `/pkg_assets/` URL prefi
 The URL pattern is:
 
 ```
-/pkg_assets/<destination-stem>_images/<filename>
+/pkg_assets/<asset-destination-path>
 ```
 
-where `<destination-stem>` is the `<destination>` value from `llmgrader_config.xml`
-with the `.xml` extension removed.  For example, if the destination is
-`unit1_basic_logic.xml`, images are served from `/pkg_assets/unit1_basic_logic_images/`.
+where `<asset-destination-path>` is the path created in the solution package by the
+`<assets>` section of `llmgrader_config.xml`. For example, if an asset is copied to
+`unit1_assets/func.png`, it is served at `/pkg_assets/unit1_assets/func.png`.
+
+For backward compatibility, `create_soln_pkg` still recognizes an `images/` directory
+next to a unit XML file and copies it to `<destination-stem>_images/`. New course
+packages should prefer explicit `<assets>` mappings.
 
 > **Note:** The `/pkg_assets/` path is served by the LLM Grader web application.
-> These URLs will not resolve when viewing a locally-generated HTML file
-> (e.g., from `create_qfile`) without a running server.
+> When generating standalone HTML or PDF with `create_qfile`, pass the related
+> `llmgrader_config.xml` (or keep it in a parent directory so it can be found
+> automatically). `create_qfile` rewrites `/pkg_assets/...` URLs to local file
+> paths for the generated document.
 
 ---
 

@@ -7,9 +7,9 @@ response = client.responses.create(
     model="gpt-5",
     tools=[{"type": "web_search"}],
     input=textwrap.dedent("""\
-        How does this project compare to the state-of-the-art in autograding? What are the key differences and advantages?
-        https://sdrangan.github.io/llmgrader/docs/
-        Is it worth considering using?  Would it be better to wait until Gradescope or one of the other major autograding platforms integrates with LLMs?
+        Can you review this project:  https://sdrangan.github.io/pysilicon/docs.  It is still under construction.  But, I am wondering if there are any novel features relative to what other python spec-RTL tools do.  
+                          
+        If completed, would the project add value to what is likely to be commercially available shortly.  Should I consider using this, if it they complete some of the features. 
     """)
 )
 

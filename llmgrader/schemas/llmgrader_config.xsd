@@ -32,6 +32,20 @@
             </xs:sequence>
           </xs:complexType>
         </xs:element>
+        <xs:element name="assets" minOccurs="0">
+          <xs:complexType>
+            <xs:sequence>
+              <xs:element name="asset" minOccurs="0" maxOccurs="unbounded">
+                <xs:complexType>
+                  <xs:sequence>
+                    <xs:element name="source" type="xs:string"/>
+                    <xs:element name="destination" type="xs:string"/>
+                  </xs:sequence>
+                </xs:complexType>
+              </xs:element>
+            </xs:sequence>
+          </xs:complexType>
+        </xs:element>
       </xs:sequence>
     </xs:complexType>
   </xs:element>

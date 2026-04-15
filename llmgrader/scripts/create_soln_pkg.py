@@ -14,9 +14,39 @@ import shutil
 import zipfile
 import xml.etree.ElementTree as ET
 import argparse
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from llmgrader.services.unit_parser import UnitParser
+
+
+def normalize_package_path(path_value: str) -> Path:
+    normalized = path_value.strip().replace("\\", "/")
+    pure_path = PurePosixPath(normalized)
+    return Path(*[part for part in pure_path.parts if part not in ("", ".")])
+
+
+def copy_asset_entry(*, source_full: Path, destination_path: str, output_dir: Path) -> Path:
+    destination_rel = normalize_package_path(destination_path)
+    destination_full = output_dir / destination_rel
+
+    if source_full.is_dir():
+        destination_full.mkdir(parents=True, exist_ok=True)
+        for child in source_full.iterdir():
+            child_dest = destination_full / child.name
+            if child.is_dir():
+                shutil.copytree(child, child_dest, dirs_exist_ok=True)
+            else:
+                child_dest.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(child, child_dest)
+    else:
+        destination_full.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source_full, destination_full)
+
+    return destination_rel
+
+
+def directory_is_empty(directory_path: Path) -> bool:
+    return not any(directory_path.iterdir())
 
 
 def main():
@@ -140,6 +170,38 @@ def main():
         print(f"    Source: {source_path}")
         print(f"    Destination: {dest_filename}")
         print()
+
+    assets_elem = root.find('assets')
+    if assets_elem is not None:
+        asset_list = assets_elem.findall('asset')
+        if asset_list:
+            print(f"Packaging {len(asset_list)} asset mapping(s):")
+            print()
+
+        for asset in asset_list:
+            source_path = asset.findtext('source')
+            destination_path = asset.findtext('destination')
+
+            if not source_path or not destination_path:
+                print("Warning: Skipping asset - missing source or destination")
+                continue
+
+            source_full = config_dir / source_path
+            if not source_full.exists():
+                print(f"Error: Asset source not found: {source_full}")
+                return 1
+
+            if source_full.is_dir() and directory_is_empty(source_full):
+                print(f"Warning: Asset directory is empty: {source_full}")
+
+            destination_rel = copy_asset_entry(
+                source_full=source_full,
+                destination_path=destination_path,
+                output_dir=output_dir,
+            )
+            print(f"  Source: {source_path}")
+            print(f"  Destination: {destination_rel.as_posix()}")
+            print()
 
     # Create ZIP archive
     zip_filename = 'soln_package.zip'

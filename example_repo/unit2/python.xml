@@ -132,7 +132,51 @@
         Any mathematically correct solution that satisfies the specification should receive full credit.
         ]]></grading_notes>
     </question>
-    
 
-   
+    <question qtag="Gradient Descent" preferred_model="gpt-4.1-mini">
+        <question_text><![CDATA[
+        <p>Consider the function \(f(x)\) shown in the figure below.  Gradient descent is
+        run with a learning rate of \(\alpha\) starting from the initial point \(x_0\).</p>
+
+        <img src="/pkg_assets/unit2_images/func.png" alt="Function to perform gradient descent" width="400"/>
+
+
+        <ol type="a">
+            <li>What are the local minima of the function \(f(x)\)?</li>
+            <li> For each local minima, describe the set of initial points \(x_0\) that would converge to that minima under gradient descent with small \(\alpha\).</li>
+        </ol>
+        ]]></question_text>
+        <solution><![CDATA[
+        <ol type="a">
+            <li>The local minima of the function \(f(x)\) are approximately at \(x = 1\) and \(x = 4\).</li>
+            <li> Since the local maxima is at \(x = 2\), the set of initial points \(x_0\) that would converge to the local minimum at \(x = 1\) is approximately \(x_0 < 2\), and the set of initial points that would converge to the local minimum at \(x = 4\) is approximately \(x_0 > 2\).</li>
+        ]]></solution>  
+        <parts>
+            <part>
+                <part_label>a</part_label>
+                <points>4</points>
+            </part>
+            <part>
+                <part_label>b</part_label>
+                <points>6</points>
+            </part>
+        </parts>
+        <partial_credit>true</partial_credit>
+        <required>true</required>
+        <rubrics>
+            <item id="identify_minima" part="a" point_adjustment="+4">
+                <display_text>Identify local minima</display_text>
+                <condition>Student correctly identifies the local minima of the function based on the provided figure.</condition>
+                <notes>Minor inaccuracies in the exact location of the minima may be ignored for partial credit.</notes>
+            </item>
+
+            <item id="describe_convergence" part="b" point_adjustment="+6">
+                <display_text>Describe convergence regions</display_text>
+                <condition>Student correctly describes the regions of initial points that would converge to each local minimum under gradient descent with a small learning rate.</condition>
+                <notes>Partial credit may be awarded if the student correctly identifies one of the convergence regions or provides a qualitatively correct description.</notes>
+            </item>
+        </rubrics>
+        <rubric_total>sum_positive</rubric_total>
+    </question>
+    
 </unit>

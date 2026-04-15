@@ -12,6 +12,7 @@ import os
 import re
 import textwrap
 import xml.etree.ElementTree as ET
+from pathlib import Path, PurePosixPath
 
 from llmgrader.services.unit_parser import UnitParser
 
@@ -70,7 +71,139 @@ def split_solution_paragraph(solution_html):
         return ('', solution_html)
 
 
-def parse_xml_file(xml_file):
+def normalize_config_path(path_value):
+    normalized = path_value.strip().replace('\\', '/')
+    pure_path = PurePosixPath(normalized)
+    return Path(*[part for part in pure_path.parts if part not in ('', '.')])
+
+
+def discover_config_path(xml_file):
+    xml_path = Path(xml_file).resolve()
+    for directory in [xml_path.parent, *xml_path.parent.parents]:
+        candidate = directory / 'llmgrader_config.xml'
+        if candidate.exists():
+            return candidate
+    return None
+
+
+def load_config_context(config_path):
+    config_tree = ET.parse(config_path)
+    config_root = config_tree.getroot()
+    config_dir = Path(config_path).resolve().parent
+
+    asset_mappings = []
+    assets_elem = config_root.find('assets')
+    if assets_elem is not None:
+        for asset_elem in assets_elem.findall('asset'):
+            source_text = (asset_elem.findtext('source') or '').strip()
+            destination_text = (asset_elem.findtext('destination') or '').strip()
+            if not source_text or not destination_text:
+                continue
+
+            source_path = (config_dir / normalize_config_path(source_text)).resolve()
+            destination_path = normalize_config_path(destination_text).as_posix()
+            asset_mappings.append(
+                {
+                    'source': source_path,
+                    'destination': destination_path,
+                }
+            )
+
+    unit_destinations = {}
+    units_elem = config_root.find('units')
+    if units_elem is not None:
+        for unit_elem in units_elem.findall('unit'):
+            source_text = (unit_elem.findtext('source') or '').strip()
+            destination_text = (unit_elem.findtext('destination') or '').strip()
+            if not source_text or not destination_text:
+                continue
+            source_path = (config_dir / normalize_config_path(source_text)).resolve()
+            unit_destinations[source_path] = Path(destination_text).stem
+
+    return {
+        'config_path': Path(config_path).resolve(),
+        'asset_mappings': asset_mappings,
+        'unit_destinations': unit_destinations,
+    }
+
+
+def resolve_pkg_asset_path(pkg_url, *, xml_file, config_context):
+    if not pkg_url.startswith('/pkg_assets/'):
+        return None
+
+    pkg_path = pkg_url[len('/pkg_assets/'):].lstrip('/')
+    asset_mappings = sorted(
+        config_context.get('asset_mappings', []),
+        key=lambda mapping: len(mapping['destination']),
+        reverse=True,
+    )
+
+    for mapping in asset_mappings:
+        destination = mapping['destination']
+        source_path = mapping['source']
+        if pkg_path == destination:
+            return source_path
+        prefix = f'{destination}/'
+        if pkg_path.startswith(prefix):
+            suffix = PurePosixPath(pkg_path[len(prefix):])
+            return source_path.joinpath(*suffix.parts)
+
+    xml_path = Path(xml_file).resolve()
+    unit_destinations = config_context.get('unit_destinations', {})
+    destination_stem = unit_destinations.get(xml_path)
+    if destination_stem:
+        legacy_prefix = f'{destination_stem}_images'
+        if pkg_path == legacy_prefix:
+            return xml_path.parent / 'images'
+        prefix = f'{legacy_prefix}/'
+        if pkg_path.startswith(prefix):
+            suffix = PurePosixPath(pkg_path[len(prefix):])
+            return xml_path.parent.joinpath('images', *suffix.parts)
+
+    return None
+
+
+def make_html_asset_url(asset_path, *, output_file):
+    output_dir = Path(output_file).resolve().parent
+    try:
+        relative_path = os.path.relpath(asset_path, output_dir)
+        return Path(relative_path).as_posix()
+    except ValueError:
+        return Path(asset_path).resolve().as_uri()
+
+
+def rewrite_pkg_asset_urls(html_text, *, xml_file, output_file, config_context, errors):
+    if not html_text or '/pkg_assets/' not in html_text:
+        return html_text
+
+    if config_context is None:
+        errors.append(
+            f"Asset resolution error in {xml_file}: found /pkg_assets/ URL but no llmgrader_config.xml was provided or discovered."
+        )
+        return html_text
+
+    pattern = r'(?P<prefix>\b(?:src|href)\s*=\s*["\'])(?P<url>/pkg_assets/[^"\']+)(?P<suffix>["\'])'
+
+    def replace_match(match):
+        pkg_url = match.group('url')
+        resolved_path = resolve_pkg_asset_path(pkg_url, xml_file=xml_file, config_context=config_context)
+        if resolved_path is None:
+            errors.append(
+                f"Asset resolution error in {xml_file}: destination path {pkg_url} was not found in llmgrader_config.xml."
+            )
+            return match.group(0)
+        if not Path(resolved_path).exists():
+            errors.append(
+                f"Asset resolution error in {xml_file}: source asset for {pkg_url} was not found at {resolved_path}."
+            )
+            return match.group(0)
+        local_url = make_html_asset_url(resolved_path, output_file=output_file)
+        return f"{match.group('prefix')}{local_url}{match.group('suffix')}"
+
+    return re.sub(pattern, replace_match, html_text)
+
+
+def parse_xml_file(xml_file, *, output_file=None, config_context=None, errors=None):
     """
     Parse the XML file and extract questions.
     
@@ -82,6 +215,7 @@ def parse_xml_file(xml_file):
     """
     tree = ET.parse(xml_file)
     root = tree.getroot()
+    errors = errors if errors is not None else []
     
     # Extract unit title from root element
     unit_title = root.get('title', 'Questions')
@@ -97,6 +231,14 @@ def parse_xml_file(xml_file):
             text_content = text_elem.text if text_elem.text else ''
             # Dedent code blocks
             text_content = dedent_code_blocks(text_content)
+            if output_file is not None:
+                text_content = rewrite_pkg_asset_urls(
+                    text_content,
+                    xml_file=xml_file,
+                    output_file=output_file,
+                    config_context=config_context,
+                    errors=errors,
+                )
         else:
             text_content = ''
         
@@ -107,6 +249,14 @@ def parse_xml_file(xml_file):
             solution_content = solution_elem.text if solution_elem.text else ''
             # Dedent code blocks
             solution_content = dedent_code_blocks(solution_content)
+            if output_file is not None:
+                solution_content = rewrite_pkg_asset_urls(
+                    solution_content,
+                    xml_file=xml_file,
+                    output_file=output_file,
+                    config_context=config_context,
+                    errors=errors,
+                )
         else:
             solution_content = ''
         
@@ -283,6 +433,11 @@ def main():
         help='Path to the output HTML file (default: derived from input filename)'
     )
     parser.add_argument(
+        '--config',
+        required=False,
+        help='Path to llmgrader_config.xml used to resolve /pkg_assets URLs for standalone HTML output'
+    )
+    parser.add_argument(
         '--soln',
         action='store_true',
         help='Include solutions in the output HTML'
@@ -295,7 +450,9 @@ def main():
     
     args = parser.parse_args()
 
-    validation_errors = UnitParser.validate_unit_file(os.path.abspath(args.input))
+    input_path = os.path.abspath(args.input)
+
+    validation_errors = UnitParser.validate_unit_file(input_path)
     if validation_errors:
         print('Validation errors found in input XML file:')
         print()
@@ -315,13 +472,43 @@ def main():
             output_file = base_name + '_soln.html'
         else:
             output_file = base_name + '.html'
+
+    config_path = Path(args.config).resolve() if args.config else discover_config_path(input_path)
+    config_context = None
+    if config_path is not None:
+        config_validation_errors = UnitParser.validate_config_file(str(config_path))
+        if config_validation_errors:
+            print('Validation errors found in llmgrader_config.xml:')
+            print()
+            for error in config_validation_errors:
+                print(f'- {error}')
+            print()
+            print('Fix the XML validation errors above and rerun create_qfile.')
+            return 1
+        config_context = load_config_context(config_path)
+
+    asset_errors = []
     
     # Parse XML and extract questions
-    unit_title, questions = parse_xml_file(args.input)
+    unit_title, questions = parse_xml_file(
+        input_path,
+        output_file=output_file,
+        config_context=config_context,
+        errors=asset_errors,
+    )
+
+    if asset_errors:
+        print('Asset resolution errors found while generating standalone HTML:')
+        print()
+        for error in asset_errors:
+            print(f'- {error}')
+        print()
+        print('Fix the asset mappings above and rerun create_qfile.')
+        return 1
     
     # Generate HTML output
     generate_html(questions, output_file, unit_title=unit_title, include_solutions=args.soln)
-    
+
     print(f'Successfully created {output_file} with {len(questions)} question(s).')
     
     # Generate PDF if requested
