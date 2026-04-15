@@ -293,14 +293,6 @@ async function loadView(name) {
         const response = await fetch(`/static/views/${name}.html`);
         const html = await response.text();
 
-        // Rescue any elements that were moved into the view container so they
-        // are not destroyed when view-container.innerHTML is replaced.
-        const gradeBtn = document.getElementById("grade-button");
-        const desktopBtnContainer = document.getElementById("desktop-grade-button-container");
-        if (gradeBtn && desktopBtnContainer && gradeBtn.parentElement !== desktopBtnContainer) {
-            desktopBtnContainer.appendChild(gradeBtn);
-        }
-
         document.getElementById("view-container").innerHTML = html;
 
         // Update global active view state
@@ -418,8 +410,7 @@ function initializeGradeViewDesktop() {
     const hDiv = document.querySelector(".divider");
     if (hDiv) hDiv.style.display = "";
 
-    moveSolutionTextareaTo("desktop-solution-container");
-    moveGradeButtonTo("desktop-grade-button-container");
+    moveSolutionComposerTo("desktop-solution-container");
     moveGradeStatusTo("desktop-grade-result-container");
 
     // Reattach horizontal divider (question/solution splitter)
@@ -624,18 +615,9 @@ function initializeGradeViewMobile() {
 
     // Show first panel
     showMobilePanel("question");
-    moveSolutionTextareaTo("mobile-solution-container");
-    moveGradeButtonTo("mobile-grade-button-container");
+    moveSolutionComposerTo("mobile-solution-container");
     mirrorQuestionWhenReady();
     mirrorFeedbackWhenReady();
-
-    // Auto-expand textarea as user types
-    const solTextarea = document.getElementById("student-solution");
-    if (solTextarea && !solTextarea._autoExpandAttached) {
-        solTextarea.addEventListener("input", () => autoExpand(solTextarea));
-        solTextarea._autoExpandAttached = true;
-    }
-    if (solTextarea) autoExpand(solTextarea);
 
     // Tab switching
     document.querySelectorAll(".mobile-tabs button").forEach(btn => {
@@ -656,6 +638,30 @@ function showMobilePanel(name) {
     document.querySelectorAll(".mobile-tabs button").forEach(btn => {
         btn.classList.toggle("active", btn.getAttribute("data-panel") === name);
     });
+}
+
+function moveSolutionComposerTo(containerId) {
+    const composer = document.getElementById("solution-composer");
+    const container = document.getElementById(containerId);
+    if (!composer || !container) return;
+    if (composer.parentElement !== container) {
+        container.appendChild(composer);
+    }
+    composer.style.display = "";
+
+    // Wire up auto-expand and keyboard shortcut (safe to call multiple times)
+    const solTextarea = document.getElementById("student-solution");
+    if (solTextarea && !solTextarea._composerBound) {
+        solTextarea._composerBound = true;
+        solTextarea.addEventListener("input", () => autoExpand(solTextarea));
+        solTextarea.addEventListener("keydown", (e) => {
+            if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+                e.preventDefault();
+                gradeCurrentQuestion();
+            }
+        });
+    }
+    if (solTextarea) autoExpand(solTextarea);
 }
 
 function moveSolutionTextareaTo(containerId) {
@@ -857,6 +863,107 @@ function displayAdminCurrent() {
     displayAdminQuestion(currentUnitName, currentQtagName);
 }
 
+function escapeHtml(value) {
+    return String(value ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/\"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+}
+
+function formatNotesHtml(text) {
+    const escaped = escapeHtml(text || "").trim();
+    if (!escaped) {
+        return '<div class="admin-other-notes-body">None.</div>';
+    }
+    return `<div class="admin-other-notes-body">${escaped.replace(/\n/g, "<br>")}</div>`;
+}
+
+function formatRubricScoreCell(question, rubric) {
+    if (question?.partial_credit === true) {
+        const adjustment = Number(rubric?.point_adjustment ?? 0);
+        const prefix = adjustment > 0 ? "+" : "";
+        return `${prefix}${adjustment}`;
+    }
+
+    const conditionType = rubric?.condition_type || "positive";
+    const action = rubric?.action || "fail";
+    return `${conditionType} -> ${action}`;
+}
+
+function buildAdminRubricsHtml(question) {
+    const rubrics = question?.rubrics || {};
+    const rubricEntries = Object.entries(rubrics);
+    if (rubricEntries.length === 0) {
+        return "";
+    }
+
+    const rows = rubricEntries.map(([rubricId, rubric]) => {
+        const label = rubric?.display_text || rubric?.condition || rubricId;
+        const part = rubric?.part || "all";
+        const condition = rubric?.condition || "";
+        const notes = rubric?.notes || "";
+        const scoreCell = formatRubricScoreCell(question, rubric);
+        const notesPrefix = notes ? `<strong>Notes:</strong> ${escapeHtml(notes)}` : "";
+        const detailsHtml = [
+            `<strong>${escapeHtml(label)}</strong>`,
+            `<span>${escapeHtml(rubricId)}, ${escapeHtml(scoreCell)}</span>`,
+        ].join("<br>");
+        const conditionNotesHtml = [
+            `<div>${escapeHtml(condition)}</div>`,
+            notesPrefix ? `<div class="admin-rubric-notes">${notesPrefix}</div>` : "",
+        ].join("");
+
+        return `
+            <tr>
+                <td>${escapeHtml(part)}</td>
+                <td>${detailsHtml}</td>
+                <td>${conditionNotesHtml}</td>
+            </tr>
+        `;
+    }).join("");
+
+    return `
+        <div class="admin-rubrics-block">
+            <table>
+                <tbody>${rows}</tbody>
+            </table>
+        </div>
+    `;
+}
+
+function buildAdminOtherNotesHtml(question) {
+    const notesHtml = formatNotesHtml(question?.grading_notes || "");
+    const extraLines = [];
+
+    if (question?.partial_credit === true && question?.rubric_total) {
+        extraLines.push(`<div><strong>rubric_total:</strong> ${escapeHtml(question.rubric_total)}</div>`);
+    }
+
+    const groups = Array.isArray(question?.rubric_groups) ? question.rubric_groups : [];
+    if (groups.length > 0) {
+        const groupsText = groups
+            .map(group => `${group.type || "group"}: ${(group.ids || []).join(", ")}`)
+            .join("; ");
+        extraLines.push(`<div><strong>Rubric groups:</strong> ${escapeHtml(groupsText)}</div>`);
+    }
+
+    return `
+        <div class="admin-other-notes-block">
+            <div class="admin-other-notes-label"><strong>Other grading notes:</strong></div>
+            ${notesHtml}
+            ${extraLines.join("")}
+        </div>
+    `;
+}
+
+function buildAdminGradingNotesHtml(question) {
+    const rubricsHtml = buildAdminRubricsHtml(question);
+    const otherNotesHtml = buildAdminOtherNotesHtml(question);
+    return `${rubricsHtml}${otherNotesHtml}`;
+}
+
 // Admin View: Display selected question with reference solution and grading notes
 // Fixed: Uses q.solution_text (reference solution, not student solution)
 // Fixed: Grading notes formatting preserved via CSS white-space: pre-wrap
@@ -868,9 +975,11 @@ function displayAdminQuestion(unit, qtag) {
 
         updateAdminPartialCreditIndicator(q);
 
+        const gradingNotesHtml = buildAdminGradingNotesHtml(q);
+
         document.getElementById("admin-question-text").innerHTML = q.question_text || "";
         document.getElementById("admin-solution-text").innerHTML = q.solution || "";
-        document.getElementById("admin-grading-notes").textContent = q.grading_notes || "";
+        document.getElementById("admin-grading-notes").innerHTML = gradingNotesHtml;
 
         // Mirror into mobile panels if on mobile
         if (isMobile()) {
@@ -879,7 +988,7 @@ function displayAdminQuestion(unit, qtag) {
             const mn = document.getElementById("admin-mobile-grading-notes");
             if (mq) mq.innerHTML = q.question_text || "";
             if (ms) ms.innerHTML = q.solution || "";
-            if (mn) mn.textContent = q.grading_notes || "";
+            if (mn) mn.innerHTML = gradingNotesHtml;
         }
 
         if (window.MathJax) MathJax.typesetPromise();
@@ -1101,9 +1210,6 @@ function displayQuestion(qtag) {
 
     // Wire auto-expand for browsers without field-sizing:content support
     if (isMobile()) {
-        // Force flex override via inline style (defeats any CSS specificity issue)
-        solBox.style.flex = "none";
-        solBox.style.overflow = "hidden";
         autoExpand(solBox);
         if (!solBox._autoExpandAttached) {
             solBox.addEventListener("input", () => {
@@ -1250,6 +1356,39 @@ function resizeAndEncodeImage(file) {
     });
 }
 
+async function addSolutionImagesFromFiles(files, unitName, qtag) {
+    if (!unitName || !qtag) return 0;
+
+    const imageFiles = Array.from(files || []).filter(file =>
+        file && typeof file.type === "string" && file.type.startsWith("image/")
+    );
+    if (imageFiles.length === 0) return 0;
+
+    const sessionData = getSessionData(unitName, qtag);
+    let addedCount = 0;
+
+    for (const file of imageFiles) {
+        if (sessionData.solution_images.length >= MAX_SOLUTION_IMAGES) {
+            alert(`You can attach at most ${MAX_SOLUTION_IMAGES} images per question.`);
+            break;
+        }
+        try {
+            const dataUri = await resizeAndEncodeImage(file);
+            sessionData.solution_images.push(dataUri);
+            addedCount += 1;
+        } catch (err) {
+            console.error("Failed to encode image:", err);
+        }
+    }
+
+    if (addedCount > 0) {
+        saveSessionState();
+        renderSolutionImagePreviews(unitName, qtag);
+    }
+
+    return addedCount;
+}
+
 /**
  * Render thumbnail previews for the current qtag's solution images.
  */
@@ -1292,6 +1431,7 @@ function renderSolutionImagePreviews(unitName, qtag) {
 function initSolutionImageAttach() {
     const attachBtn = document.getElementById("solution-attach-btn");
     const fileInput = document.getElementById("solution-image-input");
+    const solutionBox = document.getElementById("student-solution");
     if (!attachBtn || !fileInput) return;
     if (attachBtn._attachBound) return;
     attachBtn._attachBound = true;
@@ -1305,24 +1445,31 @@ function initSolutionImageAttach() {
         const dropdown = document.getElementById("question-number");
         if (!dropdown || !currentUnitName) return;
         const qtag = dropdown.value;
-        const sessionData = getSessionData(currentUnitName, qtag);
-
-        for (const file of Array.from(fileInput.files)) {
-            if (sessionData.solution_images.length >= MAX_SOLUTION_IMAGES) {
-                alert(`You can attach at most ${MAX_SOLUTION_IMAGES} images per question.`);
-                break;
-            }
-            try {
-                const dataUri = await resizeAndEncodeImage(file);
-                sessionData.solution_images.push(dataUri);
-            } catch (err) {
-                console.error("Failed to encode image:", err);
-            }
-        }
-
-        saveSessionState();
-        renderSolutionImagePreviews(currentUnitName, qtag);
+        await addSolutionImagesFromFiles(fileInput.files, currentUnitName, qtag);
     });
+
+    if (solutionBox && !solutionBox._imagePasteBound) {
+        solutionBox._imagePasteBound = true;
+        solutionBox.addEventListener("paste", async (event) => {
+            const clipboardItems = Array.from(event.clipboardData?.items || []);
+            const imageFiles = clipboardItems
+                .filter(item => item.kind === "file" && item.type.startsWith("image/"))
+                .map(item => item.getAsFile())
+                .filter(Boolean);
+
+            if (imageFiles.length === 0) {
+                return;
+            }
+
+            const dropdown = document.getElementById("question-number");
+            if (!dropdown || !currentUnitName) {
+                return;
+            }
+
+            event.preventDefault();
+            await addSolutionImagesFromFiles(imageFiles, currentUnitName, dropdown.value);
+        });
+    }
 }
 
 

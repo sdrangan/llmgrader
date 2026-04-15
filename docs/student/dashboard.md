@@ -23,6 +23,7 @@ Once you are satisfied with your results on the required problem, click the
 **Download submission** button on the top right.  This selection will create a zip file with:
 
 - A JSON file of the results on all submitted problems
+- Any images you attached to your answers (included automatically)
 - A text version of the file that can be read by a human grader, if there
 is a dispute or clarification needed.
 
