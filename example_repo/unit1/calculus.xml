@@ -149,4 +149,179 @@
         - Students may use different variables
         ]]></grading_notes>
     </question>
+
+    <question qtag="Exponential critical point" preferred_model="gpt-4.1-mini">
+        <question_text><![CDATA[
+        <p>Consider the function \(f(x) = x e^{-x}\).</p>
+
+        <ol type="a">
+            <li>Find the critical points for \(x \ge 0\) and the corresponding values of \(f(x)\) at the critical points.</li>
+            <li>Draw \(f(x)\) in the region \(x \ge 0\). Clearly indicate the value at \(x=0\), the limit as \(x \to \infty\), and the \((x,y)\) coordinate of any critical points.</li>
+        </ol>
+        ]]></question_text>
+        <solution><![CDATA[
+        <ol type="a">
+            <li>
+                \[
+                f'(x) = e^{-x} - x e^{-x} = e^{-x}(1-x)
+                \]
+                Since \(e^{-x} > 0\) for all \(x\), the only critical point for \(x \ge 0\) is where \(1-x=0\), namely \(x=1\).
+                The corresponding function value is
+                \[
+                f(1) = 1 \cdot e^{-1} = \frac{1}{e}.
+                \]
+                So the critical point is \((1, 1/e)\).
+            </li>
+            <li>
+                The graph starts at \(f(0)=0\), rises to a maximum at \((1,1/e)\), and then decreases toward 0 as \(x \to \infty\).
+                Thus
+                \[
+                f(0)=0, \qquad \lim_{x \to \infty} x e^{-x} = 0,
+                \]
+                and the critical point should be labeled at \((1,1/e)\).
+            </li>
+        </ol>
+        ]]></solution>
+        <parts>
+            <part>
+                <part_label>a</part_label>
+                <points>5</points>
+            </part>
+            <part>
+                <part_label>b</part_label>
+                <points>5</points>
+            </part>
+        </parts>
+        <partial_credit>true</partial_credit>
+        <required>true</required>
+        <rubrics>
+            <item id="identify_critical_point" part="a" point_adjustment="+3">
+                <display_text>Identifies the critical point correctly</display_text>
+                <condition>Student correctly finds the critical point for \(x \ge 0\) as \(x=1\), or equivalently shows that \(f'(x)=e^{-x}(1-x)\) and solves \(f'(x)=0\) correctly.</condition>
+                <notes>If the derivative is set up correctly but the final critical point is not stated clearly, award partial credit.</notes>
+            </item>
+
+            <item id="evaluate_critical_value" part="a" point_adjustment="+2">
+                <display_text>Computes the function value at the critical point</display_text>
+                <condition>Student correctly computes \(f(1)=1/e\).</condition>
+                <notes>If the correct critical point is identified but the substitution has a minor arithmetic or notation error, award partial credit.</notes>
+            </item>
+
+            <item id="limit_at_infinity" part="b" point_adjustment="+1">
+                <display_text>Correct limit as x approaches infinity</display_text>
+                <condition>Student indicates that \(f(x) \to 0\) as \(x \to \infty\).</condition>
+            </item>
+
+            <item id="value_at_zero" part="b" point_adjustment="+1">
+                <display_text>Correct value at x equals zero</display_text>
+                <condition>Student indicates that \(f(0)=0\).</condition>
+            </item>
+
+            <item id="curve_shape" part="b" point_adjustment="+2">
+                <display_text>Correct overall shape of the curve</display_text>
+                <condition>Student's graph has the correct qualitative shape on \(x \ge 0\): it starts at the origin, increases to a single maximum, and then decreases toward 0.</condition>
+                <notes>A rough sketch is acceptable if the essential shape is correct.</notes>
+            </item>
+
+            <item id="label_critical_point_on_graph" part="b" point_adjustment="+1">
+                <display_text>Labels the critical point on the graph</display_text>
+                <condition>Student labels the critical point on the graph as \((1,1/e)\) or provides an equivalent unambiguous label.</condition>
+            </item>
+        </rubrics>
+        <rubric_total>sum_positive</rubric_total>
+
+        <grading_notes><![CDATA[
+        For part (a), accept any equivalent derivative computation or reasoning that correctly identifies the unique critical point on x >= 0 and its function value.
+        For part (b), grade the graph qualitatively. Do not require an exact scale, but the sketch must show the intercept at (0,0), a single maximum at (1,1/e), and decay toward 0 for large x.
+        ]]></grading_notes>
+    </question>
+
+    <question qtag="Exponential graphing" preferred_model="gpt-4.1-mini">
+        <question_text><![CDATA[
+        <p>Consider the function \(f(x) = x e^{-x}\).</p>
+
+        <ol type="a">
+            <li>Find the critical points for \(x \ge 0\) and the corresponding values of \(f(x)\) at the critical points.</li>
+            <li>Draw \(f(x)\) in the region \(x \ge 0\). Clearly indicate the value at \(x=0\), the limit as \(x \to \infty\), and the \((x,y)\) coordinate of any critical points.</li>
+        </ol>
+        ]]></question_text>
+        <solution><![CDATA[
+        <ol type="a">
+            <li>
+                \[
+                f'(x) = e^{-x} - x e^{-x} = e^{-x}(1-x)
+                \]
+                Since \(e^{-x} > 0\) for all \(x\), the only critical point for \(x \ge 0\) is where \(1-x=0\), namely \(x=1\).
+                The corresponding function value is
+                \[
+                f(1) = 1 \cdot e^{-1} = \frac{1}{e}.
+                \]
+                So the critical point is \((1, 1/e)\).
+            </li>
+            <li>
+                The graph starts at \(f(0)=0\), rises to a maximum at \((1,1/e)\), and then decreases toward 0 as \(x \to \infty\).
+                Thus
+                \[
+                f(0)=0, \qquad \lim_{x \to \infty} x e^{-x} = 0,
+                \]
+                and the critical point should be labeled at \((1,1/e)\).
+            </li>
+        </ol>
+        <img src="/pkg_assets/unit1_images/xexpx_soln.png" alt="Graph of x e^-x with critical point labeled" width="400"/>
+        ]]></solution>
+        <parts>
+            <part>
+                <part_label>a</part_label>
+                <points>5</points>
+            </part>
+            <part>
+                <part_label>b</part_label>
+                <points>5</points>
+            </part>
+        </parts>
+        <partial_credit>true</partial_credit>
+        <required>true</required>
+        <rubrics>
+            <item id="identify_critical_point" part="a" point_adjustment="+3">
+                <display_text>Identifies the critical point correctly</display_text>
+                <condition>Student correctly finds the critical point for \(x \ge 0\) as \(x=1\), or equivalently shows that \(f'(x)=e^{-x}(1-x)\) and solves \(f'(x)=0\) correctly.</condition>
+                <notes>If the derivative is set up correctly but the final critical point is not stated clearly, award partial credit.</notes>
+            </item>
+
+            <item id="evaluate_critical_value" part="a" point_adjustment="+2">
+                <display_text>Computes the function value at the critical point</display_text>
+                <condition>Student correctly computes \(f(1)=1/e\).</condition>
+                <notes>If the correct critical point is identified but the substitution has a minor arithmetic or notation error, award partial credit.</notes>
+            </item>
+
+            <item id="limit_at_infinity" part="b" point_adjustment="+1">
+                <display_text>Correct limit as x approaches infinity</display_text>
+                <condition>Student indicates that \(f(x) \to 0\) as \(x \to \infty\).</condition>
+            </item>
+
+            <item id="value_at_zero" part="b" point_adjustment="+1">
+                <display_text>Correct value at x equals zero</display_text>
+                <condition>Student indicates that \(f(0)=0\).</condition>
+            </item>
+
+            <item id="curve_shape" part="b" point_adjustment="+2">
+                <display_text>Correct overall shape of the curve</display_text>
+                <condition>Student's graph has the correct qualitative shape on \(x \ge 0\): it starts at the origin, increases to a single maximum, and then decreases toward 0.</condition>
+                <notes>A rough sketch is acceptable if the essential shape is correct.</notes>
+            </item>
+
+            <item id="label_critical_point_on_graph" part="b" point_adjustment="+1">
+                <display_text>Labels the critical point on the graph</display_text>
+                <condition>Student labels the critical point on the graph as \((1,1/e)\) or provides an equivalent unambiguous label.</condition>
+            </item>
+        </rubrics>
+        <rubric_total>sum_positive</rubric_total>
+
+        <grading_notes><![CDATA[
+        For part (a), accept any equivalent derivative computation or reasoning that correctly identifies the unique critical point on x >= 0 and its function value.
+        For part (b), grade the graph qualitatively. Do not require an exact scale, but the sketch must show the intercept at (0,0), a single maximum at (1,1/e), and decay toward 0 for large x.
+        ]]></grading_notes>
+    </question>
+
+
 </unit>
