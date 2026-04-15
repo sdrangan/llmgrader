@@ -39,7 +39,7 @@ Attached images are sent to the LLM along with your text, so the grader can see 
 
 ### Grading
 
-Once you have typed your answer (and optionally attached images), click the **Grade** button in the composer.  Within a few seconds (typically 5–10 seconds) you will see:
+Once you have typed your answer (and optionally attached images), click the **Grade** button in the composer.  Within a few seconds (typically 5-10 seconds) you will see:
 
 - **Summary** — a quick, student-friendly explanation of how your answer compares.
 - **Full Explanation** — a more detailed breakdown of the reasoning.
