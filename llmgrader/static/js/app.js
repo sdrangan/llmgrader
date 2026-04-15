@@ -863,6 +863,107 @@ function displayAdminCurrent() {
     displayAdminQuestion(currentUnitName, currentQtagName);
 }
 
+function escapeHtml(value) {
+    return String(value ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/\"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+}
+
+function formatNotesHtml(text) {
+    const escaped = escapeHtml(text || "").trim();
+    if (!escaped) {
+        return '<div class="admin-other-notes-body">None.</div>';
+    }
+    return `<div class="admin-other-notes-body">${escaped.replace(/\n/g, "<br>")}</div>`;
+}
+
+function formatRubricScoreCell(question, rubric) {
+    if (question?.partial_credit === true) {
+        const adjustment = Number(rubric?.point_adjustment ?? 0);
+        const prefix = adjustment > 0 ? "+" : "";
+        return `${prefix}${adjustment}`;
+    }
+
+    const conditionType = rubric?.condition_type || "positive";
+    const action = rubric?.action || "fail";
+    return `${conditionType} -> ${action}`;
+}
+
+function buildAdminRubricsHtml(question) {
+    const rubrics = question?.rubrics || {};
+    const rubricEntries = Object.entries(rubrics);
+    if (rubricEntries.length === 0) {
+        return "";
+    }
+
+    const rows = rubricEntries.map(([rubricId, rubric]) => {
+        const label = rubric?.display_text || rubric?.condition || rubricId;
+        const part = rubric?.part || "all";
+        const condition = rubric?.condition || "";
+        const notes = rubric?.notes || "";
+        const scoreCell = formatRubricScoreCell(question, rubric);
+        const notesPrefix = notes ? `<strong>Notes:</strong> ${escapeHtml(notes)}` : "";
+        const detailsHtml = [
+            `<strong>${escapeHtml(label)}</strong>`,
+            `<span>${escapeHtml(rubricId)}, ${escapeHtml(scoreCell)}</span>`,
+        ].join("<br>");
+        const conditionNotesHtml = [
+            `<div>${escapeHtml(condition)}</div>`,
+            notesPrefix ? `<div class="admin-rubric-notes">${notesPrefix}</div>` : "",
+        ].join("");
+
+        return `
+            <tr>
+                <td>${escapeHtml(part)}</td>
+                <td>${detailsHtml}</td>
+                <td>${conditionNotesHtml}</td>
+            </tr>
+        `;
+    }).join("");
+
+    return `
+        <div class="admin-rubrics-block">
+            <table>
+                <tbody>${rows}</tbody>
+            </table>
+        </div>
+    `;
+}
+
+function buildAdminOtherNotesHtml(question) {
+    const notesHtml = formatNotesHtml(question?.grading_notes || "");
+    const extraLines = [];
+
+    if (question?.partial_credit === true && question?.rubric_total) {
+        extraLines.push(`<div><strong>rubric_total:</strong> ${escapeHtml(question.rubric_total)}</div>`);
+    }
+
+    const groups = Array.isArray(question?.rubric_groups) ? question.rubric_groups : [];
+    if (groups.length > 0) {
+        const groupsText = groups
+            .map(group => `${group.type || "group"}: ${(group.ids || []).join(", ")}`)
+            .join("; ");
+        extraLines.push(`<div><strong>Rubric groups:</strong> ${escapeHtml(groupsText)}</div>`);
+    }
+
+    return `
+        <div class="admin-other-notes-block">
+            <div class="admin-other-notes-label"><strong>Other grading notes:</strong></div>
+            ${notesHtml}
+            ${extraLines.join("")}
+        </div>
+    `;
+}
+
+function buildAdminGradingNotesHtml(question) {
+    const rubricsHtml = buildAdminRubricsHtml(question);
+    const otherNotesHtml = buildAdminOtherNotesHtml(question);
+    return `${rubricsHtml}${otherNotesHtml}`;
+}
+
 // Admin View: Display selected question with reference solution and grading notes
 // Fixed: Uses q.solution_text (reference solution, not student solution)
 // Fixed: Grading notes formatting preserved via CSS white-space: pre-wrap
@@ -874,9 +975,11 @@ function displayAdminQuestion(unit, qtag) {
 
         updateAdminPartialCreditIndicator(q);
 
+        const gradingNotesHtml = buildAdminGradingNotesHtml(q);
+
         document.getElementById("admin-question-text").innerHTML = q.question_text || "";
         document.getElementById("admin-solution-text").innerHTML = q.solution || "";
-        document.getElementById("admin-grading-notes").textContent = q.grading_notes || "";
+        document.getElementById("admin-grading-notes").innerHTML = gradingNotesHtml;
 
         // Mirror into mobile panels if on mobile
         if (isMobile()) {
@@ -885,7 +988,7 @@ function displayAdminQuestion(unit, qtag) {
             const mn = document.getElementById("admin-mobile-grading-notes");
             if (mq) mq.innerHTML = q.question_text || "";
             if (ms) ms.innerHTML = q.solution || "";
-            if (mn) mn.textContent = q.grading_notes || "";
+            if (mn) mn.innerHTML = gradingNotesHtml;
         }
 
         if (window.MathJax) MathJax.typesetPromise();

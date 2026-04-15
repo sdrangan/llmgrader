@@ -884,6 +884,79 @@ textarea {
 .text-box td {
     border: 1px solid #ccc;
     padding: 6px 8px;
+
+.admin-rubrics-block table {
+    min-width: 0;
+    width: 100%;
+    table-layout: fixed;
+}
+
+.admin-rubrics-block th:nth-child(1),
+.admin-rubrics-block td:nth-child(1) {
+    width: 3.5rem;
+    white-space: nowrap;
+}
+
+.admin-rubrics-block th:nth-child(2),
+.admin-rubrics-block td:nth-child(2) {
+    width: 11rem;
+    overflow-wrap: anywhere;
+}
+
+.admin-rubrics-block th:nth-child(3),
+.admin-rubrics-block td:nth-child(3) {
+    width: auto;
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.admin-rubrics-block td span {
+    color: #555;
+    font-size: 0.9em;
+}
+
+.admin-rubric-notes {
+    margin-top: 0.2rem;
+}
+
+.admin-rubrics-block table {
+    margin-top: 0;
+    margin-bottom: 0;
+}
+
+.admin-other-notes-block {
+    margin-top: 0.15rem;
+}
+
+.admin-other-notes-label {
+    margin: 0;
+}
+
+.admin-other-notes-body {
+    margin: 0;
+}
+
+#admin-grading-notes,
+#admin-mobile-grading-notes {
+    white-space: normal;
+}
+
+#admin-grading-notes .admin-rubrics-block,
+#admin-grading-notes .admin-other-notes-block,
+#admin-mobile-grading-notes .admin-rubrics-block,
+#admin-mobile-grading-notes .admin-other-notes-block {
+    margin: 0;
+}
+
+#admin-grading-notes .admin-other-notes-block > div,
+#admin-mobile-grading-notes .admin-other-notes-block > div {
+    margin: 0;
+}
+
+#admin-grading-notes .admin-other-notes-block > div + div,
+#admin-mobile-grading-notes .admin-other-notes-block > div + div {
+    margin-top: 0.15rem;
+}
     text-align: left;
     vertical-align: top;
 }

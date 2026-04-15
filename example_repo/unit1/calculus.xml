@@ -161,9 +161,9 @@
         ]]></question_text>
         <solution><![CDATA[
         <ol type="a">
-            <li>
+            <li> Taking the derivative to find critcal points:
                 \[
-                f'(x) = e^{-x} - x e^{-x} = e^{-x}(1-x)
+                f'(x) = e^{-x} - x e^{-x} = e^{-x}(1-x) = 0
                 \]
                 Since \(e^{-x} > 0\) for all \(x\), the only critical point for \(x \ge 0\) is where \(1-x=0\), namely \(x=1\).
                 The corresponding function value is
