@@ -135,6 +135,7 @@ class APIController:
             api_key = data.get("api_key", None)
             provider = data.get("provider", None)
             timeout = data.get("timeout", 20)
+            solution_images = data.get("solution_images", [])
 
     
             # Retrieve the question data
@@ -182,6 +183,9 @@ class APIController:
                 f.write("\n=== Tools ===\n")
                 f.write(json.dumps(tools) + "\n")
 
+                f.write("\n=== Solution Images ===\n")
+                f.write(f"{len(solution_images)} image(s) attached\n")
+
             print(f"Sent grader input {fn}")
 
             # Call the grader
@@ -194,7 +198,8 @@ class APIController:
                 model=model,
                 provider=provider,
                 api_key=api_key,
-                timeout=timeout
+                timeout=timeout,
+                solution_images=solution_images
             )
 
             return jsonify(grade_result)

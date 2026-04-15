@@ -1073,7 +1073,7 @@ class Grader:
         )
 
 
-    def _make_llm_caller(self, provider, model, api_key, task, timeout, tools=None):
+    def _make_llm_caller(self, provider, model, api_key, task, timeout, tools=None, solution_images=None):
         """
         Creates a function that calls the specified LLM provider with the given parameters.
         
@@ -1091,6 +1091,9 @@ class Grader:
             The timeout in seconds for the API call.
         tools: list[str] | None
             Built-in tool names enabled for the request.
+        solution_images: list[str] | None
+            Optional list of base64 data URI strings to include as image content
+            alongside the text prompt (multimodal grading).
 
         Returns
         -------
@@ -1102,14 +1105,25 @@ class Grader:
                 input_tokens, output_tokens: int
                     Number of tokens used in the API call (input & output)
         """
+        images = solution_images or []
+
         if provider == "openai":
             client = OpenAI(api_key=api_key)
             requested_tools = [tool for tool in (tools or []) if tool in self.SUPPORTED_TOOLS]
 
+            # Build the input: multimodal list when images are present, plain string otherwise
+            if images:
+                task_hint = task + "\n\n--- STUDENT SOLUTION IMAGES ---\nSee attached images below."
+                openai_input = [{"type": "input_text", "text": task_hint}]
+                for data_uri in images:
+                    openai_input.append({"type": "input_image", "image_url": data_uri})
+            else:
+                openai_input = task
+
             def call_openai():
                 request_kwargs = {
                     "model": model,
-                    "input": task,
+                    "input": openai_input,
                     "temperature": 1 if model.startswith("gpt-5-mini") else 0,
                     "timeout": timeout,
                 }
@@ -1155,11 +1169,23 @@ class Grader:
             url = f"https://router.huggingface.co/models/{hf_model}/v1/chat/completions"
             headers = {"Authorization": f"Bearer {api_key}"}
 
+            # Build message content: multimodal list when images are present
+            if images:
+                task_hint = task + "\n\n--- STUDENT SOLUTION IMAGES ---\nSee attached images below."
+                message_content = [{"type": "text", "text": task_hint}]
+                for data_uri in images:
+                    message_content.append({
+                        "type": "image_url",
+                        "image_url": {"url": data_uri}
+                    })
+            else:
+                message_content = task
+
             def call_hf():
                 payload = {
                     "model": hf_model,
                     "messages": [
-                        {"role": "user", "content": task}
+                        {"role": "user", "content": message_content}
                     ],
                     "temperature": 0,
                 }
@@ -1290,7 +1316,8 @@ class Grader:
             provider : str = "openai",
             model: str="gpt-4.1-mini",
             api_key: str | None = None,
-            timeout: float = 20.) -> GradeResult:
+            timeout: float = 20.,
+            solution_images: list[str] | None = None) -> GradeResult:
         """
         Grades a student's solution using the OpenAI API.
         
@@ -1314,6 +1341,9 @@ class Grader:
             The API key (either OpenAI API key or Hugging Face token) to use for authentication.
         timeout: float
             The timeout in seconds for the API call.
+        solution_images: list[str] | None
+            Optional list of base64 data URI strings representing images attached
+            by the student alongside their solution.
 
         Returns
         -------
@@ -1376,7 +1406,11 @@ class Grader:
             
             # Create the API call function
             try:
-                call_llm = self._make_llm_caller(provider, model, api_key, task, timeout, tools=tools)
+                call_llm = self._make_llm_caller(
+                    provider, model, api_key, task, timeout,
+                    tools=tools,
+                    solution_images=solution_images or [],
+                )
             except Exception as e:
                 grade = {
                     "result": "error",
