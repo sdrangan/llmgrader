@@ -203,15 +203,19 @@ function renderAdminUsers(admins) {
         removeBtn.className = "modal-btn";
         removeBtn.style.marginLeft = "8px";
         removeBtn.addEventListener("click", async () => {
-            const resp = await fetch(`/api/admin/users/${encodeURIComponent(admin.email)}`, {
-                method: "DELETE"
-            });
-            const payload = await resp.json().catch(() => ({}));
-            if (!resp.ok) {
-                alert(payload.error || "Failed to remove admin user");
-                return;
+            try {
+                const resp = await fetch(`/api/admin/users/${encodeURIComponent(admin.email)}`, {
+                    method: "DELETE"
+                });
+                const payload = await resp.json().catch(() => ({}));
+                if (!resp.ok) {
+                    alert(payload.error || "Failed to remove admin user");
+                    return;
+                }
+                await loadAdminUsers();
+            } catch (err) {
+                alert("Failed to remove admin user");
             }
-            await loadAdminUsers();
         });
         item.appendChild(removeBtn);
         list.appendChild(item);
@@ -279,19 +283,22 @@ function initializeAdminPreferencesModal() {
         adminUserAddBtn.addEventListener("click", async () => {
             const email = (adminUserEmailInput?.value || "").trim();
             if (!email) return;
-
-            const resp = await fetch("/api/admin/users", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ email })
-            });
-            const payload = await resp.json().catch(() => ({}));
-            if (!resp.ok) {
-                alert(payload.error || "Failed to add admin user");
-                return;
+            try {
+                const resp = await fetch("/api/admin/users", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ email })
+                });
+                const payload = await resp.json().catch(() => ({}));
+                if (!resp.ok) {
+                    alert(payload.error || "Failed to add admin user");
+                    return;
+                }
+                if (adminUserEmailInput) adminUserEmailInput.value = "";
+                await loadAdminUsers();
+            } catch (err) {
+                alert("Failed to add admin user");
             }
-            if (adminUserEmailInput) adminUserEmailInput.value = "";
-            await loadAdminUsers();
         });
     }
 

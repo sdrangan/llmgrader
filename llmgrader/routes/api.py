@@ -3,6 +3,7 @@ print("LOADING api.py FROM:", __file__)
 import os
 import json
 import secrets
+import re
 from functools import wraps
 from urllib.parse import urlencode
 from flask import Blueprint, request, jsonify
@@ -171,6 +172,28 @@ class APIController:
             "auth_mode": self.auth_mode(),
             "oauth_enabled": oauth_ready,
         }
+
+    @staticmethod
+    def is_safe_analytics_sql(sql_query: str) -> bool:
+        sql = (sql_query or "").strip()
+        if not sql:
+            return False
+
+        if ";" in sql.rstrip(";"):
+            return False
+
+        lowered = sql.lower()
+        if not lowered.startswith("select") and not lowered.startswith("with"):
+            return False
+
+        forbidden = re.compile(
+            r"\b(insert|update|delete|drop|alter|create|replace|attach|detach|vacuum|reindex|pragma|begin|commit|rollback)\b"
+        )
+        return forbidden.search(lowered) is None
+
+    @staticmethod
+    def sanitize_filename_component(value: str) -> str:
+        return re.sub(r"[^A-Za-z0-9_.-]", "_", value or "")
 
     def require_authenticated_user(self, f):
         @wraps(f)
@@ -386,10 +409,11 @@ class APIController:
             tools = qdata.get("tools", [])
 
             # Save grader inputs for debugging
-            safe_qtag = qtag.replace(" ", "_").replace("/", "_")
+            safe_unit = self.sanitize_filename_component(unit)
+            safe_qtag = self.sanitize_filename_component(qtag)
             fn = os.path.join(
                 self.grader.scratch_dir,
-                f"grade_input_{unit}_{safe_qtag}.txt"
+                f"grade_input_{safe_unit}_{safe_qtag}.txt"
             )
 
             with open(fn, "w", encoding="utf-8") as f:
@@ -616,6 +640,12 @@ class APIController:
                     "rows": [],
                     "error": "Please enter a SQL query"
                 })
+            if not self.is_safe_analytics_sql(sql_query):
+                return jsonify({
+                    "columns": [],
+                    "rows": [],
+                    "error": "Only read-only SELECT queries are allowed"
+                })
 
             try:
                 conn = sqlite3.connect(self.grader.db_path)
@@ -671,6 +701,8 @@ class APIController:
             
             if not sql_query:
                 return {"error": "No query in session"}, 400
+            if not self.is_safe_analytics_sql(sql_query):
+                return {"error": "Only read-only SELECT queries are allowed"}, 400
             
             try:
                 conn = sqlite3.connect(self.grader.db_path)

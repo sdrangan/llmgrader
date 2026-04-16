@@ -133,3 +133,20 @@ def test_admin_can_manage_admin_users(app_factory, monkeypatch):
 
         last_admin_delete = client.delete("/api/admin/users/admin@example.com")
         assert last_admin_delete.status_code == 400
+
+
+def test_dbviewer_rejects_non_readonly_sql(app_factory):
+    create, _ = app_factory
+    app = create(LLMGRADER_AUTH_MODE="dev-open", LLMGRADER_INITIAL_ADMIN_EMAIL=None)
+
+    with app.test_client() as client:
+        blocked = client.post("/admin/dbviewer", json={"sql_query": "DROP TABLE submissions"})
+        assert blocked.status_code == 200
+        assert blocked.get_json()["error"] == "Only read-only SELECT queries are allowed"
+
+        allowed = client.post(
+            "/admin/dbviewer",
+            json={"sql_query": "SELECT id FROM submissions LIMIT 1"},
+        )
+        assert allowed.status_code == 200
+        assert allowed.get_json()["error"] is None
