@@ -593,6 +593,7 @@ textarea {
     min-height: 0;
     min-width: 0;
     width: 100%;
+    overflow: hidden;
     box-shadow: 0 1px 4px rgba(0,0,0,0.07);
     box-sizing: border-box;
 }
@@ -614,6 +615,7 @@ textarea {
 .solution-input-row {
     display: grid;
     grid-template-columns: auto 1fr auto;
+    grid-template-rows: minmax(0, 1fr) auto;
     grid-template-areas:
         "textarea textarea textarea"
         "attach . grade";
@@ -632,6 +634,7 @@ textarea {
     align-self: stretch;
     min-width: 0;
     min-height: 80px;
+    height: 100%;
     width: 100%;
     padding: 4px 0;
     border: none;
@@ -1294,22 +1297,25 @@ textarea {
         flex: none;
         border-radius: 8px;
         min-height: auto;
+        overflow: visible;
         width: 100%;
     }
 
     .solution-input-row {
         flex: none;
+        grid-template-rows: auto auto;
         min-height: auto;
         min-width: 0;
         width: 100%;
     }
 
     #student-solution {
+        height: auto;
         width: 100%;
         min-width: 0;
         min-height: 100px;
         resize: none;
-        overflow-y: auto;
+        overflow-y: visible;
         box-sizing: border-box;
         font-size: 1rem;
         line-height: 1.4;

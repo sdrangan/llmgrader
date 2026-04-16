@@ -467,9 +467,18 @@ function mirrorQuestionWhenReady() {
     observer.observe(q, { childList: true, subtree: true });
 }
 
-function autoExpand(el) {
-    el.style.height = "auto";
-    el.style.height = el.scrollHeight + "px";
+function syncSolutionTextareaSizing(el) {
+    if (!el) {
+        return;
+    }
+
+    if (isMobile()) {
+        el.style.height = "auto";
+        el.style.height = `${el.scrollHeight}px`;
+        return;
+    }
+
+    el.style.height = "";
 }
 
 function formatGradeNumber(value) {
@@ -638,6 +647,12 @@ function showMobilePanel(name) {
     document.querySelectorAll(".mobile-tabs button").forEach(btn => {
         btn.classList.toggle("active", btn.getAttribute("data-panel") === name);
     });
+
+    if (name === "solution") {
+        requestAnimationFrame(() => {
+            syncSolutionTextareaSizing(document.getElementById("student-solution"));
+        });
+    }
 }
 
 function moveSolutionComposerTo(containerId) {
@@ -653,7 +668,6 @@ function moveSolutionComposerTo(containerId) {
     const solTextarea = document.getElementById("student-solution");
     if (solTextarea && !solTextarea._composerBound) {
         solTextarea._composerBound = true;
-        solTextarea.addEventListener("input", () => autoExpand(solTextarea));
         solTextarea.addEventListener("keydown", (e) => {
             if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
                 e.preventDefault();
@@ -661,7 +675,7 @@ function moveSolutionComposerTo(containerId) {
             }
         });
     }
-    if (solTextarea) autoExpand(solTextarea);
+    syncSolutionTextareaSizing(solTextarea);
 }
 
 function moveSolutionTextareaTo(containerId) {
@@ -1203,23 +1217,12 @@ function displayQuestion(qtag) {
     const solBox = document.getElementById("student-solution");
     solBox.value = sessionData.student_solution || 
                    currentStudentSolutions[qtag]?.solution || "";
+    syncSolutionTextareaSizing(solBox);
 
     // Restore solution image thumbnails and wire the attach button
     initSolutionImageAttach();
     renderSolutionImagePreviews(currentUnitName, qtag);
 
-    // Wire auto-expand for browsers without field-sizing:content support
-    if (isMobile()) {
-        autoExpand(solBox);
-        if (!solBox._autoExpandAttached) {
-            solBox.addEventListener("input", () => {
-                solBox.style.height = "auto";
-                solBox.style.height = solBox.scrollHeight + "px";
-            });
-            solBox._autoExpandAttached = true;
-            console.log("autoExpand listener attached in displayQuestion");
-        }
-    }
 
     // ---------------------------
     // Update PART DROPDOWN
@@ -1309,7 +1312,7 @@ function populateQuestionDropdown(qtags, selectedQtag = null) {
                     student_solution: solBox.value
                 }, null);
             }
-            if (isMobile()) autoExpand(solBox);
+            syncSolutionTextareaSizing(solBox);
         });
     }
 }
