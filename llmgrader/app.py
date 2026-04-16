@@ -1,7 +1,7 @@
 from flask import Flask
 from llmgrader.routes.api import APIController
 from llmgrader.services.grader import Grader
-import secrets
+import os
 
 def create_app(
         scratch_dir : str ="scratch",
@@ -17,7 +17,7 @@ def create_app(
         Path to solution package (if testing locally).
     """
     app = Flask(__name__)
-    app.secret_key = secrets.token_hex(16)
+    app.secret_key = os.environ.get("LLMGRADER_SECRET_KEY", "llmgrader-dev-secret-key")
 
     grader = Grader(
         scratch_dir=scratch_dir,

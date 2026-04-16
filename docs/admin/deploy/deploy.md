@@ -19,7 +19,7 @@ A Render deployment consists of:
 
 - a **Web Service** running the Flask application  
 - a **Persistent Disk** mounted at `/var/data`  
-- environment variables for admin authentication and configuration  
+- environment variables for Google sign-in and admin authorization  
 - automatic redeploys on Git pushes  
 
 The grader stores uploaded solution packages on the persistent disk, so course content survives restarts and redeploys.  Before starting you will need to create a Render account, by
@@ -119,7 +119,11 @@ In the Render service settings, add:
 
 | Variable | Suggested value | Remarks 
 |----------|---------|--------- |
-| `LLMGRADER_ADMIN_PASSWORD` | Any | Password for entering admin pages |
+| `LLMGRADER_SECRET_KEY` | Long random string | Stable Flask session secret |
+| `LLMGRADER_GOOGLE_CLIENT_ID` | OAuth client ID | Google OAuth configuration |
+| `LLMGRADER_GOOGLE_CLIENT_SECRET` | OAuth client secret | Google OAuth configuration |
+| `LLMGRADER_GOOGLE_REDIRECT_URI` | `https://<host>/auth/callback` | OAuth callback URL |
+| `LLMGRADER_INITIAL_ADMIN_EMAIL` | `you@example.com` | Bootstraps first admin |
 | `PYTHON_VERSION` | `3.12.3` | Update with python version |
 | `LLMGRADER_STORAGE_PATH` | /var/data/| Root for persistent storage |  
 
@@ -166,6 +170,5 @@ Once you are deployed, you can [upload the course package](../buildcourse/upload
 
 ---
 
-Go to [setting the admin password](./password.md)
-
+Go to [Google sign-in and admin access](./password.md)
 

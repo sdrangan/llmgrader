@@ -5,85 +5,74 @@ nav_order: 2
 has_children: false
 ---
 
-# Admin Password Protection
+# Google Sign-in and Admin Access
 
-LLM Grader includes optional password protection for all instructor‑only pages. 
-This page explains how to enable it, how it works, and how to use it during development and deployment.
+LLM Grader uses Google OAuth for sign-in and server-side email authorization for admin access.
 
 ---
 
 ## Overview
 
-The grader supports a single global admin password, controlled entirely through an environment variable.  
-If the password is set, all routes under `/admin` require authentication using standard HTTP Basic Authentication.  
-If the password is **not** set, the grader runs in open mode, which is convenient for local development.
-
-This design keeps the system lightweight, stateless, and easy to deploy.
+- Public/student functionality remains available without login.
+- Any Google account may sign in.
+- Admin routes are authorized by email lookup on the server.
+- Initial admin is bootstrapped from `LLMGRADER_INITIAL_ADMIN_EMAIL`.
+- Development bypass is available only with explicit `LLMGRADER_AUTH_MODE=dev-open`.
 
 ---
 
-## Setting the Password
-
-### 1. Choose a password  
-Pick any string you want to use as the admin password.
-
-### 2. Set the environment variable
+## Required environment variables
 
 #### On Render (production)
 
 1. Go to **Environment → Environment Variables**
-2. Add a new variable:
+2. Add these variables:
 
 ```
-Key: LLMGRADER_ADMIN_PASSWORD
-Value: your-secret-password
+LLMGRADER_SECRET_KEY=your-stable-secret
+LLMGRADER_GOOGLE_CLIENT_ID=...
+LLMGRADER_GOOGLE_CLIENT_SECRET=...
+LLMGRADER_GOOGLE_REDIRECT_URI=https://<your-domain>/auth/callback
+LLMGRADER_INITIAL_ADMIN_EMAIL=you@example.com
 ```
 
 3. Redeploy the service.
 
 #### On your local machine (development)
 
-**macOS / Linux:**
+**macOS / Linux**
 ```
-export LLMGRADER_ADMIN_PASSWORD=your-secret-password
+export LLMGRADER_SECRET_KEY=dev-secret
+export LLMGRADER_GOOGLE_CLIENT_ID=...
+export LLMGRADER_GOOGLE_CLIENT_SECRET=...
+export LLMGRADER_GOOGLE_REDIRECT_URI=http://127.0.0.1:5000/auth/callback
+export LLMGRADER_INITIAL_ADMIN_EMAIL=you@example.com
 ```
-
-**Windows PowerShell:**
-```
-setx LLMGRADER_ADMIN_PASSWORD "your-secret-password"
-```
-
-Restart the terminal so the variable is available to Flask.
 
 ---
 
-## How Basic Auth Works
+## Development open mode (explicit only)
 
-- If `LLMGRADER_ADMIN_PASSWORD` is **not set**, all admin pages are accessible without authentication.
-- If `LLMGRADER_ADMIN_PASSWORD` **is set**, any route under `/admin` requires authentication.
-- When you visit an admin page, your browser will display a standard login dialog asking for a username and password.
-- **The username is ignored** — you can enter anything (e.g., "admin", "user", or leave it blank if your browser allows).
-- **Only the password matters** — it must match the value of `LLMGRADER_ADMIN_PASSWORD`.
+For local development convenience, you can bypass admin checks:
 
-If the password is incorrect or you cancel the dialog, the server returns a `401 Unauthorized` response.
+```
+LLMGRADER_AUTH_MODE=dev-open
+```
 
-Your browser will remember the credentials during your session, so you won't need to re-enter them on every page.
+This is **opt-in** and should not be used in production.
 
 ---
 
 ## Recommended Usage
 
-- **Local development:** leave `LLMGRADER_ADMIN_PASSWORD` unset for convenience.
-- **Production:** always set `LLMGRADER_ADMIN_PASSWORD` to protect student submissions and logs.
-- **Sharing with TAs:** give them the password or create a separate Render environment for testing.
+- **Local development:** use normal auth, or set `LLMGRADER_AUTH_MODE=dev-open` temporarily.
+- **Production:** set all OAuth/admin env vars and keep `LLMGRADER_AUTH_MODE` unset (normal mode).
+- **Admin management:** use the Admin UI to add/remove additional admin emails.
 
 ---
 
 ## Troubleshooting
 
-- If admin pages are not protected, verify that `LLMGRADER_ADMIN_PASSWORD` is set in the environment.
-- If you get repeated `401` errors, confirm that:
-  - the password matches exactly (it's case-sensitive)
-  - you're entering the password in the browser's login dialog
-  - you haven't cached incorrect credentials (try clearing browser data or using an incognito window)
-- After changing the password on Render, redeploy the service.
+- If sign-in is unavailable, verify Google client ID/secret/redirect URI env vars.
+- If admin pages are denied after sign-in, verify your email is in the admin list or matches `LLMGRADER_INITIAL_ADMIN_EMAIL`.
+- If sessions reset unexpectedly, verify `LLMGRADER_SECRET_KEY` is stable across deployments.

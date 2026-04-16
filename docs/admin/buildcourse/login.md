@@ -7,10 +7,11 @@ has_children: false
 
 # Admin Login
 
-Before uploading and viewing a course package, you will need to login as an Administrator.
-Go to **File->Admin login**.  You will be prompted for a password.
-This password should match the value of `LLMGRADER_ADMIN_PASSWORD` when the system 
-was [deployed](../deploy/password.md).  
+Before uploading and viewing a course package, sign in with Google using the
+top-right **Sign in** control.
 
-If you do not know the password, you can go to the render and view the environment variables.
-If you do not have access to the render deployment, ask someone who does.
+Admin access is granted server-side by your email address. The initial admin email
+is configured via `LLMGRADER_INITIAL_ADMIN_EMAIL` during deployment, and admins can
+add/remove other admins in the UI.
+
+Deployment details are in [Google sign-in and admin access](../deploy/password.md).

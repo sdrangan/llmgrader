@@ -23,4 +23,4 @@ You should now be able to see the course on your browser.
 Once you are ready to deploy the grader on a public render portal follow the following instructions:
 
 - [Deploying on render](deploy.md)
-- [Setting the password](password.md)
+- [Google sign-in and admin access](password.md)

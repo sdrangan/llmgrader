@@ -186,11 +186,54 @@ async function saveAdminPreferences(closeModal) {
     closeModal();
 }
 
+function renderAdminUsers(admins) {
+    const list = document.getElementById("admin-user-list");
+    if (!list) return;
+    list.innerHTML = "";
+
+    admins.forEach((admin) => {
+        const item = document.createElement("li");
+        const label = document.createElement("span");
+        label.textContent = admin.name ? `${admin.name} (${admin.email})` : admin.email;
+        item.appendChild(label);
+
+        const removeBtn = document.createElement("button");
+        removeBtn.type = "button";
+        removeBtn.textContent = "Remove";
+        removeBtn.className = "modal-btn";
+        removeBtn.style.marginLeft = "8px";
+        removeBtn.addEventListener("click", async () => {
+            const resp = await fetch(`/api/admin/users/${encodeURIComponent(admin.email)}`, {
+                method: "DELETE"
+            });
+            const payload = await resp.json().catch(() => ({}));
+            if (!resp.ok) {
+                alert(payload.error || "Failed to remove admin user");
+                return;
+            }
+            await loadAdminUsers();
+        });
+        item.appendChild(removeBtn);
+        list.appendChild(item);
+    });
+}
+
+async function loadAdminUsers() {
+    const resp = await fetch("/api/admin/users");
+    const payload = await resp.json().catch(() => ({}));
+    if (!resp.ok) {
+        throw new Error(payload.error || "Failed to load admin users");
+    }
+    renderAdminUsers(Array.isArray(payload.admins) ? payload.admins : []);
+}
+
 function initializeAdminPreferencesModal() {
     const adminPreferencesMenuItem = document.getElementById("admin-preferences-menu-item");
     const adminPreferencesModal = document.getElementById("admin-preferences-modal");
     const adminPreferencesCancelBtn = document.getElementById("admin-preferences-cancel-btn");
     const adminPreferencesSaveBtn = document.getElementById("admin-preferences-save-btn");
+    const adminUserEmailInput = document.getElementById("admin-user-email-input");
+    const adminUserAddBtn = document.getElementById("admin-user-add-btn");
 
     if (!adminPreferencesMenuItem || !adminPreferencesModal) {
         return;
@@ -222,13 +265,35 @@ function initializeAdminPreferencesModal() {
             if (periodSelect) periodSelect.value = prefs.tokenLimit?.period ?? "per_hour";
 
             adminAllowedModels = Array.isArray(prefs.allowedModels) ? prefs.allowedModels : [];
+            await loadAdminUsers();
         } catch (e) {
             adminAllowedModels = [];
+            renderAdminUsers([]);
         }
 
         renderAdminModelList(adminAllowedModels);
         adminPreferencesModal.style.display = "flex";
     });
+
+    if (adminUserAddBtn) {
+        adminUserAddBtn.addEventListener("click", async () => {
+            const email = (adminUserEmailInput?.value || "").trim();
+            if (!email) return;
+
+            const resp = await fetch("/api/admin/users", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ email })
+            });
+            const payload = await resp.json().catch(() => ({}));
+            if (!resp.ok) {
+                alert(payload.error || "Failed to add admin user");
+                return;
+            }
+            if (adminUserEmailInput) adminUserEmailInput.value = "";
+            await loadAdminUsers();
+        });
+    }
 
     if (adminPreferencesCancelBtn) {
         adminPreferencesCancelBtn.addEventListener("click", () => {

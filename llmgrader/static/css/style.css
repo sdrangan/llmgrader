@@ -153,6 +153,31 @@ body[data-active-view="analytics"] #analytics-view {
     font-size: 0.9rem;
 }
 
+.menu-spacer {
+    flex: 1;
+}
+
+.account-area {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.account-link {
+    color: #57068c;
+    text-decoration: none;
+    font-weight: 600;
+}
+
+.account-link:hover {
+    text-decoration: underline;
+}
+
+.account-user {
+    color: #2d2a3a;
+    font-size: 0.85rem;
+}
+
 .menu-group {
     position: relative;
     display: inline-block;
@@ -1317,5 +1342,4 @@ textarea {
         flex: 1 1 auto;
     }
 }
-
 
