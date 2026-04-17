@@ -1,0 +1,25 @@
+<unit id="template_unit" title="Template Unit" version="1.0">
+  <question qtag="template_minimal_question">
+    <question_text><![CDATA[
+    <p>State the final answer clearly.</p>
+    ]]></question_text>
+
+    <solution><![CDATA[
+    <p>Reference solution goes here.</p>
+    ]]></solution>
+
+    <grading_notes><![CDATA[
+    Accept equivalent reasoning and notation.
+    ]]></grading_notes>
+
+    <required>true</required>
+    <partial_credit>false</partial_credit>
+
+    <parts>
+      <part>
+        <part_label>all</part_label>
+        <points>5</points>
+      </part>
+    </parts>
+  </question>
+</unit>
