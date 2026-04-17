@@ -383,6 +383,8 @@ class APIController:
         @bp.post("/grade")
         def grade():
             data = request.json
+            current_user = self.current_user()
+            user_email = self.normalize_email(current_user.get("email")) if current_user else None
 
             unit = data["unit"]
             qtag = data["qtag"]                     # NEW: qtag instead of index
@@ -457,7 +459,8 @@ class APIController:
                 provider=provider,
                 api_key=api_key,
                 timeout=timeout,
-                solution_images=solution_images
+                solution_images=solution_images,
+                user_email=user_email,
             )
 
             return jsonify(grade_result)
