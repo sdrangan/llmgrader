@@ -1341,7 +1341,8 @@ class Grader:
             model: str="gpt-4.1-mini",
             api_key: str | None = None,
             timeout: float = 20.,
-            solution_images: list[str] | None = None) -> GradeResult:
+            solution_images: list[str] | None = None,
+            user_email: str | None = None) -> GradeResult:
         """
         Grades a student's solution using the OpenAI API.
         
@@ -1368,6 +1369,9 @@ class Grader:
         solution_images: list[str] | None
             Optional list of base64 data URI strings representing images attached
             by the student alongside their solution.
+        user_email: str | None
+            Optional authenticated email address associated with the submission.
+            Anonymous submissions leave this as None.
 
         Returns
         -------
@@ -1528,6 +1532,7 @@ class Grader:
         result_parts = grade.get("result_parts")
         self.insert_submission(
             timestamp=datetime.now(timezone.utc).isoformat(),
+            user_email=user_email,
             question_text=question_text,
             ref_soln=solution,
             grading_notes=grading_notes,

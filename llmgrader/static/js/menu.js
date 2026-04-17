@@ -59,8 +59,15 @@ function initializeMenuSystem() {
         return viewName === 'admin' || viewName === 'analytics';
     }
 
+    var authState = {
+        authenticated: false,
+        is_admin: false,
+        user: null,
+        oauth_enabled: false
+    };
+
     function isAdminLoggedIn() {
-        return sessionStorage.getItem('isAdmin') === 'true';
+        return authState.is_admin === true;
     }
 
     viewButtons.forEach(function (button) {
@@ -373,34 +380,15 @@ function initializeMenuSystem() {
         });
     }
 
-    var adminLoginMenuItem = document.getElementById('admin-login-menu-item');
-    var adminLoginModal = document.getElementById('admin-login-modal');
-    var adminLoginPassword = document.getElementById('admin-login-password');
-    var adminLoginSubmit = document.getElementById('admin-login-submit');
-    var adminLoginCancel = document.getElementById('admin-login-cancel');
     var adminMenuButton = document.querySelector('.menu-group[data-view="admin"] .menu-button');
     var analyticsMenuButton = document.querySelector('.menu-group[data-view="analytics"] .menu-button');
     var adminViewButtons = Array.prototype.slice.call(document.querySelectorAll('[data-view="admin"]'));
     var analyticsViewButtons = Array.prototype.slice.call(document.querySelectorAll('[data-view="analytics"]'));
-
-    function showAdminLoginDialog() {
-        if (!adminLoginModal) {
-            return;
-        }
-        if (adminLoginPassword) {
-            adminLoginPassword.value = '';
-            adminLoginPassword.focus();
-        }
-        adminLoginModal.style.display = 'flex';
-        closeMenus();
-    }
-
-    function hideAdminLoginDialog() {
-        if (!adminLoginModal) {
-            return;
-        }
-        adminLoginModal.style.display = 'none';
-    }
+    var analyticsMenuGroup = document.getElementById('analytics-menu-group');
+    var analyticsSwitchViewItem = document.getElementById('switch-view-analytics-item');
+    var accountName = document.getElementById('account-user-name');
+    var signInLink = document.getElementById('sign-in-link');
+    var signOutLink = document.getElementById('sign-out-link');
 
     function enableAdminMenuItems() {
         if (adminMenuButton) {
@@ -440,73 +428,76 @@ function initializeMenuSystem() {
         });
     }
 
-    async function adminLogin(password) {
-        try {
-            var response = await fetch('/api/admin-login', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({ password: password })
-            });
-
-            if (!response.ok) {
-                return false;
-            }
-
-            sessionStorage.setItem('isAdmin', 'true');
-            return true;
-        } catch (error) {
-            return false;
+    function setAnalyticsVisible(visible) {
+        if (analyticsMenuGroup) {
+            analyticsMenuGroup.style.display = visible ? '' : 'none';
+        }
+        if (analyticsSwitchViewItem) {
+            analyticsSwitchViewItem.style.display = visible ? '' : 'none';
         }
     }
 
-    window.showAdminLoginDialog = showAdminLoginDialog;
-    window.hideAdminLoginDialog = hideAdminLoginDialog;
+    function updateAccountArea() {
+        if (!signInLink || !signOutLink || !accountName) {
+            return;
+        }
+        if (!authState.authenticated) {
+            signInLink.classList.remove('hidden');
+            signOutLink.classList.add('hidden');
+            accountName.classList.add('hidden');
+            accountName.textContent = '';
+            signInLink.style.display = authState.oauth_enabled ? '' : 'none';
+            return;
+        }
+
+        signInLink.classList.add('hidden');
+        signOutLink.classList.remove('hidden');
+        accountName.classList.remove('hidden');
+        accountName.textContent = authState.user && authState.user.email ? authState.user.email : 'Signed in';
+    }
+
+    function updateRoleVisibility() {
+        if (isAdminLoggedIn()) {
+            enableAdminMenuItems();
+            setAnalyticsVisible(true);
+            return;
+        }
+
+        disableAdminMenuItems();
+        setAnalyticsVisible(false);
+        var currentView = document.body && document.body.getAttribute('data-active-view');
+        if (currentView === 'admin' || currentView === 'analytics') {
+            setActiveView('grade');
+            if (typeof loadView === 'function') {
+                loadView('grade');
+            }
+        }
+    }
+
+    async function refreshAuthState() {
+        try {
+            var response = await fetch('/api/auth/session');
+            if (!response.ok) {
+                throw new Error('auth state unavailable');
+            }
+            authState = await response.json();
+        } catch (error) {
+            authState = {
+                authenticated: false,
+                is_admin: false,
+                user: null,
+                oauth_enabled: false
+            };
+        } finally {
+            updateAccountArea();
+            updateRoleVisibility();
+        }
+    }
+
     window.enableAdminMenuItems = enableAdminMenuItems;
     window.disableAdminMenuItems = disableAdminMenuItems;
-    window.adminLogin = adminLogin;
-
-    if (adminLoginMenuItem) {
-        adminLoginMenuItem.addEventListener('click', function () {
-            showAdminLoginDialog();
-        });
-    }
-
-    if (adminLoginCancel) {
-        adminLoginCancel.addEventListener('click', function () {
-            hideAdminLoginDialog();
-        });
-    }
-
-    if (adminLoginModal) {
-        adminLoginModal.addEventListener('click', function (e) {
-            if (e.target === adminLoginModal) {
-                hideAdminLoginDialog();
-            }
-        });
-    }
-
-    if (adminLoginSubmit) {
-        adminLoginSubmit.addEventListener('click', async function () {
-            if (!adminLoginPassword) {
-                return;
-            }
-            var success = await adminLogin(adminLoginPassword.value);
-            if (success) {
-                enableAdminMenuItems();
-                hideAdminLoginDialog();
-            } else {
-                alert('Admin login failed');
-            }
-        });
-    }
-
-    if (isAdminLoggedIn()) {
-        enableAdminMenuItems();
-    } else {
-        disableAdminMenuItems();
-    }
+    window.refreshAuthState = refreshAuthState;
+    refreshAuthState();
 
     // Load Course Package modal and upload workflow added
     var loadCourseMenuItem = document.getElementById('load-course-menu-item');

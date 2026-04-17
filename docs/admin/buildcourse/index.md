@@ -1,7 +1,7 @@
 ---
 title: Building a Course Package
 parent: Administrator Guide
-nav_order: 1
+nav_order: 2
 has_children: true
 ---
 
@@ -12,9 +12,8 @@ Each course in the LLM grader is represented by a **course package** (sometimes 
 a configuration file and a set of unit files describing the questions and solutions in each
 unit.  
 
-- [Admin access](login.md)
-- [HTML notes](htmlnotes.md)
 - [Package configuration](pkgconfig.md)
 - [Unit XML](unitxml.md)
 - [Rubrics and grading notes](./rubrics.md)
+- [HTML notes](htmlnotes.md)
 - [Upload](upload.md)

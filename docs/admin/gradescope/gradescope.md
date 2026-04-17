@@ -1,12 +1,11 @@
 ---
 title: Building an Autograded Assignment
 parent: Gradescope Integration
-nav_order: 1
+nav_order: 4
 has_children: false
 ---
 
-# Building an Auto
-## Building the Gradescope Autograder
+# Building the Gradescope Autograder
 
 To build the Gradescope autograder:
 

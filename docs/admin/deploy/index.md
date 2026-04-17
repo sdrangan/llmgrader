@@ -1,14 +1,14 @@
 ---
-title: Deploying on Render
+title: Deploying the App
 parent: Administrator Guide
-nav_order: 2
+nav_order: 3
 has_children: true
 ---
+
 # Launching and Deploying the Grader
 
-Once you have [built a course package](../buildcourse/), we can upload it to a portal.
-First, I would test the portal on a local machine.
-For running the portal on a local machine, navigate to the repo `llmgrader` and simply run:
+Once you have [built a course package](../buildcourse/), you can upload it to a portal.
+First, you should test the portal on a local machine.  For running the portal on a local machine, navigate to the repo `llmgrader` and simply run:
 
 ```bash
 python run.py --soln_pkg <soln_pkg>
@@ -22,5 +22,6 @@ You should now be able to see the course on your browser.
 
 Once you are ready to deploy the grader on a public render portal follow the following instructions:
 
+
 - [Deploying on render](deploy.md)
-- [Setting the password](password.md)
+- [Google sign-in and admin access](password.md)

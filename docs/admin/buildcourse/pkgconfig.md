@@ -1,7 +1,7 @@
 ---
 title:  Course Package Configuration
 parent: Building a Course Package
-nav_order: 2
+nav_order: 1
 has_children: false
 ---
 
@@ -10,7 +10,7 @@ has_children: false
 ## Course Package Overview 
 
 Each **course** is assumed to be divied into **units**.  For example, a course on probabiliy may have units such as combinatorics, or random variables.
-Each unit will have a set of questions. Typically, the instructor will  A **course package** (or **solution package**)
+Each unit will have a set of questions. Corrsponding to the course is a **course package** (or **solution package**)
 is a lightweight, instructor‑authored bundle that tells the LLM grader which units belong to a course and where to find their XML definitions
 for the questions and solutions in that unit. It contains:
 

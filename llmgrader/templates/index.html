@@ -47,11 +47,10 @@
                 <div class="submenu-menu" role="menu">
                     <button class="menu-item" role="menuitem" type="button" data-view="grade">Grade</button>
                     <button class="menu-item" role="menuitem" type="button" data-view="dashboard">Dashboard</button>
-                    <button class="menu-item" role="menuitem" type="button" data-view="admin">Admin</button>
-                    <button class="menu-item" role="menuitem" type="button" data-view="analytics">Analytics</button>
+                    <button class="menu-item" role="menuitem" type="button" data-view="admin" id="switch-view-admin-item">Admin</button>
+                    <button class="menu-item" role="menuitem" type="button" data-view="analytics" id="switch-view-analytics-item">Analytics</button>
                 </div>
             </div>
-            <button class="menu-item" role="menuitem" type="button" id="admin-login-menu-item">Admin Login...</button>
             <button class="menu-item" role="menuitem" type="button" id="preferences-menu-item">Preferences…</button>
         </div>
     </div>
@@ -120,7 +119,7 @@
         </div>
     </div>
 
-    <div class="menu-group view-menu" role="none" data-view="analytics">
+    <div class="menu-group view-menu" role="none" data-view="analytics" id="analytics-menu-group">
         <button class="menu-button" role="menuitem" aria-haspopup="true" aria-expanded="false">Analytics</button>
         <div class="menu-dropdown" role="menu">
             <button class="menu-item" role="menuitem" type="button"
@@ -143,6 +142,13 @@
             <button class="menu-item" role="menuitem" type="button" disabled>Unit...</button>
             <button class="menu-item" role="menuitem" type="button" disabled>Download Submission</button>
         </div>
+    </div>
+
+    <div class="menu-spacer" aria-hidden="true"></div>
+    <div id="account-area" class="account-area" role="group" aria-label="Account controls">
+        <a id="sign-in-link" class="account-link" href="/auth/login">Sign in</a>
+        <span id="account-user-name" class="account-user hidden"></span>
+        <a id="sign-out-link" class="account-link hidden" href="/auth/logout">Sign out</a>
     </div>
 </div>
 
@@ -244,6 +250,15 @@
                     <option value="unlimited">unlimited</option>
                 </select>
             </div>
+
+            <div class="modal-section" style="margin-top:12px;">
+                <label for="admin-user-email-input">Admin users</label>
+                <div style="display:flex; align-items:center; gap:8px; margin:8px 0;">
+                    <input id="admin-user-email-input" type="email" placeholder="user@example.com" style="flex:1;">
+                    <button id="admin-user-add-btn" type="button" class="modal-btn modal-btn-primary">Add</button>
+                </div>
+                <ul id="admin-user-list"></ul>
+            </div>
         </div>
         <div class="modal-buttons">
             <button id="admin-preferences-save-btn" class="modal-btn modal-btn-primary">Save</button>
@@ -263,21 +278,6 @@
         <div class="modal-buttons">
             <button id="load-course-btn" class="modal-btn modal-btn-primary">Load</button>
             <button id="load-course-cancel-btn" class="modal-btn">Cancel</button>
-        </div>
-    </div>
-</div>
-
-<!-- Admin Login Modal -->
-<div id="admin-login-modal" class="admin-login-modal">
-    <div class="admin-login-dialog">
-        <h2>Admin Login</h2>
-        <div class="modal-content">
-            <label for="admin-login-password">Password</label>
-            <input id="admin-login-password" type="password" placeholder="Enter password">
-        </div>
-        <div class="admin-login-actions">
-            <button id="admin-login-submit" class="modal-btn modal-btn-primary">Login</button>
-            <button id="admin-login-cancel" class="modal-btn">Cancel</button>
         </div>
     </div>
 </div>
