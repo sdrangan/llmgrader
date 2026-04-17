@@ -1,0 +1,41 @@
+<unit id="template_unit" title="Template Unit" version="1.0">
+  <question qtag="template_partial_credit_question" preferred_model="gpt-4.1-mini">
+    <question_text><![CDATA[
+    <p>Solve the problem and show key steps.</p>
+    ]]></question_text>
+
+    <solution><![CDATA[
+    <p>Reference solution with the expected method and final result.</p>
+    ]]></solution>
+
+    <grading_notes><![CDATA[
+    Award credit for mathematically equivalent methods when they satisfy the prompt.
+    ]]></grading_notes>
+
+    <required>true</required>
+    <partial_credit>true</partial_credit>
+
+    <parts>
+      <part>
+        <part_label>all</part_label>
+        <points>10</points>
+      </part>
+    </parts>
+
+    <rubrics>
+      <item id="core_method" part="all" point_adjustment="+6">
+        <display_text>Core method is correct</display_text>
+        <condition>Student uses a correct method and intermediate setup.</condition>
+      </item>
+      <item id="final_result" part="all" point_adjustment="+4">
+        <display_text>Final result is correct</display_text>
+        <condition>Student states a correct final answer consistent with the method.</condition>
+      </item>
+      <item id="minor_arithmetic_error" part="all" point_adjustment="-1">
+        <display_text>Minor arithmetic slip</display_text>
+        <condition>Student has a small arithmetic error but the method is otherwise correct.</condition>
+      </item>
+    </rubrics>
+    <rubric_total>sum_positive</rubric_total>
+  </question>
+</unit>

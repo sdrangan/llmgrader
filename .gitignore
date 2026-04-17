@@ -174,6 +174,7 @@ example_repo/**/*.html
 example_repo/**/*.pdf
 # BUT allow XML files inside example_repo
 !example_repo/**/*.xml
+!agentdocs/templates/*.xml
 
 example_repo_temp/
 example_repo/soln_package/
@@ -182,4 +183,3 @@ example_repo/*.zip
 **/example_repo/autograder/
 docs/key.txt
 local_data/
-
