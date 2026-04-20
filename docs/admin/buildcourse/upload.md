@@ -1,7 +1,7 @@
 ---
 title:  Uploading the Package
 parent: Building a Course Package
-nav_order: 6
+nav_order: 5
 has_children: false
 ---
 

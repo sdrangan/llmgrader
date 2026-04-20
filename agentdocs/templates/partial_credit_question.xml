@@ -1,15 +1,41 @@
 <unit id="template_unit" title="Template Unit" version="1.0">
-  <question qtag="template_partial_credit_question" preferred_model="gpt-4.1-mini">
+  <question qtag="example_logistic_regression" preferred_model="gpt-4.1-mini">
     <question_text><![CDATA[
-    <p>Solve the problem and show key steps.</p>
+    <p>Consider a logistic regression model for binary classification with a scalar feature \(x\) and parameters \(w\) and \(b\):</p>
+    <p class="math">
+    \[
+      p = \Pr(y=1\mid x) = \sigma(wx + b) = \frac{1}{1 + e^{-(wx + b)}}
+    \]
+    </p>
+
+    <ol type="a">
+      <li>Find the values of \(w\) and \(b\) such that \(p=0.5\) when \(x=0\) and \(p=0.8\) when \(x=1\).</li>
+      <li>Using the parameters from part (a), compute \(p\) when \(x=0.5\).</li>
+    </ol>
     ]]></question_text>
 
     <solution><![CDATA[
-    <p>Reference solution with the expected method and final result.</p>
+    <p>For part (a), write \(z = wx + b\).</p>
+    <p>When \(x=0\), we have \(p=0.5\), so \(z=0\) and therefore \(b=0\).</p>
+    <p>When \(x=1\), we have \(p=0.8\), so</p>
+    <p class="math">
+    \[
+      wx + b = \ln\left(\frac{0.8}{0.2}\right) = \ln(4)
+    \]
+    </p>
+    <p>Since \(x=1\) and \(b=0\), this gives \(w = \ln(4)\).</p>
+
+    <p>For part (b), substitute \(x=0.5\):</p>
+    <p class="math">
+    \[
+      p = \sigma\left(0.5\ln(4)\right) \approx 0.667
+    \]
+    </p>
     ]]></solution>
 
     <grading_notes><![CDATA[
-    Award credit for mathematically equivalent methods when they satisfy the prompt.
+    Accept equivalent algebra and any numerically consistent approximation for the probability in part (b).
+    If part (a) is set up correctly but not fully simplified, award partial credit.
     ]]></grading_notes>
 
     <required>true</required>
@@ -17,23 +43,30 @@
 
     <parts>
       <part>
-        <part_label>all</part_label>
-        <points>10</points>
+        <part_label>a</part_label>
+        <points>5</points>
+      </part>
+      <part>
+        <part_label>b</part_label>
+        <points>5</points>
       </part>
     </parts>
 
     <rubrics>
-      <item id="core_method" part="all" point_adjustment="+6">
-        <display_text>Core method is correct</display_text>
-        <condition>Student uses a correct method and intermediate setup.</condition>
+      <item id="linear_system" part="a" point_adjustment="+3">
+        <display_text>Correct setup for the parameter equations</display_text>
+        <condition>Student correctly uses the given probabilities to set up equations for \(w\) and \(b\), or equivalently identifies that \(b=0\) from \(p=0.5\) at \(x=0\) and then solves for \(w\).</condition>
+        <notes>Equivalent use of the logit transform should receive full credit for this item.</notes>
       </item>
-      <item id="final_result" part="all" point_adjustment="+4">
-        <display_text>Final result is correct</display_text>
-        <condition>Student states a correct final answer consistent with the method.</condition>
+      <item id="solution_param" part="a" point_adjustment="+2">
+        <display_text>Correct values of w and b</display_text>
+        <condition>Student gives \(b = 0\) and \(w = \ln(4)\), or a numerically equivalent value for \(w\).</condition>
+        <notes>If the setup is correct but there is a minor algebraic slip, award partial credit.</notes>
       </item>
-      <item id="minor_arithmetic_error" part="all" point_adjustment="-1">
-        <display_text>Minor arithmetic slip</display_text>
-        <condition>Student has a small arithmetic error but the method is otherwise correct.</condition>
+      <item id="solution_prob" part="b" point_adjustment="+5">
+        <display_text>Correct probability at x = 0.5</display_text>
+        <condition>Student correctly computes the probability at \(x=0.5\) using the parameters from part (a), or shows the correct expression with only a minor numerical error.</condition>
+        <notes>Any answer close to \(0.667\) with correct setup should receive full credit.</notes>
       </item>
     </rubrics>
     <rubric_total>sum_positive</rubric_total>

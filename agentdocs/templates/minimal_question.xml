@@ -1,15 +1,34 @@
 <unit id="template_unit" title="Template Unit" version="1.0">
-  <question qtag="template_minimal_question">
+  <question qtag="example_exponential_derivative" preferred_model="gpt-4.1-mini">
     <question_text><![CDATA[
-    <p>State the final answer clearly.</p>
+    <p>Compute the derivative of \(y = a^x\) with respect to \(x\). Show your work.</p>
     ]]></question_text>
 
     <solution><![CDATA[
-    <p>Reference solution goes here.</p>
+    <p>One standard method is to take the natural logarithm of both sides:</p>
+    <p class="math">
+    \[
+      \ln(y) = \ln(a^x) = x\ln(a)
+    \]
+    \[
+      \frac{y'}{y} = \ln(a)
+    \]
+    \[
+      y' = y\ln(a) = a^x \ln(a)
+    \]
+    </p>
+
+    <p>An equivalent method is to rewrite \(a^x = e^{x\ln(a)}\) and apply the chain rule, which gives the same final answer:</p>
+    <p class="math">
+    \[
+      y' = a^x \ln(a)
+    \]
+    </p>
     ]]></solution>
 
     <grading_notes><![CDATA[
-    Accept equivalent reasoning and notation.
+    Accept any mathematically equivalent derivation.
+    Students may use logarithmic differentiation or rewrite the function in exponential form.
     ]]></grading_notes>
 
     <required>true</required>
@@ -18,7 +37,7 @@
     <parts>
       <part>
         <part_label>all</part_label>
-        <points>5</points>
+        <points>10</points>
       </part>
     </parts>
   </question>
