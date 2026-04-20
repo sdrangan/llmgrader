@@ -60,7 +60,8 @@ def create_config_skeleton(
             ET.SubElement(asset_elem, "source").text = (asset.get("source") or "").strip()
             ET.SubElement(asset_elem, "destination").text = (asset.get("destination") or "").strip()
 
-    return ET.indent(root, space="  ") or ET.tostring(root, encoding="unicode")
+    ET.indent(root, space="  ")
+    return ET.tostring(root, encoding="unicode")
 
 
 def validate_config_xml(

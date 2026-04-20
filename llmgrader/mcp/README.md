@@ -12,7 +12,7 @@ This repository includes a minimal MCP server for `llmgrader_config.xml` authori
 ## Local setup
 
 ```bash
-cd /home/runner/work/llmgrader/llmgrader
+cd /path/to/llmgrader
 pip install -e .
 ```
 
@@ -29,4 +29,3 @@ An example workspace config is provided at:
 - `.vscode/mcp.json`
 
 Open this repo as a workspace, start Copilot Chat with MCP enabled, and call the `llmgrader_*` tools.
-
