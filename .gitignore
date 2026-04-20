@@ -84,6 +84,9 @@ build/
 # IDE/editor settings
 .vscode/
 .idea/
+!.vscode/
+.vscode/*
+!.vscode/mcp.json
 
 # OS-specific
 .DS_Store
@@ -182,4 +185,3 @@ example_repo/*.zip
 **/example_repo/autograder/
 docs/key.txt
 local_data/
-
