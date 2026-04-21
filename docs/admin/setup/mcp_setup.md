@@ -5,30 +5,13 @@ nav_order: 5
 has_children: false
 ---
 
-# Using an Agent for Course Authoring
+# Setting up The MCP Server
 
-## LLM Grader's MCP Server
+## Overview 
 
-LLM grader is being designed with agentic assitance to help instructors build course content.  Eventually, this agent will help tasks including creating course packages, questions, solutions, and grading rubrics.
+As described in the [instructor guide](../buildcourse/agent.md), LLM grader is being designed with agentic assitance to help instructors build course content.  To use this facility, you will ahve to set up the **model context protocol** or MCP server.  
 
-The agent functionality is exposed as **model context protocol** or MCP server.  [Describe what is an MCP server and why it is good].
-
-## Initial Functionality
-
-The initial MCP server for LLM grader is just for authoring the configuration file, `llmgrader_config.xml`, inside Visual Studio Code.  If successful, the functionality will expand.  For now, the current MCP server can help you:
-
-- scan your workspace for likely unit XML files and asset folders
-- generate a starter `llmgrader_config.xml`
-- validate the config before packaging
-
-The current tools are:
-
-- `llmgrader_explain_config`
-- `llmgrader_create_config_skeleton`
-- `llmgrader_validate_config_xml`
-- `llmgrader_scan_repo_for_config_inputs`
-
-## Recommended Instructor Setup
+## Instructor Set-Up
 
 The simplest setup is:
 

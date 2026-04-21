@@ -11,8 +11,13 @@ from openai import OpenAI
 from llmgrader.mcp.server import (
     create_config_skeleton,
     explain_config,
+    explain_rubric_rules,
+    explain_unit_xml,
+    create_unit_xml_skeleton,
     scan_repo_for_config_inputs,
+    scan_repo_for_unit_inputs,
     validate_config_xml,
+    validate_unit_xml,
 )
 
 
@@ -133,6 +138,194 @@ def build_tool_schemas() -> list[dict[str, Any]]:
                 "additionalProperties": False,
             },
         },
+        {
+            "type": "function",
+            "name": "explain_unit_xml",
+            "description": (
+                "Explain the purpose, required structure, and authoring rules for a unit XML file. "
+                "Use this when the user asks how to create a unit XML or how questions, parts, and grading metadata fit together."
+            ),
+            "strict": True,
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": [],
+                "additionalProperties": False,
+            },
+        },
+        {
+            "type": "function",
+            "name": "explain_rubric_rules",
+            "description": (
+                "Explain binary and partial-credit rubric rules, including rubric_total behavior, common mistakes, and group semantics."
+            ),
+            "strict": True,
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": [],
+                "additionalProperties": False,
+            },
+        },
+        {
+            "type": "function",
+            "name": "create_unit_xml_skeleton",
+            "description": (
+                "Create a starter unit XML draft from a unit id, optional title/version, and structured question definitions."
+            ),
+            "strict": True,
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "unit_id": {
+                        "type": "string",
+                        "description": "Identifier for the root <unit id=...> attribute.",
+                    },
+                    "title": {
+                        "type": ["string", "null"],
+                        "description": "Optional unit title attribute.",
+                    },
+                    "version": {
+                        "type": ["string", "null"],
+                        "description": "Optional unit version attribute.",
+                    },
+                    "questions": {
+                        "type": ["array", "null"],
+                        "description": "Optional structured question list for the starter unit.",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "qtag": {"type": "string"},
+                                "question_text": {"type": "string"},
+                                "solution": {"type": "string"},
+                                "grading_notes": {"type": ["string", "null"]},
+                                "preferred_model": {"type": ["string", "null"]},
+                                "required": {"type": "boolean"},
+                                "partial_credit": {"type": "boolean"},
+                                "tools": {
+                                    "type": "array",
+                                    "items": {"type": "string"},
+                                },
+                                "parts": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "object",
+                                        "properties": {
+                                            "part_label": {"type": "string"},
+                                            "points": {"type": ["number", "integer"]},
+                                        },
+                                        "required": ["part_label", "points"],
+                                        "additionalProperties": False,
+                                    },
+                                },
+                                "rubrics": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "object",
+                                        "properties": {
+                                            "id": {"type": "string"},
+                                            "part": {"type": ["string", "null"]},
+                                            "condition_type": {"type": ["string", "null"]},
+                                            "action": {"type": ["string", "null"]},
+                                            "point_adjustment": {"type": ["string", "number", "integer", "null"]},
+                                            "display_text": {"type": "string"},
+                                            "condition": {"type": "string"},
+                                            "notes": {"type": ["string", "null"]},
+                                        },
+                                        "required": [
+                                            "id",
+                                            "part",
+                                            "condition_type",
+                                            "action",
+                                            "point_adjustment",
+                                            "display_text",
+                                            "condition",
+                                            "notes",
+                                        ],
+                                        "additionalProperties": False,
+                                    },
+                                },
+                                "rubric_groups": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "object",
+                                        "properties": {
+                                            "type": {"type": "string"},
+                                            "ids": {
+                                                "type": "array",
+                                                "items": {"type": "string"},
+                                            },
+                                        },
+                                        "required": ["type", "ids"],
+                                        "additionalProperties": False,
+                                    },
+                                },
+                                "rubric_total": {"type": ["string", "null"]},
+                            },
+                            "required": [
+                                "qtag",
+                                "question_text",
+                                "solution",
+                                "grading_notes",
+                                "preferred_model",
+                                "required",
+                                "partial_credit",
+                                "tools",
+                                "parts",
+                                "rubrics",
+                                "rubric_groups",
+                                "rubric_total",
+                            ],
+                            "additionalProperties": False,
+                        },
+                    },
+                },
+                "required": ["unit_id", "title", "version", "questions"],
+                "additionalProperties": False,
+            },
+        },
+        {
+            "type": "function",
+            "name": "validate_unit_xml",
+            "description": (
+                "Validate a unit XML draft using schema checks, existing parser semantic checks, and high-confidence authoring checks for questions and rubrics."
+            ),
+            "strict": True,
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "unit_xml": {
+                        "type": "string",
+                        "description": "Full unit XML text to validate.",
+                    },
+                    "workspace_root": {
+                        "type": ["string", "null"],
+                        "description": "Optional workspace root used for warnings about /pkg_assets references and nearby config context.",
+                    },
+                },
+                "required": ["unit_xml", "workspace_root"],
+                "additionalProperties": False,
+            },
+        },
+        {
+            "type": "function",
+            "name": "scan_repo_for_unit_inputs",
+            "description": (
+                "Scan a workspace root for likely unit XML files, rubric examples, asset directories, and nearby authoring files before drafting a new unit."
+            ),
+            "strict": True,
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "workspace_root": {
+                        "type": "string",
+                        "description": "Absolute or relative workspace root path to scan.",
+                    }
+                },
+                "required": ["workspace_root"],
+                "additionalProperties": False,
+            },
+        },
     ]
 
 
@@ -148,6 +341,10 @@ def resolve_openai_api_key(api_key: str | None = None) -> str:
 def execute_tool_call(name: str, arguments: dict[str, Any]) -> Any:
     if name == "explain_config":
         return explain_config()
+    if name == "explain_unit_xml":
+        return explain_unit_xml()
+    if name == "explain_rubric_rules":
+        return explain_rubric_rules()
     if name == "create_config_skeleton":
         return create_config_skeleton(
             course_name=arguments["course_name"],
@@ -155,25 +352,40 @@ def execute_tool_call(name: str, arguments: dict[str, Any]) -> Any:
             units=arguments["units"],
             assets=arguments.get("assets"),
         )
+    if name == "create_unit_xml_skeleton":
+        return create_unit_xml_skeleton(
+            unit_id=arguments["unit_id"],
+            title=arguments.get("title"),
+            version=arguments.get("version"),
+            questions=arguments.get("questions"),
+        )
     if name == "validate_config_xml":
         return validate_config_xml(
             config_xml=arguments["config_xml"],
             workspace_root=arguments.get("workspace_root"),
         )
+    if name == "validate_unit_xml":
+        return validate_unit_xml(
+            unit_xml=arguments["unit_xml"],
+            workspace_root=arguments.get("workspace_root"),
+        )
     if name == "scan_repo_for_config_inputs":
         return scan_repo_for_config_inputs(workspace_root=arguments["workspace_root"])
+    if name == "scan_repo_for_unit_inputs":
+        return scan_repo_for_unit_inputs(workspace_root=arguments["workspace_root"])
     raise ValueError(f"Unknown blind-user tool: {name}")
 
 
 def _build_system_instruction(workspace_root: str) -> str:
     return (
-        "You are helping a first-time user author or validate llmgrader_config.xml. "
+        "You are helping a first-time user author or validate llmgrader_config.xml and unit XML files. "
         "You have no prior conversation context beyond the current user prompt. "
         f"The current workspace root is: {workspace_root}. "
-        "Prefer inspecting the workspace with repo-scan tools before inventing file paths. "
-        "If enough information exists in the workspace, create a reasonable draft config. "
+        "Prefer inspecting the workspace with repo-scan tools before inventing file paths or question structure. "
+        "If enough information exists in the workspace, create a reasonable draft config or unit XML. "
         "If key information is missing, ask concise follow-up questions instead of guessing. "
         "After generating XML, validate it before presenting it when practical. "
+        "For unit XML, pay attention to parts, partial-credit mode, and rubric rules. "
         "Keep responses concise, practical, and focused on the user request."
     )
 

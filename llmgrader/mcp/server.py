@@ -6,6 +6,13 @@ from xml.etree import ElementTree as ET
 
 from mcp.server.fastmcp import FastMCP
 
+from llmgrader.mcp.unit_xml_tools import (
+    create_unit_xml_skeleton,
+    explain_rubric_rules,
+    explain_unit_xml,
+    scan_repo_for_unit_inputs,
+    validate_unit_xml,
+)
 from llmgrader.services.unit_parser import UnitParser
 
 
@@ -258,6 +265,47 @@ def llmgrader_validate_config_xml(config_xml: str, workspace_root: str | None = 
 def llmgrader_scan_repo_for_config_inputs(workspace_root: str) -> dict:
     """Scan a workspace root for likely unit XMLs and asset directories."""
     return scan_repo_for_config_inputs(workspace_root=workspace_root)
+
+
+@mcp.tool(name="llmgrader_explain_unit_xml")
+def llmgrader_explain_unit_xml() -> dict:
+    """Provide guidance for authoring a unit XML file."""
+    return explain_unit_xml()
+
+
+@mcp.tool(name="llmgrader_explain_rubric_rules")
+def llmgrader_explain_rubric_rules() -> dict:
+    """Provide guidance for authoring binary and partial-credit rubrics."""
+    return explain_rubric_rules()
+
+
+@mcp.tool(name="llmgrader_create_unit_xml_skeleton")
+def llmgrader_create_unit_xml_skeleton(
+    unit_id: str,
+    title: str | None = None,
+    version: str | None = "1.0",
+    questions: list[dict] | None = None,
+) -> dict:
+    """Generate a starter unit XML from structured inputs."""
+    xml_text = create_unit_xml_skeleton(
+        unit_id=unit_id,
+        title=title,
+        version=version,
+        questions=questions,
+    )
+    return {"xml": xml_text}
+
+
+@mcp.tool(name="llmgrader_validate_unit_xml")
+def llmgrader_validate_unit_xml(unit_xml: str, workspace_root: str | None = None) -> dict:
+    """Validate unit XML content using schema, semantic, and authoring checks."""
+    return validate_unit_xml(unit_xml=unit_xml, workspace_root=workspace_root)
+
+
+@mcp.tool(name="llmgrader_scan_repo_for_unit_inputs")
+def llmgrader_scan_repo_for_unit_inputs(workspace_root: str) -> dict:
+    """Scan a workspace root for likely unit XML files, rubric examples, assets, and adjacent authoring files."""
+    return scan_repo_for_unit_inputs(workspace_root=workspace_root)
 
 
 def main() -> None:
