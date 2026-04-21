@@ -1502,72 +1502,153 @@ async function gradeCurrentQuestion() {
     }
 
     const gradeBtn = document.getElementById("grade-button");
+    const liveStatus = document.getElementById("grade-live-status");
     gradeBtn.disabled = true;
     gradeBtn.textContent = "Grading...";
-
-    const sessionData = getSessionData(currentUnitName, qtag);
-    const solutionImages = sessionData.solution_images || [];
-
-    const resp = await fetch("/grade", {
-        method: "POST",
-        headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({
-            unit: currentUnitName,
-            qtag: qtag,
-            student_solution: studentSolution,
-            part_label: selectedPart,
-            model: model,
-            api_key : apiKey,
-            provider: provider,
-            timeout: timeout,
-            solution_images: solutionImages
-        })
-    });
-
-    const data = await resp.json();
-
-    // If the backend signals that the user needs an API key, launch the wizard
-    if (data.full_explanation === "__START_API_KEY_WALKTHROUGH__") {
-        gradeBtn.disabled = false;
-        gradeBtn.textContent = "Grade";
-        if (typeof openApiKeyWizard === "function") openApiKeyWizard(data.feedback || "");
-        return;
+    if (liveStatus) {
+        liveStatus.textContent = "Starting grading job...";
     }
 
-    gradeBtn.disabled = false;
-    gradeBtn.textContent = "Grade";
+    try {
+        const sessionData = getSessionData(currentUnitName, qtag);
+        const solutionImages = sessionData.solution_images || [];
+        const startResp = await fetch("/grade/jobs", {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({
+                unit: currentUnitName,
+                qtag: qtag,
+                student_solution: studentSolution,
+                part_label: selectedPart,
+                model: model,
+                api_key : apiKey,
+                provider: provider,
+                timeout: timeout,
+                solution_images: solutionImages
+            })
+        });
 
-    setGradeSummaryDisplay({
-        result: data.result || "",
-        points: data.points ?? null,
-        maxPoints: data.max_points ?? getQuestionMaxPoints(currentUnitItems[qtag], selectedPart),
-        requiredLabel: currentUnitItems[qtag]?.required === false ? "optional" : "required"
-    });
-    renderMarkdownInto(document.getElementById("feedback-box"), data.feedback);
-    renderMarkdownInto(document.getElementById("full-explanation-box"), data.full_explanation);
+        const startData = await startResp.json();
+        if (!startResp.ok && startResp.status !== 409) {
+            throw new Error(startData.error || "Failed to start grading job.");
+        }
 
-    // Save student solution at qtag level
-    updateSessionData(currentUnitName, qtag, {
-        student_solution: studentSolution,
-        selected_part: selectedPart,
-        required: currentUnitItems[qtag]?.required !== false,
-        partial_credit: currentUnitItems[qtag]?.partial_credit === true
-    });
+        const jobId = startData.job_id;
+        if (!jobId) {
+            throw new Error("Grading job start response did not include a job id.");
+        }
 
-    // Save grading results per part
-    // If "all" is selected, we can store under "all" as a part_label
-    // or handle it differently based on your requirements
-    const partToSave = selectedPart === "all" ? "all" : selectedPart;
-    updateSessionData(currentUnitName, qtag, {
-        result: data.result || "",
-        points: data.points ?? null,
-        max_points: data.max_points ?? null,
-        point_parts: data.point_parts ?? null,
-        max_point_parts: data.max_point_parts ?? null,
-        result_parts: data.result_parts ?? null,
-        feedback: data.feedback || "",
-        full_explanation: data.full_explanation || ""
-    }, partToSave);
+        if (startResp.status === 409 && liveStatus) {
+            liveStatus.textContent = "Grading is already in progress. Waiting for the active job...";
+        }
+
+        if (
+            startResp.status === 409
+            && (startData.unit !== currentUnitName || startData.qtag !== qtag || startData.part_label !== selectedPart)
+        ) {
+            if (liveStatus) {
+                liveStatus.textContent = "Another grading job is already in progress. Please wait for it to finish.";
+            }
+            return;
+        }
+
+        const startedAt = Date.now();
+        while (true) {
+            const statusResp = await fetch(`/grade/jobs/${encodeURIComponent(jobId)}`);
+            const statusData = await statusResp.json();
+
+            if (!statusResp.ok) {
+                throw new Error(statusData.error || "Failed to read grading job status.");
+            }
+
+            const elapsedSeconds = Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
+            if (statusData.status === "queued") {
+                if (liveStatus) {
+                    liveStatus.textContent = `Queued... ${elapsedSeconds}s elapsed.`;
+                }
+                await new Promise(resolve => setTimeout(resolve, 1000));
+                continue;
+            }
+
+            if (statusData.status === "running") {
+                if (liveStatus) {
+                    liveStatus.textContent = `Thinking... ${elapsedSeconds}s elapsed.`;
+                }
+                await new Promise(resolve => setTimeout(resolve, 1000));
+                continue;
+            }
+
+            if (statusData.status === "timed_out") {
+                throw new Error(statusData.error || "Grading timed out.");
+            }
+
+            if (statusData.status === "error") {
+                throw new Error(statusData.error || "Grading failed.");
+            }
+
+            if (statusData.status !== "done") {
+                throw new Error(`Unexpected grading job state: ${statusData.status}`);
+            }
+
+            // If the backend signals that the user needs an API key, launch the wizard
+            if (statusData.full_explanation === "__START_API_KEY_WALKTHROUGH__") {
+                if (typeof openApiKeyWizard === "function") openApiKeyWizard(statusData.feedback || "");
+                if (liveStatus) {
+                    liveStatus.textContent = "";
+                }
+                return;
+            }
+
+            setGradeSummaryDisplay({
+                result: statusData.result || "",
+                points: statusData.points ?? null,
+                maxPoints: statusData.max_points ?? getQuestionMaxPoints(currentUnitItems[qtag], selectedPart),
+                requiredLabel: currentUnitItems[qtag]?.required === false ? "optional" : "required"
+            });
+            renderMarkdownInto(document.getElementById("feedback-box"), statusData.feedback);
+            renderMarkdownInto(document.getElementById("full-explanation-box"), statusData.full_explanation);
+
+            // Save student solution at qtag level
+            updateSessionData(currentUnitName, qtag, {
+                student_solution: studentSolution,
+                selected_part: selectedPart,
+                required: currentUnitItems[qtag]?.required !== false,
+                partial_credit: currentUnitItems[qtag]?.partial_credit === true
+            });
+
+            // Save grading results per part
+            const partToSave = selectedPart === "all" ? "all" : selectedPart;
+            updateSessionData(currentUnitName, qtag, {
+                result: statusData.result || "",
+                points: statusData.points ?? null,
+                max_points: statusData.max_points ?? null,
+                point_parts: statusData.point_parts ?? null,
+                max_point_parts: statusData.max_point_parts ?? null,
+                result_parts: statusData.result_parts ?? null,
+                feedback: statusData.feedback || "",
+                full_explanation: statusData.full_explanation || ""
+            }, partToSave);
+
+            if (liveStatus) {
+                liveStatus.textContent = `Done in ${elapsedSeconds}s.`;
+                setTimeout(() => {
+                    if (liveStatus.textContent.startsWith("Done in")) {
+                        liveStatus.textContent = "";
+                    }
+                }, 4000);
+            }
+            return;
+        }
+    } catch (err) {
+        console.error("Grade request failed:", err);
+        alert(err.message || "Grading failed.");
+        if (liveStatus) {
+            liveStatus.textContent = err.message || "Grading failed.";
+        }
+    } finally {
+        gradeBtn.disabled = false;
+        gradeBtn.textContent = "Grade";
+    }
 }
 
 
@@ -1717,4 +1798,3 @@ async function getHfToken() {
     // 3. Nothing found
     return null;
 }
-
