@@ -88,8 +88,7 @@ cd llmgrader
 
 ### Standard Installation
 
-Use this when you want to run the app or the packaging utilities without
-editing the source code itself.
+Use this when you want to run the app or the packaging utilities without editing the source code itself.
 
 ```bash
 pip install .
@@ -101,7 +100,7 @@ again.
 
 ### Editable Installation
 
-Use this when you are actively developing or debugging LLM Grader.
+Use this when you are actively developing or debugging LLM Grader -- see the [developer's guide](../../developer/).
 
 ```bash
 pip install -e .
@@ -130,40 +129,6 @@ pip install .
 
 This is the cleanest packaging-oriented install path.
 
-### Practical runtime install for this repository
-
-This repository also maintains a broader runtime dependency list in
-`requirements.txt`. If you plan to run the current web app locally, this is the
-safer practical install:
-
-```bash
-pip install -r requirements.txt
-pip install -e .
-```
-
-That installs the runtime libraries used by the current app, then installs the
-package itself in editable mode.
-
-### Development install
-
-If you want the test, notebook, formatting, and other development tools used in
-this repo, install:
-
-```bash
-pip install -r requirements-dev.txt
-pip install -e .
-```
-
-## What Gets Installed
-
-The package currently exposes these command-line entry points:
-
-- `create_grading_json`
-- `build_autograder`
-- `create_qfile`
-- `create_soln_pkg`
-
-These become available in the active Python environment after installation.
 
 ## Verifying the Installation
 

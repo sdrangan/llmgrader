@@ -2,11 +2,7 @@
   "servers": {
     "llmgrader": {
       "type": "stdio",
-      "command": "python",
-      "args": [
-        "-m",
-        "llmgrader.mcp.server"
-      ]
+      "command": "${workspaceFolder}\\.vscode\\llmgrader_mcp_server.cmd"
     }
   }
 }

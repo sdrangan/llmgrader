@@ -28,6 +28,17 @@ The system is intentionally lightweight — a small core that instructors can un
 - **Transparent, inspectable grading traces** so instructors can see *why* the model awarded points.
 - **Tool‑augmented evaluation**, including web‑search‑based retrieval of external artifacts (e.g., student GitHub repos, hosted figures, or reference materials) and, in the near future, optional Python execution for numeric checks.
 
+---
+
+### Documentation Sections
+
+The documentation is organized into four main sections:
+
+- **Student Guide** for answering questions and using the portal
+- **Administrator Guide** for course setup, deployment, authoring, and operations
+- **Analytics** for grading and system visibility
+- **Developer Guide** for contributors working on the `llmgrader` codebase and tooling
+
 
 ---
 
