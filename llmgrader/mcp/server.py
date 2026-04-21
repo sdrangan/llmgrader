@@ -11,24 +11,60 @@ from llmgrader.services.unit_parser import UnitParser
 
 mcp = FastMCP("llmgrader")
 
-
 def explain_config() -> dict:
     return {
-        "required_shape": {
-            "root": "llmgrader",
-            "course": ["name", "term"],
-            "units": ["unit(name, source, destination)"],
-            "assets": ["asset(source, destination) (optional)"],
+        "summary": (
+            "llmgrader_config.xml defines course metadata, unit XML files "
+            "to include in the package, and optional asset files/directories."
+        ),
+        "required_sections": {
+            "course": {
+                "description": "Metadata for the packaged course.",
+                "required_fields": ["name", "term"],
+            },
+            "units": {
+                "description": "List of unit XML files to include in the package.",
+                "required_fields": ["name", "source", "destination"],
+                "minimum_items": 1,
+            },
         },
-        "notes": [
+        "optional_sections": {
+            "assets": {
+                "description": "Optional files or directories to include in the package.",
+                "required_fields": ["source", "destination"],
+            }
+        },
+        "validation_rules": [
             "At least one <unit> is required.",
             "Destination paths must be relative to the package root.",
             "Destination paths must not contain '..'.",
             "Use <source> values relative to the workspace where possible.",
         ],
-        "example_prompt": "Create a skeleton llmgrader_config.xml for Probability I, Fall 2026.",
+        "follow_up_questions": [
+            "What is the course name?",
+            "What term should be used?",
+            "What unit XML files should be included?",
+            "Do you want to include any asset directories or files?",
+        ],
+        "minimal_example_xml": (
+            "<llmgrader>\n"
+            "  <course>\n"
+            "    <name>Probability</name>\n"
+            "    <term>Fall 2026</term>\n"
+            "  </course>\n"
+            "  <units>\n"
+            "    <unit>\n"
+            "      <name>combinatorics</name>\n"
+            "      <source>units/combinatorics.xml</source>\n"
+            "      <destination>combinatorics.xml</destination>\n"
+            "    </unit>\n"
+            "  </units>\n"
+            "</llmgrader>"
+        ),
+        "example_prompt": (
+            "Create a skeleton llmgrader_config.xml for Probability I, Fall 2026."
+        ),
     }
-
 
 def create_config_skeleton(
     *,
@@ -77,8 +113,7 @@ def validate_config_xml(
     except ET.ParseError as exc:
         return {"valid": False, "errors": [f"Failed to parse XML: {exc}"], "warnings": []}
 
-    if root.tag != "llmgrader":
-        errors.append("Root element must be <llmgrader>.")
+    errors.extend(_validate_config_shape(root))
 
     course_elem = root.find("course")
     if course_elem is None:
@@ -90,13 +125,7 @@ def validate_config_xml(
             errors.append("Missing required <course>/<term> value.")
 
     units_elem = root.find("units")
-    if units_elem is None:
-        errors.append("Missing required <units> section.")
-        unit_elems: list[ET.Element] = []
-    else:
-        unit_elems = units_elem.findall("unit")
-        if not unit_elems:
-            errors.append("At least one <units>/<unit> entry is required.")
+    unit_elems = units_elem.findall("unit") if units_elem is not None else []
 
     for index, unit_elem in enumerate(unit_elems, start=1):
         unit_name = (unit_elem.findtext("name") or "").strip() or f"unit[{index}]"
@@ -105,9 +134,7 @@ def validate_config_xml(
 
         if not source_value:
             errors.append(f"Unit '{unit_name}' is missing <source>.")
-        if not destination_value:
-            errors.append(f"Unit '{unit_name}' is missing <destination>.")
-        else:
+        if destination_value:
             destination_error = UnitParser._validate_package_destination(destination_value)
             if destination_error:
                 errors.append(f"Unit '{unit_name}' has invalid <destination>: {destination_error}")
@@ -126,11 +153,7 @@ def validate_config_xml(
             destination_value = (asset_elem.findtext("destination") or "").strip()
             asset_label = destination_value or f"asset[{index}]"
 
-            if not source_value:
-                errors.append(f"Asset '{asset_label}' is missing <source>.")
-            if not destination_value:
-                errors.append(f"Asset '{asset_label}' is missing <destination>.")
-            else:
+            if destination_value:
                 destination_error = UnitParser._validate_package_destination(destination_value)
                 if destination_error:
                     errors.append(f"Asset '{asset_label}' has invalid <destination>: {destination_error}")
@@ -143,6 +166,18 @@ def validate_config_xml(
             )
 
     return {"valid": not errors, "errors": errors, "warnings": warnings}
+
+
+def _validate_config_shape(root: ET.Element) -> list[str]:
+    schema = UnitParser._load_schema("llmgrader_config.xsd")
+    schema_errors: list[str] = []
+
+    for error in schema.iter_errors(root):
+        location = getattr(error, "path", None) or "/"
+        reason = getattr(error, "reason", None) or str(error)
+        schema_errors.append(f"{location}: {reason}")
+
+    return schema_errors
 
 
 def scan_repo_for_config_inputs(*, workspace_root: str) -> dict:
@@ -159,15 +194,15 @@ def scan_repo_for_config_inputs(*, workspace_root: str) -> dict:
         dirs[:] = [d for d in dirs if d not in ignored]
 
         current_path = Path(current_root)
-        rel_current = "." if current_path == root else str(current_path.relative_to(root))
+        rel_current = "." if current_path == root else current_path.relative_to(root).as_posix()
         if current_path.name.lower() in likely_asset_dir_names:
             asset_dirs.append(rel_current)
 
         for filename in files:
             if not filename.lower().endswith(".xml"):
                 continue
-            rel_path = str((current_path / filename).relative_to(root))
-            if filename == "llmgrader_config.xml":
+            rel_path = (current_path / filename).relative_to(root).as_posix()
+            if filename == "llmgrader-config.xml":
                 continue
             xml_candidates.append(rel_path)
 
@@ -192,7 +227,7 @@ def _warn_missing_source(*, source_value: str, workspace_root: str | None, label
 
 @mcp.tool(name="llmgrader_explain_config")
 def llmgrader_explain_config() -> dict:
-    """Provide guidance for authoring llmgrader_config.xml."""
+    """Provide guidance for authoring llmgrader-config.xml."""
     return explain_config()
 
 
@@ -203,7 +238,7 @@ def llmgrader_create_config_skeleton(
     units: list[dict[str, str]],
     assets: list[dict[str, str]] | None = None,
 ) -> dict:
-    """Generate a llmgrader_config.xml skeleton from structured inputs."""
+    """Generate a llmgrader-config.xml skeleton from structured inputs."""
     xml_text = create_config_skeleton(
         course_name=course_name,
         term=term,
@@ -215,7 +250,7 @@ def llmgrader_create_config_skeleton(
 
 @mcp.tool(name="llmgrader_validate_config_xml")
 def llmgrader_validate_config_xml(config_xml: str, workspace_root: str | None = None) -> dict:
-    """Validate llmgrader_config.xml content and return errors/warnings."""
+    """Validate llmgrader-config.xml content and return errors/warnings."""
     return validate_config_xml(config_xml=config_xml, workspace_root=workspace_root)
 
 

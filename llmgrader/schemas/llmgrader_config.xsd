@@ -3,13 +3,13 @@
   <xs:element name="llmgrader">
     <xs:complexType>
       <xs:sequence>
-        <xs:element name="course" minOccurs="0">
+        <xs:element name="course">
           <xs:complexType>
             <xs:sequence>
-              <xs:element name="name" type="xs:string" minOccurs="0"/>
-              <xs:choice minOccurs="0">
-                <xs:element name="semester" type="xs:string"/>
-                <xs:element name="term" type="xs:string"/>
+              <xs:element name="name" type="xs:token"/>
+              <xs:choice>
+                <xs:element name="semester" type="xs:token"/>
+                <xs:element name="term" type="xs:token"/>
               </xs:choice>
             </xs:sequence>
           </xs:complexType>
@@ -17,14 +17,14 @@
         <xs:element name="units">
           <xs:complexType>
             <xs:sequence>
-              <xs:choice minOccurs="0" maxOccurs="unbounded">
-                <xs:element name="section" type="xs:string"/>
+              <xs:choice minOccurs="1" maxOccurs="unbounded">
+                <xs:element name="section" type="xs:token"/>
                 <xs:element name="unit">
                   <xs:complexType>
                     <xs:sequence>
-                      <xs:element name="name" type="xs:string"/>
-                      <xs:element name="source" type="xs:string" minOccurs="0"/>
-                      <xs:element name="destination" type="xs:string"/>
+                      <xs:element name="name" type="xs:token"/>
+                      <xs:element name="source" type="xs:token"/>
+                      <xs:element name="destination" type="xs:token"/>
                     </xs:sequence>
                   </xs:complexType>
                 </xs:element>
@@ -38,8 +38,8 @@
               <xs:element name="asset" minOccurs="0" maxOccurs="unbounded">
                 <xs:complexType>
                   <xs:sequence>
-                    <xs:element name="source" type="xs:string"/>
-                    <xs:element name="destination" type="xs:string"/>
+                    <xs:element name="source" type="xs:token"/>
+                    <xs:element name="destination" type="xs:token"/>
                   </xs:sequence>
                 </xs:complexType>
               </xs:element>

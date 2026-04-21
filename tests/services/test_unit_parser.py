@@ -6,7 +6,7 @@ from pathlib import Path
 from llmgrader.services.unit_parser import UnitParser
 
 
-RESOURCE_DIR = Path(__file__).parent / "fixtures" / "unit_parser"
+RESOURCE_DIR = Path(__file__).resolve().parents[1] / "fixtures" / "unit_parser"
 
 
 def _make_parser(tmp_path: Path) -> UnitParser:

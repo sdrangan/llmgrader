@@ -48,6 +48,27 @@ def test_validate_config_xml_reports_destination_errors() -> None:
     assert any("must not contain '..'" in err for err in result["errors"])
 
 
+def test_validate_config_xml_uses_schema_for_missing_destination() -> None:
+    xml_text = """\
+<llmgrader>
+  <course>
+    <name>Probability I</name>
+    <term>Fall 2026</term>
+  </course>
+  <units>
+    <unit>
+      <name>random_variables</name>
+      <source>units/random_variables.xml</source>
+    </unit>
+  </units>
+</llmgrader>
+"""
+    result = validate_config_xml(config_xml=xml_text)
+
+    assert result["valid"] is False
+    assert any("destination" in err.lower() for err in result["errors"])
+
+
 def test_validate_config_xml_warns_when_sources_missing(tmp_path: Path) -> None:
     xml_text = """\
 <llmgrader>

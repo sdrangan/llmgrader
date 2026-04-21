@@ -4,7 +4,7 @@ from pathlib import Path
 from llmgrader.scripts import create_qfile
 
 
-RESOURCE_DIR = Path(__file__).parent / "fixtures" / "unit_parser"
+RESOURCE_DIR = Path(__file__).resolve().parents[1] / "fixtures" / "unit_parser"
 
 
 def test_create_qfile_rejects_invalid_xml(tmp_path, capsys, monkeypatch) -> None:
@@ -101,6 +101,10 @@ def test_create_qfile_rewrites_pkg_assets_with_explicit_config(tmp_path, monkeyp
         config_path = course_root / "llmgrader_config.xml"
         config_path.write_text(
                 """<llmgrader>
+    <course>
+        <name>Fixture Course</name>
+        <term>Fall 2026</term>
+    </course>
     <units>
         <unit>
             <name>Unit 2</name>
@@ -152,6 +156,10 @@ def test_create_qfile_auto_discovers_config_for_pkg_assets(tmp_path, monkeypatch
 
         (course_root / "llmgrader_config.xml").write_text(
                 """<llmgrader>
+    <course>
+        <name>Fixture Course</name>
+        <term>Fall 2026</term>
+    </course>
     <units>
         <unit>
             <name>Unit 2</name>
@@ -201,6 +209,10 @@ def test_create_qfile_rewrites_legacy_namespaced_images(tmp_path, monkeypatch) -
 
         (course_root / "llmgrader_config.xml").write_text(
                 """<llmgrader>
+    <course>
+        <name>Fixture Course</name>
+        <term>Fall 2026</term>
+    </course>
     <units>
         <unit>
             <name>Unit 2</name>
@@ -247,6 +259,10 @@ def test_create_qfile_errors_when_asset_destination_not_in_config(
     config_path = course_root / "llmgrader_config.xml"
     config_path.write_text(
         """<llmgrader>
+    <course>
+    <name>Fixture Course</name>
+    <term>Fall 2026</term>
+    </course>
     <units>
     <unit>
         <name>Unit 2</name>
@@ -295,6 +311,10 @@ def test_create_qfile_errors_when_asset_source_missing(
     config_path = course_root / "llmgrader_config.xml"
     config_path.write_text(
         """<llmgrader>
+    <course>
+    <name>Fixture Course</name>
+    <term>Fall 2026</term>
+    </course>
     <units>
     <unit>
         <name>Unit 2</name>

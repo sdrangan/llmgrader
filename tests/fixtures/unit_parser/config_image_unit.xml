@@ -1,4 +1,8 @@
 <llmgrader>
+  <course>
+    <name>Fixture Course</name>
+    <term>Fall 2026</term>
+  </course>
   <units>
     <unit>
       <name>Fixture Image Unit</name>

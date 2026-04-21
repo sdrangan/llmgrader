@@ -1,11 +1,17 @@
 <llmgrader>
+  <course>
+    <name>Fixture Course</name>
+    <term>Fall 2026</term>
+  </course>
   <units>
     <unit>
       <name>Fixture Good Unit</name>
+      <source>unit_good.xml</source>
       <destination>unit_good.xml</destination>
     </unit>
     <unit>
       <name>Fixture Semantic Broken Unit</name>
+      <source>unit_semantic_broken.xml</source>
       <destination>unit_semantic_broken.xml</destination>
     </unit>
   </units>

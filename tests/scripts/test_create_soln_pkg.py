@@ -9,7 +9,7 @@ import pytest
 from llmgrader.scripts.create_soln_pkg import main as create_soln_pkg_main
 
 
-RESOURCE_DIR = Path(__file__).parent / "fixtures" / "unit_parser"
+RESOURCE_DIR = Path(__file__).resolve().parents[1] / "fixtures" / "unit_parser"
 
 
 # ---------------------------------------------------------------------------
@@ -31,6 +31,10 @@ def _build_source_repo(tmp_path: Path, *, with_images: bool, assets_xml: str = "
     config.write_text(
                 f"""\
 <llmgrader>
+    <course>
+        <name>Fixture Course</name>
+        <term>Fall 2026</term>
+    </course>
   <units>
     <unit>
       <name>Fixture Good Unit</name>
@@ -138,6 +142,10 @@ def test_package_images_dir_namespaced_by_destination_stem(
     config.write_text(
         """\
 <llmgrader>
+    <course>
+        <name>Fixture Course</name>
+        <term>Fall 2026</term>
+    </course>
   <units>
     <unit>
       <name>Unit 1</name>

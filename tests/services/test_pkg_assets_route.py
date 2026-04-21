@@ -20,7 +20,13 @@ def pkg_dir(tmp_path: Path) -> Path:
 
     # Minimal config so UnitParser doesn't raise on missing config
     (pkg / "llmgrader_config.xml").write_text(
-        "<llmgrader><units></units></llmgrader>", encoding="utf-8"
+        (
+            "<llmgrader>"
+            "<course><name>Fixture Course</name><term>Fall 2026</term></course>"
+            "<units><section>Empty Section</section></units>"
+            "</llmgrader>"
+        ),
+        encoding="utf-8"
     )
 
     return pkg
