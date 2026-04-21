@@ -31,6 +31,7 @@ def get_default_admin_prefs():
 
 class APIController:
     GRADE_JOB_TIMEOUT_GRACE_SECONDS = 15.0
+    GRADE_JOB_RETENTION_SECONDS = 3600.0
     ACTIVE_GRADE_JOB_STATES = {"queued", "running"}
 
     def __init__(self, grader):
@@ -298,6 +299,21 @@ class APIController:
         deadline_ts = job.get("deadline_ts")
         if deadline_ts is not None and time.time() > deadline_ts:
             self.mark_job_timed_out_locked(job, message="Grading job timed out before completion.")
+
+    def prune_old_grade_jobs_locked(self) -> None:
+        cutoff_ts = time.time() - self.GRADE_JOB_RETENTION_SECONDS
+        removable_job_ids = []
+        for job_id, job in self.grade_jobs.items():
+            if job_id == self.active_grade_job_id:
+                continue
+            if job["status"] in self.ACTIVE_GRADE_JOB_STATES:
+                continue
+            finished_ts = job.get("finished_at_ts")
+            if finished_ts is None or finished_ts < cutoff_ts:
+                removable_job_ids.append(job_id)
+
+        for job_id in removable_job_ids:
+            self.grade_jobs.pop(job_id, None)
 
     def run_grade_job(self, job_id: str) -> None:
         with self.grade_job_lock:
@@ -584,6 +600,7 @@ class APIController:
             tools = qdata.get("tools", [])
             with self.grade_job_lock:
                 self.expire_active_job_if_stale_locked()
+                self.prune_old_grade_jobs_locked()
 
                 active_job = self.grade_jobs.get(self.active_grade_job_id) if self.active_grade_job_id else None
                 if active_job and active_job["status"] in self.ACTIVE_GRADE_JOB_STATES:
@@ -632,6 +649,7 @@ class APIController:
         def grade_job_status(job_id):
             with self.grade_job_lock:
                 self.expire_active_job_if_stale_locked()
+                self.prune_old_grade_jobs_locked()
                 job = self.grade_jobs.get(job_id)
                 if not job:
                     return jsonify({"error": f"Unknown grading job '{job_id}'"}), 404

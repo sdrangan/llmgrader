@@ -35,6 +35,8 @@ const MODEL_PROVIDER = {
 };
 
 const DEFAULT_MODEL = "gpt-4.1-mini";
+const GRADE_POLL_INTERVAL_MS = 1000;
+const GRADE_MAX_POLL_DURATION_SECONDS = 300;
 
 function populateModelSelect() {
     const modelSelect = document.getElementById("model-select");
@@ -1529,17 +1531,15 @@ async function gradeCurrentQuestion() {
         });
 
         const startData = await startResp.json();
-        if (!startResp.ok && startResp.status !== 409) {
+        if (startResp.status === 409 && liveStatus) {
+            liveStatus.textContent = "Grading is already in progress. Waiting for the active job...";
+        } else if (!startResp.ok) {
             throw new Error(startData.error || "Failed to start grading job.");
         }
 
         const jobId = startData.job_id;
         if (!jobId) {
             throw new Error("Grading job start response did not include a job id.");
-        }
-
-        if (startResp.status === 409 && liveStatus) {
-            liveStatus.textContent = "Grading is already in progress. Waiting for the active job...";
         }
 
         if (
@@ -1562,11 +1562,14 @@ async function gradeCurrentQuestion() {
             }
 
             const elapsedSeconds = Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
+            if (elapsedSeconds > GRADE_MAX_POLL_DURATION_SECONDS) {
+                throw new Error("Grading is taking too long to complete. Please retry.");
+            }
             if (statusData.status === "queued") {
                 if (liveStatus) {
                     liveStatus.textContent = `Queued... ${elapsedSeconds}s elapsed.`;
                 }
-                await new Promise(resolve => setTimeout(resolve, 1000));
+                await new Promise(resolve => setTimeout(resolve, GRADE_POLL_INTERVAL_MS));
                 continue;
             }
 
@@ -1574,7 +1577,7 @@ async function gradeCurrentQuestion() {
                 if (liveStatus) {
                     liveStatus.textContent = `Thinking... ${elapsedSeconds}s elapsed.`;
                 }
-                await new Promise(resolve => setTimeout(resolve, 1000));
+                await new Promise(resolve => setTimeout(resolve, GRADE_POLL_INTERVAL_MS));
                 continue;
             }
 
