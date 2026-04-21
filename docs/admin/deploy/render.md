@@ -66,8 +66,13 @@ pip install -r requirements.txt
 
 **Start Command:**  
 ```
-gunicorn app:app
+gunicorn run:app
 ```
+
+Grading now runs as a background job with polling, so long grade operations no longer
+depend on a single long-lived `/grade` request. The current implementation keeps
+grading simple and safe by allowing only one active grading job per app instance
+at a time.
 
 **Instance Type:**  
 - Start with **Starter** or **Basic**  
@@ -173,4 +178,3 @@ Once you are deployed, you can [upload the course package](../buildcourse/upload
 ---
 
 Go to [Google sign-in and admin access](./password.md)
-

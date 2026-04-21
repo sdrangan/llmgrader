@@ -4,6 +4,8 @@ import os
 import json
 import secrets
 import re
+import threading
+import time
 from functools import wraps
 from urllib.parse import urlencode
 from flask import Blueprint, request, jsonify
@@ -28,8 +30,15 @@ def get_default_admin_prefs():
 
 
 class APIController:
+    GRADE_JOB_TIMEOUT_GRACE_SECONDS = 15.0
+    GRADE_JOB_RETENTION_SECONDS = 3600.0
+    ACTIVE_GRADE_JOB_STATES = {"queued", "running"}
+
     def __init__(self, grader):
         self.grader = grader
+        self.grade_job_lock = threading.Lock()
+        self.grade_jobs = {}
+        self.active_grade_job_id = None
 
     @staticmethod
     def normalize_email(email: str | None) -> str:
@@ -194,6 +203,185 @@ class APIController:
     @staticmethod
     def sanitize_filename_component(value: str) -> str:
         return re.sub(r"[^A-Za-z0-9_.-]", "_", value or "")
+
+    @staticmethod
+    def parse_timeout_seconds(raw_timeout) -> float:
+        try:
+            timeout_value = float(raw_timeout)
+        except (TypeError, ValueError):
+            timeout_value = 20.0
+        return max(1.0, timeout_value)
+
+    def write_grade_input_debug(self, *, unit: str, qtag: str, question_dict: dict, student_soln: str,
+                                part_label: str, model: str, tools: list, solution_images: list) -> None:
+        safe_unit = self.sanitize_filename_component(unit)
+        safe_qtag = self.sanitize_filename_component(qtag)
+        fn = os.path.join(
+            self.grader.scratch_dir,
+            f"grade_input_{safe_unit}_{safe_qtag}.txt"
+        )
+
+        with open(fn, "w", encoding="utf-8") as f:
+            f.write(f"Unit: {unit}\n")
+            f.write(f"Qtag: {qtag}\n\n")
+
+            f.write("=== Reference Problem (HTML) ===\n")
+            f.write(question_dict.get("question_text", "") + "\n\n")
+
+            f.write("=== Reference Solution (HTML) ===\n")
+            f.write(question_dict.get("solution", "") + "\n\n")
+
+            f.write("=== Grading Notes ===\n")
+            f.write(question_dict.get("grading_notes", "") + "\n\n")
+
+            f.write("=== Student Solution ===\n")
+            f.write(student_soln + "\n")
+
+            f.write("\n=== Grading Part Label ===\n")
+            f.write(part_label + "\n")
+
+            f.write("\n=== Model ===\n")
+            f.write(model + "\n")
+
+            f.write("\n=== Tools ===\n")
+            f.write(json.dumps(tools) + "\n")
+
+            f.write("\n=== Solution Images ===\n")
+            f.write(f"{len(solution_images)} image(s) attached\n")
+
+        print(f"Sent grader input {fn}")
+
+    def serialize_grade_job(self, job: dict, *, include_result: bool = False) -> dict:
+        payload = {
+            "job_id": job["job_id"],
+            "status": job["status"],
+            "created_at": job.get("created_at"),
+            "started_at": job.get("started_at"),
+            "finished_at": job.get("finished_at"),
+            "unit": job.get("unit"),
+            "qtag": job.get("qtag"),
+            "part_label": job.get("part_label"),
+        }
+        if job.get("message"):
+            payload["message"] = job["message"]
+        if job["status"] in self.ACTIVE_GRADE_JOB_STATES:
+            started_ts = job.get("started_at_ts") or job.get("created_at_ts")
+            if started_ts is not None:
+                payload["elapsed_seconds"] = max(0, int(time.time() - started_ts))
+        if job.get("error"):
+            payload["error"] = job["error"]
+        if include_result and job.get("result"):
+            payload.update(job["result"])
+        return payload
+
+    def mark_job_timed_out_locked(self, job: dict, *, message: str) -> None:
+        job["status"] = "timed_out"
+        job["message"] = message
+        job["error"] = message
+        job["finished_at"] = self.utc_now()
+        job["finished_at_ts"] = time.time()
+        if self.active_grade_job_id == job["job_id"]:
+            self.active_grade_job_id = None
+
+    def expire_active_job_if_stale_locked(self) -> None:
+        if not self.active_grade_job_id:
+            return
+
+        job = self.grade_jobs.get(self.active_grade_job_id)
+        if not job:
+            self.active_grade_job_id = None
+            return
+
+        if job["status"] not in self.ACTIVE_GRADE_JOB_STATES:
+            self.active_grade_job_id = None
+            return
+
+        deadline_ts = job.get("deadline_ts")
+        if deadline_ts is not None and time.time() > deadline_ts:
+            self.mark_job_timed_out_locked(job, message="Grading job timed out before completion.")
+
+    def prune_old_grade_jobs_locked(self) -> None:
+        cutoff_ts = time.time() - self.GRADE_JOB_RETENTION_SECONDS
+        removable_job_ids = []
+        for job_id, job in self.grade_jobs.items():
+            if job_id == self.active_grade_job_id:
+                continue
+            if job["status"] in self.ACTIVE_GRADE_JOB_STATES:
+                continue
+            finished_ts = job.get("finished_at_ts")
+            if finished_ts is None or finished_ts < cutoff_ts:
+                removable_job_ids.append(job_id)
+
+        for job_id in removable_job_ids:
+            self.grade_jobs.pop(job_id, None)
+
+    def run_grade_job(self, job_id: str) -> None:
+        with self.grade_job_lock:
+            job = self.grade_jobs.get(job_id)
+            if not job or job["status"] != "queued":
+                return
+            job["status"] = "running"
+            job["message"] = "Grading in progress."
+            job["started_at"] = self.utc_now()
+            job["started_at_ts"] = time.time()
+
+        try:
+            self.write_grade_input_debug(
+                unit=job["unit"],
+                qtag=job["qtag"],
+                question_dict=job["question_dict"],
+                student_soln=job["student_soln"],
+                part_label=job["part_label"],
+                model=job["model"],
+                tools=job["tools"],
+                solution_images=job["solution_images"],
+            )
+
+            grade_result = self.grader.grade(
+                question_dict=job["question_dict"],
+                student_soln=job["student_soln"],
+                part_label=job["part_label"],
+                unit_name=job["unit"],
+                qtag=job["qtag"],
+                model=job["model"],
+                provider=job["provider"],
+                api_key=job["api_key"],
+                timeout=job["timeout"],
+                solution_images=job["solution_images"],
+                user_email=job["user_email"],
+            )
+        except Exception as exc:
+            with self.grade_job_lock:
+                current = self.grade_jobs.get(job_id)
+                if not current:
+                    return
+                if current["status"] == "timed_out":
+                    return
+                current["status"] = "error"
+                current["message"] = "Grading job failed."
+                current["error"] = str(exc)
+                current["finished_at"] = self.utc_now()
+                current["finished_at_ts"] = time.time()
+                if self.active_grade_job_id == job_id:
+                    self.active_grade_job_id = None
+            return
+
+        with self.grade_job_lock:
+            current = self.grade_jobs.get(job_id)
+            if not current:
+                return
+            if current["status"] == "timed_out":
+                return
+            if time.time() > current.get("deadline_ts", float("inf")):
+                self.mark_job_timed_out_locked(current, message="Grading job timed out before completion.")
+                return
+            current["status"] = "done"
+            current["message"] = "Grading complete."
+            current["result"] = grade_result
+            current["finished_at"] = self.utc_now()
+            current["finished_at_ts"] = time.time()
+            if self.active_grade_job_id == job_id:
+                self.active_grade_job_id = None
 
     def require_authenticated_user(self, f):
         @wraps(f)
@@ -381,89 +569,99 @@ class APIController:
             })
 
         @bp.post("/grade")
-        def grade():
-            data = request.json
+        @bp.post("/grade/jobs")
+        def start_grade_job():
+            data = request.get_json(silent=True) or {}
             current_user = self.current_user()
             user_email = self.normalize_email(current_user.get("email")) if current_user else None
 
-            unit = data["unit"]
-            qtag = data["qtag"]                     # NEW: qtag instead of index
-            student_soln = data["student_solution"]
+            unit = data.get("unit")
+            qtag = data.get("qtag")
+            student_soln = data.get("student_solution")
+            if not unit or not qtag or student_soln is None:
+                return jsonify({"error": "unit, qtag and student_solution are required"}), 400
+
             part_label = data.get("part_label", "all")
             model = data.get("model", "gpt-4.1-mini")
             api_key = data.get("api_key", None)
             provider = data.get("provider", None)
-            timeout = data.get("timeout", 20)
-            solution_images = data.get("solution_images", [])
+            timeout_seconds = self.parse_timeout_seconds(data.get("timeout", 20))
+            solution_images = data.get("solution_images", []) or []
 
-    
             # Retrieve the question data
-            u = self.grader.units[unit]
+            u = self.grader.units.get(unit)
+            if u is None:
+                return jsonify({"error": f"Unknown unit '{unit}'"}), 400
 
             if qtag not in u:
                 return jsonify({"error": f"Unknown qtag '{qtag}'"}), 400
 
             qdata = u[qtag]
-
-            ref_problem = qdata["question_text"]
-            ref_solution = qdata["solution"]
-            grading_notes = qdata["grading_notes"]
             tools = qdata.get("tools", [])
+            with self.grade_job_lock:
+                self.expire_active_job_if_stale_locked()
+                self.prune_old_grade_jobs_locked()
 
-            # Save grader inputs for debugging
-            safe_unit = self.sanitize_filename_component(unit)
-            safe_qtag = self.sanitize_filename_component(qtag)
-            fn = os.path.join(
-                self.grader.scratch_dir,
-                f"grade_input_{safe_unit}_{safe_qtag}.txt"
-            )
+                active_job = self.grade_jobs.get(self.active_grade_job_id) if self.active_grade_job_id else None
+                if active_job and active_job["status"] in self.ACTIVE_GRADE_JOB_STATES:
+                    payload = self.serialize_grade_job(active_job, include_result=False)
+                    payload["status"] = "already_running"
+                    payload["message"] = "A grading job is already in progress for this app instance."
+                    return jsonify(payload), 409
 
-            with open(fn, "w", encoding="utf-8") as f:
-                f.write(f"Unit: {unit}\n")
-                f.write(f"Qtag: {qtag}\n\n")
+                now_ts = time.time()
+                job_id = secrets.token_hex(12)
+                job = {
+                    "job_id": job_id,
+                    "status": "queued",
+                    "message": "Grading job queued.",
+                    "created_at": self.utc_now(),
+                    "created_at_ts": now_ts,
+                    "started_at": None,
+                    "started_at_ts": None,
+                    "finished_at": None,
+                    "finished_at_ts": None,
+                    "deadline_ts": now_ts + timeout_seconds + self.GRADE_JOB_TIMEOUT_GRACE_SECONDS,
+                    "error": None,
+                    "result": None,
+                    "unit": unit,
+                    "qtag": qtag,
+                    "part_label": part_label,
+                    "student_soln": student_soln,
+                    "question_dict": qdata,
+                    "model": model,
+                    "provider": provider,
+                    "api_key": api_key,
+                    "timeout": timeout_seconds,
+                    "solution_images": solution_images,
+                    "user_email": user_email,
+                    "tools": tools,
+                }
+                self.grade_jobs[job_id] = job
+                self.active_grade_job_id = job_id
 
-                f.write("=== Reference Problem (HTML) ===\n")
-                f.write(ref_problem + "\n\n")
+            worker = threading.Thread(target=self.run_grade_job, args=(job_id,), daemon=True)
+            worker.start()
 
-                f.write("=== Reference Solution (HTML) ===\n")
-                f.write(ref_solution + "\n\n")
+            return jsonify(self.serialize_grade_job(job, include_result=False)), 202
 
-                f.write("=== Grading Notes ===\n")
-                f.write(grading_notes + "\n\n")
+        @bp.get("/grade/jobs/<job_id>")
+        def grade_job_status(job_id):
+            with self.grade_job_lock:
+                self.expire_active_job_if_stale_locked()
+                self.prune_old_grade_jobs_locked()
+                job = self.grade_jobs.get(job_id)
+                if not job:
+                    return jsonify({"error": f"Unknown grading job '{job_id}'"}), 404
 
-                f.write("=== Student Solution ===\n")
-                f.write(student_soln + "\n")
+                if job["status"] in self.ACTIVE_GRADE_JOB_STATES:
+                    deadline_ts = job.get("deadline_ts")
+                    if deadline_ts is not None and time.time() > deadline_ts:
+                        self.mark_job_timed_out_locked(job, message="Grading job timed out before completion.")
 
-                f.write("\n=== Grading Part Label ===\n")
-                f.write(part_label + "\n")
+                payload = self.serialize_grade_job(job, include_result=(job["status"] == "done"))
 
-                f.write("\n=== Model ===\n")
-                f.write(model + "\n")
-
-                f.write("\n=== Tools ===\n")
-                f.write(json.dumps(tools) + "\n")
-
-                f.write("\n=== Solution Images ===\n")
-                f.write(f"{len(solution_images)} image(s) attached\n")
-
-            print(f"Sent grader input {fn}")
-
-            # Call the grader
-            grade_result = self.grader.grade(
-                question_dict=qdata,
-                student_soln=student_soln,
-                part_label=part_label,
-                unit_name=unit,
-                qtag=qtag,
-                model=model,
-                provider=provider,
-                api_key=api_key,
-                timeout=timeout,
-                solution_images=solution_images,
-                user_email=user_email,
-            )
-
-            return jsonify(grade_result)
+            return jsonify(payload)
 
         @bp.post("/reload")
         def reload_units():

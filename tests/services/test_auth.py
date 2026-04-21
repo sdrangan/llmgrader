@@ -1,9 +1,12 @@
 import sqlite3
+import threading
+import time
 from pathlib import Path
 
 import pytest
 
 from llmgrader.app import create_app
+from llmgrader.routes.api import APIController
 from llmgrader.services.grader import Grader
 
 
@@ -191,8 +194,8 @@ def test_grade_route_passes_optional_session_email(app_factory, monkeypatch, sig
                 sess["user_email"] = signed_in_email
                 sess["user_name"] = "Student"
 
-        resp = client.post(
-            "/grade",
+        start_resp = client.post(
+            "/grade/jobs",
             json={
                 "unit": "unit1",
                 "qtag": "q1",
@@ -202,5 +205,133 @@ def test_grade_route_passes_optional_session_email(app_factory, monkeypatch, sig
             },
         )
 
-    assert resp.status_code == 200
+        assert start_resp.status_code == 202
+        job_id = start_resp.get_json()["job_id"]
+
+        deadline = time.time() + 2.0
+        final_payload = None
+        while time.time() < deadline:
+            status_resp = client.get(f"/grade/jobs/{job_id}")
+            assert status_resp.status_code == 200
+            status_payload = status_resp.get_json()
+            if status_payload["status"] == "done":
+                final_payload = status_payload
+                break
+            time.sleep(0.01)
+
+    assert final_payload is not None
+    assert final_payload["result"] == "pass"
     assert captured["user_email"] == expected_email
+
+
+def test_grade_job_start_rejects_concurrent_runs(app_factory, monkeypatch):
+    create, _ = app_factory
+    release_first_job = threading.Event()
+    first_job_started = threading.Event()
+
+    def fake_load_unit_pkg(self):
+        self.units = {
+            "unit1": {
+                "q1": {
+                    "question_text": "Question",
+                    "solution": "Solution",
+                    "grading_notes": "Notes",
+                }
+            }
+        }
+        self.units_order = []
+
+    def fake_grade(self, **kwargs):
+        first_job_started.set()
+        release_first_job.wait(timeout=2)
+        return {"result": "pass", "full_explanation": "ok", "feedback": "ok"}
+
+    monkeypatch.setattr(Grader, "load_unit_pkg", fake_load_unit_pkg)
+    monkeypatch.setattr(Grader, "grade", fake_grade)
+
+    app = create(LLMGRADER_AUTH_MODE="dev-open", LLMGRADER_INITIAL_ADMIN_EMAIL=None)
+
+    with app.test_client() as client:
+        first_resp = client.post(
+            "/grade/jobs",
+            json={
+                "unit": "unit1",
+                "qtag": "q1",
+                "student_solution": "My answer",
+                "provider": "openai",
+                "api_key": "test-key",
+            },
+        )
+        assert first_resp.status_code == 202
+        assert first_job_started.wait(timeout=1.0)
+
+        second_resp = client.post(
+            "/grade/jobs",
+            json={
+                "unit": "unit1",
+                "qtag": "q1",
+                "student_solution": "My answer (retry)",
+                "provider": "openai",
+                "api_key": "test-key",
+            },
+        )
+        assert second_resp.status_code == 409
+        second_payload = second_resp.get_json()
+        assert second_payload["status"] == "already_running"
+        assert "already in progress" in second_payload["message"]
+
+        release_first_job.set()
+
+
+def test_grade_job_status_marks_stale_running_job_timed_out(app_factory, monkeypatch):
+    create, _ = app_factory
+    release_job = threading.Event()
+    job_started = threading.Event()
+    monkeypatch.setattr(APIController, "GRADE_JOB_TIMEOUT_GRACE_SECONDS", 0.0)
+
+    def fake_load_unit_pkg(self):
+        self.units = {
+            "unit1": {
+                "q1": {
+                    "question_text": "Question",
+                    "solution": "Solution",
+                    "grading_notes": "Notes",
+                }
+            }
+        }
+        self.units_order = []
+
+    def fake_grade(self, **kwargs):
+        job_started.set()
+        release_job.wait(timeout=2)
+        return {"result": "pass", "full_explanation": "ok", "feedback": "ok"}
+
+    monkeypatch.setattr(Grader, "load_unit_pkg", fake_load_unit_pkg)
+    monkeypatch.setattr(Grader, "grade", fake_grade)
+
+    app = create(LLMGRADER_AUTH_MODE="dev-open", LLMGRADER_INITIAL_ADMIN_EMAIL=None)
+
+    with app.test_client() as client:
+        start_resp = client.post(
+            "/grade/jobs",
+            json={
+                "unit": "unit1",
+                "qtag": "q1",
+                "student_solution": "My answer",
+                "provider": "openai",
+                "api_key": "test-key",
+                "timeout": 1,
+            },
+        )
+        assert start_resp.status_code == 202
+        job_id = start_resp.get_json()["job_id"]
+        assert job_started.wait(timeout=1.0)
+
+        time.sleep(1.1)
+        status_resp = client.get(f"/grade/jobs/{job_id}")
+        assert status_resp.status_code == 200
+        status_payload = status_resp.get_json()
+        assert status_payload["status"] == "timed_out"
+        assert "timed out" in status_payload["error"]
+
+        release_job.set()
