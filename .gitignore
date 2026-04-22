@@ -185,3 +185,6 @@ example_repo/*.zip
 **/example_repo/autograder/
 docs/key.txt
 local_data/
+
+# Experiment directory
+experiment/

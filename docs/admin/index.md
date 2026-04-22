@@ -1,7 +1,7 @@
 ---
 title: Administrator Guide
 parent: LLM Grader
-nav_order: 2
+nav_order: 3
 has_children: true
 ---
 

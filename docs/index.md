@@ -22,6 +22,7 @@ The system is intentionally lightweight — a small core that instructors can un
 ### Core Capabilities
 
 - **Structured problem definitions** that capture instructor intent, reference solutions, rubrics, and grading notes across engineering domains.  
+- **Agent-assisted course building** through an MCP-based authoring workflow that can scan course materials, inspect example questions, draft XML, and validate the result before packaging.  
 - **LLM‑based evaluation** of student reasoning using OpenAI models, with optional tool‑assisted checks (Python execution, numeric verification, and web‑search‑augmented fact checking).  
 - **Flexible scoring logic** that instructors can customize, inspect, and iterate on.  
 - **Seamless export to Gradescope**, including a standalone autograder that requires no LLM calls during grading.  
@@ -34,10 +35,11 @@ The system is intentionally lightweight — a small core that instructors can un
 
 The documentation is organized into four main sections:
 
-- **Student Guide** for answering questions and using the portal
-- **Administrator Guide** for course setup, deployment, authoring, and operations
-- **Analytics** for grading and system visibility
-- **Developer Guide** for contributors working on the `llmgrader` codebase and tooling
+- [**Overview**](./overview/) for describing the architecture or how LLM grader workes
+- [**Student Guide**](./student/) for answering questions and using the portal
+- [**Administrator Guide**](./admin/) for instructors for course setup, deployment, authoring, and operations
+- [**Analytics**](./analytics/) for grading and system visibility
+- [**Developer Guide**](./developer/) for contributors working on the `llmgrader` codebase and tooling
 
 
 ---

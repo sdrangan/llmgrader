@@ -14,10 +14,15 @@ from llmgrader.mcp.config_xml_tools import (
     scan_repo_for_config_inputs,
     validate_config_xml,
 )
+from llmgrader.mcp.example_tools import (
+    get_question_example,
+    list_question_examples,
+)
 from llmgrader.mcp.unit_xml_tools import (
     create_unit_xml_skeleton,
     explain_rubric_rules,
     get_unit_xml_structure,
+    plan_question_draft,
     scan_repo_for_unit_inputs,
     validate_unit_xml,
 )
@@ -141,6 +146,41 @@ def build_tool_schemas() -> list[dict[str, Any]]:
         },
         {
             "type": "function",
+            "name": "list_question_examples",
+            "description": (
+                "Return a curated catalog of available question XML examples with short summaries "
+                "so the user can choose one to inspect."
+            ),
+            "strict": True,
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": [],
+                "additionalProperties": False,
+            },
+        },
+        {
+            "type": "function",
+            "name": "get_question_example",
+            "description": (
+                "Return one curated question XML example by ID, including the source filename, "
+                "qtag, and serialized <question> XML snippet."
+            ),
+            "strict": True,
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "example_id": {
+                        "type": "string",
+                        "description": "Stable curated example identifier.",
+                    }
+                },
+                "required": ["example_id"],
+                "additionalProperties": False,
+            },
+        },
+        {
+            "type": "function",
             "name": "get_unit_xml_structure",
             "description": (
                 "Return a nested schema object for the unit XML hierarchy, including element metadata, "
@@ -151,6 +191,30 @@ def build_tool_schemas() -> list[dict[str, Any]]:
                 "type": "object",
                 "properties": {},
                 "required": [],
+                "additionalProperties": False,
+            },
+        },
+        {
+            "type": "function",
+            "name": "plan_question_draft",
+            "description": (
+                "Return a recommended workflow for drafting a new unit XML question, including "
+                "example lookup, schema review, initial drafting, and validation steps."
+            ),
+            "strict": True,
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "task": {
+                        "type": ["string", "null"],
+                        "description": "Optional short description of the question the user wants to draft.",
+                    },
+                    "workspace_root": {
+                        "type": ["string", "null"],
+                        "description": "Optional workspace root used to include repository scanning in the plan.",
+                    },
+                },
+                "required": ["task", "workspace_root"],
                 "additionalProperties": False,
             },
         },
@@ -342,8 +406,17 @@ def resolve_openai_api_key(api_key: str | None = None) -> str:
 def execute_tool_call(name: str, arguments: dict[str, Any]) -> Any:
     if name == "get_llmgrader_config_structure":
         return get_llmgrader_config_structure()
+    if name == "list_question_examples":
+        return list_question_examples()
+    if name == "get_question_example":
+        return get_question_example(arguments["example_id"])
     if name == "get_unit_xml_structure":
         return get_unit_xml_structure()
+    if name == "plan_question_draft":
+        return plan_question_draft(
+            task=arguments.get("task"),
+            workspace_root=arguments.get("workspace_root"),
+        )
     if name == "explain_rubric_rules":
         return explain_rubric_rules()
     if name == "create_config_skeleton":

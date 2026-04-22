@@ -4,18 +4,29 @@ from llmgrader.mcp.unit_xml_tools import (
     create_unit_xml_skeleton,
     explain_rubric_rules,
     get_unit_xml_structure,
+  plan_question_draft,
     scan_repo_for_unit_inputs,
     validate_unit_xml,
 )
+from llmgrader.mcp.server import llmgrader_plan_question_draft
 
 
 def test_get_unit_xml_structure_returns_expected_shape() -> None:
     result = get_unit_xml_structure()
 
     assert "summary" in result
+    assert "authoring_workflow" in result
+    assert "recommended_examples" in result
+    assert "example_lookup_tools" in result
     assert "structure" in result
     assert "semantic_rules" in result
     assert "examples" in result
+    assert result["example_lookup_tools"] == {
+      "list_examples": "llmgrader_list_question_examples",
+      "get_example": "llmgrader_get_question_example",
+    }
+    assert result["recommended_examples"][0]["id"] == "calculus_exponential_graphing"
+    assert any("inspect a curated example" in step for step in result["authoring_workflow"])
     unit_schema = result["structure"]["unit"]
     assert unit_schema["required"] is True
     assert unit_schema["multiple"] is False
@@ -25,7 +36,11 @@ def test_get_unit_xml_structure_returns_expected_shape() -> None:
     assert question_schema["attributes"]["qtag"]["required"] is True
     assert question_schema["children"]["question_text"]["text_content"]["type"] == "html_or_text"
     assert "CDATA" in question_schema["children"]["question_text"]["description"]
+    assert "<![CDATA[" in question_schema["children"]["question_text"]["text_content"]["example"]
     assert "CDATA" in question_schema["children"]["solution"]["description"]
+    assert "<![CDATA[" in question_schema["children"]["solution"]["text_content"]["example"]
+    assert any("condition_type='llm_judge'" in rule for rule in result["semantic_rules"])
+    assert any("sum_part_max" in rule for rule in result["semantic_rules"])
     assert question_schema["children"]["rubrics"]["related_tools"] == [
       {
         "name": "llmgrader_explain_rubric_rules",
@@ -36,6 +51,7 @@ def test_get_unit_xml_structure_returns_expected_shape() -> None:
       }
     ]
     assert question_schema["children"]["parts"]["children"]["part"]["children"]["points"]["text_content"]["type"] == "number"
+    assert "one_of" in question_schema["children"]["rubrics"]["children"]["group"]["description"]
 
 
 def test_explain_rubric_rules_returns_expected_shape() -> None:
@@ -46,6 +62,38 @@ def test_explain_rubric_rules_returns_expected_shape() -> None:
     assert "partial_credit_fields" in result
     assert "common_mistakes" in result
     assert "minimal_examples" in result
+
+
+def test_plan_question_draft_returns_structured_workflow() -> None:
+    result = plan_question_draft(
+        task="Draft a multipart partial-credit probability question.",
+        workspace_root="tests/fixtures/probability_repo",
+    )
+
+    assert "summary" in result
+    assert result["task"] == "Draft a multipart partial-credit probability question."
+    assert result["workspace_root"] == "tests/fixtures/probability_repo"
+    assert len(result["steps"]) == 6
+    assert result["steps"][0]["recommended_tool"] == "llmgrader_list_question_examples"
+    assert result["steps"][1]["recommended_tool"] == "llmgrader_scan_repo_for_unit_inputs"
+    assert result["steps"][2]["recommended_tool"] == "llmgrader_get_question_example"
+    assert result["steps"][3]["recommended_tool"] == "llmgrader_get_unit_xml_structure"
+    assert result["steps"][4]["recommended_tool"] == "llmgrader_create_unit_xml_skeleton"
+    assert result["steps"][5]["recommended_tool"] == "llmgrader_validate_unit_xml"
+    assert all("goal" in step for step in result["steps"])
+    assert all("reason" in step for step in result["steps"])
+    assert all("expected_output" in step for step in result["steps"])
+
+
+def test_server_wrapper_exposes_plan_question_draft() -> None:
+    result = llmgrader_plan_question_draft(
+        task="Draft a multipart partial-credit probability question.",
+        workspace_root="tests/fixtures/probability_repo",
+    )
+
+    assert result["task"] == "Draft a multipart partial-credit probability question."
+    assert result["steps"][0]["recommended_tool"] == "llmgrader_list_question_examples"
+    assert any(step["recommended_tool"] == "llmgrader_create_unit_xml_skeleton" for step in result["steps"])
 
 
 def test_create_unit_xml_skeleton_produces_parseable_xml() -> None:

@@ -33,6 +33,8 @@ For `llmgrader_config.xml`, it can:
 
 For unit XML authoring, it can:
 
+- suggest a structured drafting workflow before it generates XML
+- list curated example questions and retrieve a full example question XML snippet
 - explain the expected unit XML structure
 - explain rubric conventions for binary and partial-credit questions
 - generate a starter unit XML file
@@ -45,7 +47,10 @@ The current tools are:
 - `llmgrader_create_config_skeleton`
 - `llmgrader_validate_config_xml`
 - `llmgrader_scan_repo_for_config_inputs`
+- `llmgrader_list_question_examples`
+- `llmgrader_get_question_example`
 - `llmgrader_get_unit_xml_structure`
+- `llmgrader_plan_question_draft`
 - `llmgrader_explain_rubric_rules`
 - `llmgrader_create_unit_xml_skeleton`
 - `llmgrader_validate_unit_xml`
@@ -95,9 +100,10 @@ Once the workspace is open, start Copilot Chat with MCP enabled and ask for one 
 These prompts are intended as starting points. In practice, the best workflow is often:
 
 1. ask the agent to scan the workspace
-2. ask it to draft a file
-3. ask it to validate the result
-4. revise the XML manually if needed
+2. ask it to plan the draft and inspect a close example
+3. ask it to draft a file
+4. ask it to validate the result
+5. revise the XML manually if needed
 
 ### Example: start a course config
 
@@ -126,6 +132,18 @@ Create a starter unit XML for a probability unit with one partial-credit questio
 Break the question into parts, include a partial-credit rubric, and validate the XML before presenting it.
 ```
 
+### Example: ask for a planning pass before drafting
+
+```text
+Before drafting a new unit XML question, plan the authoring workflow, inspect a close curated example, and then draft and validate the XML.
+```
+
+### Example: ask for a close example first
+
+```text
+List curated question examples with partial credit and multiple parts, then retrieve the closest one before drafting a new probability question.
+```
+
 ### Example: ask only for rubric help
 
 ```text
@@ -142,6 +160,8 @@ Scan this workspace for unit authoring inputs, then review my current unit XML d
 
 The current MCP tools are best viewed as authoring helpers, not a one-shot course builder. They are good at:
 
+- planning a sensible authoring sequence for nontrivial questions
+- surfacing a close working example before drafting
 - producing a valid initial XML skeleton
 - reflecting the structure already documented in this repository
 - catching missing required fields and common rubric mistakes
@@ -159,8 +179,21 @@ For new content, a practical workflow is:
 
 1. Create or collect your source materials in the workspace.
 2. Ask the agent to scan the repo for likely config or unit inputs.
-3. Ask it to create a starter XML file.
-4. Edit the draft manually to reflect your exact wording and scoring policy.
-5. Ask the agent to validate the revised XML.
-6. Package and upload only after the XML passes validation and you have reviewed the result.
+3. For nontrivial unit questions, ask it to plan the draft and inspect a close curated example.
+4. Ask it to create a starter XML file.
+5. Edit the draft manually to reflect your exact wording and scoring policy.
+6. Ask the agent to validate the revised XML.
+7. Package and upload only after the XML passes validation and you have reviewed the result.
+
+For complex partial-credit or multipart questions, a successful tool sequence often looks like this:
+
+1. `llmgrader_scan_repo_for_unit_inputs`
+2. `llmgrader_plan_question_draft`
+3. `llmgrader_get_unit_xml_structure`
+4. `llmgrader_list_question_examples`
+5. `llmgrader_get_question_example`
+6. `llmgrader_create_unit_xml_skeleton`
+7. `llmgrader_validate_unit_xml`
+
+This sequence is more expensive in token usage than going straight to draft generation, but it is often more reliable because the model sees a valid example and the supported XML constraints before it writes the first draft.
 

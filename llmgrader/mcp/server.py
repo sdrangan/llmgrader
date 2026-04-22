@@ -8,10 +8,15 @@ from llmgrader.mcp.config_xml_tools import (
     scan_repo_for_config_inputs,
     validate_config_xml,
 )
+from llmgrader.mcp.example_tools import (
+    get_question_example,
+    list_question_examples,
+)
 from llmgrader.mcp.unit_xml_tools import (
     create_unit_xml_skeleton,
     explain_rubric_rules,
     get_unit_xml_structure,
+    plan_question_draft,
     scan_repo_for_unit_inputs,
     validate_unit_xml,
 )
@@ -61,6 +66,28 @@ def llmgrader_scan_repo_for_config_inputs(workspace_root: str) -> dict:
     return scan_repo_for_config_inputs(workspace_root=workspace_root)
 
 
+@mcp.tool(name="llmgrader_list_question_examples")
+def llmgrader_list_question_examples() -> dict:
+    """Return a curated catalog of question XML examples with short summaries and feature hints.
+
+    Use this before authoring a unit XML question so you can inspect
+    a valid example with similar structure, such as multipart, partial-credit,
+    rubric-heavy, or image-based questions.
+    """
+    return list_question_examples()
+
+
+@mcp.tool(name="llmgrader_get_question_example")
+def llmgrader_get_question_example(example_id: str) -> dict:
+    """Return one curated question XML example by ID.
+
+    The response includes the source filename, qtag, and serialized <question>
+    XML snippet so the caller can inspect a valid authoring pattern before
+    drafting similar unit XML.
+    """
+    return get_question_example(example_id)
+
+
 @mcp.tool(name="llmgrader_get_unit_xml_structure")
 def llmgrader_get_unit_xml_structure() -> dict:
     """Return a nested schema object for the unit XML structure.
@@ -71,6 +98,19 @@ def llmgrader_get_unit_xml_structure() -> dict:
     it is required or repeatable.
     """
     return get_unit_xml_structure()
+
+
+@mcp.tool(name="llmgrader_plan_question_draft")
+def llmgrader_plan_question_draft(
+    task: str | None = None,
+    workspace_root: str | None = None,
+) -> dict:
+    """Return a recommended workflow for drafting a new unit XML question.
+
+    Use this before calling llmgrader_create_unit_xml_skeleton when the caller
+    needs guidance on example selection, schema review, and validation order.
+    """
+    return plan_question_draft(task=task, workspace_root=workspace_root)
 
 
 @mcp.tool(name="llmgrader_explain_rubric_rules")

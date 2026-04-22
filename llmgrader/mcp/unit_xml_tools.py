@@ -13,6 +13,90 @@ from llmgrader.mcp.description_utils import (
 from llmgrader.services.unit_parser import UnitParser
 
 
+def plan_question_draft(task: str | None = None, workspace_root: str | None = None) -> dict:
+    """Return a structured workflow for drafting a new unit XML question.
+
+    This helper is intended for tool-driven clients that need a clear sequence of
+    steps before drafting complex questions. The returned plan is JSON-serializable.
+    """
+    summary = (
+        "Use a valid example and the unit XML constraints before drafting a new "
+        "question, then validate the resulting XML."
+    )
+
+    steps = [
+        {
+            "goal": "Inspect curated question examples.",
+            "recommended_tool": "llmgrader_list_question_examples",
+            "reason": (
+                "Find examples with features that match the target question, such as "
+                "multipart structure, partial credit, rubric logic, or images."
+            ),
+            "expected_output": "A list of example ids, descriptions, and feature tags.",
+        },
+        {
+            "goal": "Inspect one concrete example in detail.",
+            "recommended_tool": "llmgrader_get_question_example",
+            "reason": (
+                "Review a valid <question> XML snippet before drafting similar XML so "
+                "the new question follows supported authoring patterns."
+            ),
+            "expected_output": "A serialized <question> XML snippet with valid structure and rubric fields.",
+        },
+        {
+            "goal": "Review unit XML structure and constraints.",
+            "recommended_tool": "llmgrader_get_unit_xml_structure",
+            "reason": (
+                "Confirm required elements, supported rubric fields, CDATA and HTML "
+                "conventions, and other hard constraints before drafting."
+            ),
+            "expected_output": "Schema guidance, semantic rules, and recommended examples.",
+        },
+        {
+            "goal": "Draft the initial unit XML.",
+            "recommended_tool": "llmgrader_create_unit_xml_skeleton",
+            "reason": (
+                "Generate a first XML draft from structured question inputs after an "
+                "example and the constraints have been reviewed."
+            ),
+            "expected_output": "A draft <unit> XML document containing the new question.",
+        },
+        {
+            "goal": "Validate the drafted XML.",
+            "recommended_tool": "llmgrader_validate_unit_xml",
+            "reason": (
+                "Catch unsupported rubric fields, invalid aggregation modes, and other "
+                "schema or authoring issues before presenting the result."
+            ),
+            "expected_output": "A validation result with errors, warnings, or confirmation that the XML is valid.",
+        },
+    ]
+
+    if workspace_root:
+        steps.insert(
+            1,
+            {
+                "goal": "Scan the repository for local unit XML examples and nearby authoring files.",
+                "recommended_tool": "llmgrader_scan_repo_for_unit_inputs",
+                "reason": (
+                    "Check whether the current workspace already contains relevant unit "
+                    "XML patterns, rubric examples, assets, or authoring notes."
+                ),
+                "expected_output": (
+                    "Repository-local unit XML candidates, rubric examples, asset directories, "
+                    "and nearby authoring files."
+                ),
+            },
+        )
+
+    return {
+        "summary": summary,
+        "task": task,
+        "workspace_root": workspace_root,
+        "steps": steps,
+    }
+
+
 def get_unit_xml_structure() -> dict:
     """Return a JSON-serializable nested schema description of the unit XML format.
 
@@ -25,15 +109,42 @@ def get_unit_xml_structure() -> dict:
             "A unit XML file describes one unit and its questions, including prompt text, "
             "reference solutions, parts, grading behavior, and optional rubric guidance."
         ),
+        "authoring_workflow": [
+                "First inspect a curated example using recommended tools before drafting new XML.",
+            "Use examples especially for multipart, partial-credit, rubric-heavy, or image-based questions.",
+            "After drafting XML, validate it before presenting it to the user.",
+        ],
+        "recommended_examples": [
+            {
+                "id": "calculus_exponential_graphing",
+                "why": "Multipart partial-credit question with an embedded image and per-part rubrics.",
+            },
+            {
+                "id": "calculus_integration_by_parts",
+                "why": "Single-part partial-credit question with a straightforward rubric_total pattern.",
+            },
+            {
+                "id": "calculus_exponential_derivative",
+                "why": "Binary-graded question with rubric groups and alternative valid methods.",
+            },
+        ],
+        "example_lookup_tools": {
+            "list_examples": "llmgrader_list_question_examples",
+            "get_example": "llmgrader_get_question_example",
+        },
         "structure": {"unit": _unit_structure()},
         "semantic_rules": [
             "The root element should be <unit> and should include a non-empty id attribute.",
             "A unit should contain at least one <question> element.",
             "Each question should have a unique qtag within the unit.",
             "Each question should include question_text, solution, and parts.",
+            "question_text and solution should usually be HTML wrapped in CDATA, especially for multi-line content, lists, math, or embedded images.",
             "Each part should identify a part_label and points value.",
             "If partial_credit is true and rubrics are used, rubric items should use point_adjustment.",
+            "If partial_credit is true, do not invent binary-only rubric fields or values such as condition_type='llm_judge' or action='add'.",
             "If partial_credit is false and rubrics are used, rubric items should use condition_type and action.",
+            "The only supported rubric group type is one_of; unsupported group types such as part_max should not be used.",
+            "Allowed rubric_total values are sum_positive, sum_negative, and flexible; unsupported values such as sum_part_max should not be used.",
             "For multi-part questions with rubric_total sum_positive or sum_negative, rubric items should reference concrete part labels rather than part='all'.",
             "For multi-part questions with rubric_total sum_positive, positive rubric items for each part should sum to that part's max points.",
             "Question text may reference packaged assets using /pkg_assets/... URLs after those assets are declared in llmgrader_config.xml.",
@@ -77,28 +188,28 @@ def get_unit_xml_structure() -> dict:
 
 def _question_text_structure() -> dict:
     return make_element_description(
-        "Prompt shown to the student; it should be wrapped in CDATA and may contain HTML markup.",
+        "Prompt shown to the student; it should be wrapped in CDATA and should be in HTML markup.",
         required=True,
         multiple=False,
         text_content=make_text_content_description(
-            "Question prompt body, typically stored in CDATA and optionally written as HTML.",
+            "Question prompt body, typically stored in CDATA and should be as HTML.",
             required=True,
             type="html_or_text",
-            example="<p>State the sample space for a fair coin toss.</p>",
+            example="<![CDATA[<p>State the sample space for a fair coin toss.</p>]]>",
         ),
     )
 
 
 def _solution_structure() -> dict:
     return make_element_description(
-        "Reference solution used during grading; it should be wrapped in CDATA and may contain HTML markup.",
+        "Reference solution used during grading; it should be wrapped in CDATA and should usually be in HTML markup.",
         required=True,
         multiple=False,
         text_content=make_text_content_description(
-            "Reference answer body, typically stored in CDATA and optionally written as HTML.",
+            "Reference answer body, typically stored in CDATA and usually written as HTML.",
             required=True,
             type="html_or_text",
-            example="<p>The sample space is {H, T}.</p>",
+            example="<![CDATA[<p>The sample space is {H, T}.</p>]]>",
         ),
     )
 
@@ -255,7 +366,7 @@ def _rubric_notes_structure() -> dict:
 
 def _rubric_item_structure() -> dict:
     return make_element_description(
-        "One rubric condition or scoring rule.",
+        "One rubric condition or scoring rule. For partial-credit questions, use point_adjustment and do not invent binary-only fields or values.",
         required=False,
         multiple=True,
         attributes={
@@ -316,7 +427,7 @@ def _rubric_group_id_structure() -> dict:
 
 def _rubric_group_structure() -> dict:
     return make_element_description(
-        "Optional rubric group, typically for alternatives.",
+        "Optional rubric group for alternatives. The only supported group type is one_of.",
         required=False,
         multiple=True,
         attributes={
@@ -352,7 +463,7 @@ def _rubrics_structure() -> dict:
 
 def _rubric_total_structure() -> dict:
     return make_element_description(
-        "Optional score aggregation mode when partial-credit rubrics are present.",
+        "Optional score aggregation mode when partial-credit rubrics are present. Supported values are sum_positive, sum_negative, and flexible.",
         required=False,
         multiple=False,
         text_content=make_text_content_description(

@@ -12,7 +12,10 @@ def test_build_tool_schemas_exposes_expected_function_tools() -> None:
         "create_config_skeleton",
         "validate_config_xml",
         "scan_repo_for_config_inputs",
+        "list_question_examples",
+        "get_question_example",
         "get_unit_xml_structure",
+        "plan_question_draft",
         "explain_rubric_rules",
         "create_unit_xml_skeleton",
         "validate_unit_xml",
@@ -36,6 +39,15 @@ def test_build_tool_schemas_exposes_expected_function_tools() -> None:
         "workspace_root",
     ]
     assert tool_by_name["validate_config_xml"]["parameters"]["properties"]["workspace_root"]["type"] == [
+        "string",
+        "null",
+    ]
+    assert tool_by_name["get_question_example"]["parameters"]["required"] == ["example_id"]
+    assert tool_by_name["plan_question_draft"]["parameters"]["required"] == [
+        "task",
+        "workspace_root",
+    ]
+    assert tool_by_name["plan_question_draft"]["parameters"]["properties"]["task"]["type"] == [
         "string",
         "null",
     ]
@@ -116,6 +128,49 @@ def test_execute_tool_call_routes_unit_xml_validation(monkeypatch) -> None:
     assert result == {"valid": True, "errors": [], "warnings": []}
     assert captured == {
         "unit_xml": "<unit id='probability_intro'></unit>",
+        "workspace_root": "tests/fixtures/probability_repo",
+    }
+
+
+def test_execute_tool_call_routes_question_example_lookup(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_get_question_example(example_id):
+        captured["example_id"] = example_id
+        return {"id": example_id, "question_xml": "<question />"}
+
+    monkeypatch.setattr(blind_user_llm, "get_question_example", fake_get_question_example)
+
+    result = blind_user_llm.execute_tool_call(
+        "get_question_example",
+        {"example_id": "calculus_exponential_derivative"},
+    )
+
+    assert result == {"id": "calculus_exponential_derivative", "question_xml": "<question />"}
+    assert captured == {"example_id": "calculus_exponential_derivative"}
+
+
+def test_execute_tool_call_routes_plan_question_draft(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_plan_question_draft(*, task=None, workspace_root=None):
+        captured["task"] = task
+        captured["workspace_root"] = workspace_root
+        return {"summary": "plan", "steps": []}
+
+    monkeypatch.setattr(blind_user_llm, "plan_question_draft", fake_plan_question_draft)
+
+    result = blind_user_llm.execute_tool_call(
+        "plan_question_draft",
+        {
+            "task": "Draft a multipart partial-credit probability question.",
+            "workspace_root": "tests/fixtures/probability_repo",
+        },
+    )
+
+    assert result == {"summary": "plan", "steps": []}
+    assert captured == {
+        "task": "Draft a multipart partial-credit probability question.",
         "workspace_root": "tests/fixtures/probability_repo",
     }
 
