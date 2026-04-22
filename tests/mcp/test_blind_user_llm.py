@@ -8,11 +8,11 @@ def test_build_tool_schemas_exposes_expected_function_tools() -> None:
     tool_by_name = {tool["name"]: tool for tool in tools}
 
     assert [tool["name"] for tool in tools] == [
-        "explain_config",
+        "get_llmgrader_config_structure",
         "create_config_skeleton",
         "validate_config_xml",
         "scan_repo_for_config_inputs",
-        "explain_unit_xml",
+        "get_unit_xml_structure",
         "explain_rubric_rules",
         "create_unit_xml_skeleton",
         "validate_unit_xml",

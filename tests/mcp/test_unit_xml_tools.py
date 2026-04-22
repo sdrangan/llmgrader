@@ -3,22 +3,39 @@ from xml.etree import ElementTree as ET
 from llmgrader.mcp.unit_xml_tools import (
     create_unit_xml_skeleton,
     explain_rubric_rules,
-    explain_unit_xml,
+    get_unit_xml_structure,
     scan_repo_for_unit_inputs,
     validate_unit_xml,
 )
 
 
-def test_explain_unit_xml_returns_expected_shape() -> None:
-    result = explain_unit_xml()
+def test_get_unit_xml_structure_returns_expected_shape() -> None:
+    result = get_unit_xml_structure()
 
     assert "summary" in result
-    assert "required_sections" in result
-    assert "optional_sections" in result
-    assert "validation_rules" in result
-    assert "follow_up_questions" in result
-    assert "minimal_example_xml" in result
-    assert "common_authoring_mistakes" in result
+    assert "structure" in result
+    assert "semantic_rules" in result
+    assert "examples" in result
+    unit_schema = result["structure"]["unit"]
+    assert unit_schema["required"] is True
+    assert unit_schema["multiple"] is False
+    assert unit_schema["attributes"]["id"]["required"] is True
+    question_schema = unit_schema["children"]["question"]
+    assert question_schema["multiple"] is True
+    assert question_schema["attributes"]["qtag"]["required"] is True
+    assert question_schema["children"]["question_text"]["text_content"]["type"] == "html_or_text"
+    assert "CDATA" in question_schema["children"]["question_text"]["description"]
+    assert "CDATA" in question_schema["children"]["solution"]["description"]
+    assert question_schema["children"]["rubrics"]["related_tools"] == [
+      {
+        "name": "llmgrader_explain_rubric_rules",
+        "when_to_use": (
+          "Use this tool for more detailed rubric authoring guidance, including binary "
+          "versus partial-credit rubric rules and rubric_total behavior."
+        ),
+      }
+    ]
+    assert question_schema["children"]["parts"]["children"]["part"]["children"]["points"]["text_content"]["type"] == "number"
 
 
 def test_explain_rubric_rules_returns_expected_shape() -> None:

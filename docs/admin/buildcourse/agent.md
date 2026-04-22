@@ -41,11 +41,11 @@ For unit XML authoring, it can:
 
 The current tools are:
 
-- `llmgrader_explain_config`
+- `llmgrader_get_llmgrader_config_structure`
 - `llmgrader_create_config_skeleton`
 - `llmgrader_validate_config_xml`
 - `llmgrader_scan_repo_for_config_inputs`
-- `llmgrader_explain_unit_xml`
+- `llmgrader_get_unit_xml_structure`
 - `llmgrader_explain_rubric_rules`
 - `llmgrader_create_unit_xml_skeleton`
 - `llmgrader_validate_unit_xml`

@@ -1,45 +1,32 @@
 from __future__ import annotations
 
 import os
-import tempfile
 from pathlib import Path
 from xml.etree import ElementTree as ET
 
+from llmgrader.mcp.description_utils import (
+    make_attribute_description,
+    make_element_description,
+    make_related_tool_description,
+    make_text_content_description,
+)
 from llmgrader.services.unit_parser import UnitParser
 
 
-def explain_unit_xml() -> dict:
+def get_unit_xml_structure() -> dict:
+    """Return a JSON-serializable nested schema description of the unit XML format.
+
+    The returned object is intended for MCP tool output and describes the XML
+    element hierarchy, attributes, child elements, text content, semantic rules,
+    and examples for the unit XML authoring format.
+    """
     return {
         "summary": (
             "A unit XML file describes one unit and its questions, including prompt text, "
             "reference solutions, parts, grading behavior, and optional rubric guidance."
         ),
-        "required_sections": {
-            "unit": {
-                "description": "Root <unit> element for the authoring file.",
-                "required_attributes": ["id"],
-                "recommended_attributes": ["title", "version"],
-            },
-            "question": {
-                "description": "Each <question> defines one gradeable item in the unit.",
-                "required_attributes": ["qtag"],
-                "required_elements": ["question_text", "solution", "parts"],
-                "recommended_elements": ["required", "partial_credit", "grading_notes"],
-            },
-            "parts": {
-                "description": "Defines the point structure for the question.",
-                "required_elements": ["part"],
-                "recommended_part_fields": ["part_label", "points"],
-            },
-        },
-        "optional_sections": {
-            "preferred_model": "Optional model hint for one question.",
-            "tool": "Optional built-in tool request. Currently only 'web_search' is supported.",
-            "rubrics": "Optional rubric items and one_of groups used to guide grading.",
-            "rubric_total": "Optional partial-credit score aggregation mode when rubrics are present.",
-            "grading_notes": "Optional instructor notes with interpretation guidance for the grader.",
-        },
-        "validation_rules": [
+        "structure": {"unit": _unit_structure()},
+        "semantic_rules": [
             "The root element should be <unit> and should include a non-empty id attribute.",
             "A unit should contain at least one <question> element.",
             "Each question should have a unique qtag within the unit.",
@@ -51,47 +38,393 @@ def explain_unit_xml() -> dict:
             "For multi-part questions with rubric_total sum_positive, positive rubric items for each part should sum to that part's max points.",
             "Question text may reference packaged assets using /pkg_assets/... URLs after those assets are declared in llmgrader_config.xml.",
         ],
-        "common_authoring_mistakes": [
-            "Omitting the unit id or a question qtag.",
-            "Leaving question_text or solution blank in an otherwise complete skeleton.",
-            "Using partial-credit rubric fields on binary questions or binary rubric fields on partial-credit questions.",
-            "Referencing a rubric part that does not exist in <parts>.",
-            "Creating overlapping rubric items that double-count the same evidence.",
-            "Using unsupported tool values instead of the currently supported web_search tool.",
-        ],
-        "follow_up_questions": [
-            "What unit id and title should be used?",
-            "What questions belong in this unit, and what qtags should identify them?",
-            "Is each question binary or partial-credit?",
-            "What part labels and point values should be used for each question?",
-            "Do you want rubric items or grading notes for any question?",
-            "Do any questions need packaged assets referenced from /pkg_assets/?",
-        ],
-        "minimal_example_xml": (
-            "<unit id=\"probability_intro\" title=\"Probability Intro\" version=\"1.0\">\n"
-            "  <question qtag=\"q1\">\n"
-            "    <question_text><![CDATA[\n"
-            "    <p>State the sample space for a fair coin toss.</p>\n"
-            "    ]]></question_text>\n"
-            "    <solution><![CDATA[\n"
-            "    <p>The sample space is {H, T}.</p>\n"
-            "    ]]></solution>\n"
-            "    <required>true</required>\n"
-            "    <partial_credit>false</partial_credit>\n"
-            "    <parts>\n"
-            "      <part>\n"
-            "        <part_label>all</part_label>\n"
-            "        <points>1</points>\n"
-            "      </part>\n"
-            "    </parts>\n"
-            "  </question>\n"
-            "</unit>"
-        ),
-        "scope_limitations": [
-            "The validator reuses the repo's existing unit schema and semantic checks, then adds a small set of high-confidence authoring checks from the docs.",
-            "It does not attempt to judge the quality of question wording or whether a rubric is pedagogically optimal.",
-        ],
+        "examples": {
+            "minimal_unit_xml": (
+                "<unit id=\"probability_intro\" title=\"Probability Intro\" version=\"1.0\">\n"
+                "  <question qtag=\"q1\">\n"
+                "    <question_text><![CDATA[\n"
+                "    <p>State the sample space for a fair coin toss.</p>\n"
+                "    ]]></question_text>\n"
+                "    <solution><![CDATA[\n"
+                "    <p>The sample space is {H, T}.</p>\n"
+                "    ]]></solution>\n"
+                "    <required>true</required>\n"
+                "    <partial_credit>false</partial_credit>\n"
+                "    <parts>\n"
+                "      <part>\n"
+                "        <part_label>all</part_label>\n"
+                "        <points>1</points>\n"
+                "      </part>\n"
+                "    </parts>\n"
+                "  </question>\n"
+                "</unit>"
+            ),
+            "rubric_item_example": {
+                "binary": {
+                    "condition_type": "positive",
+                    "action": "fail",
+                    "display_text": "Correct final answer",
+                },
+                "partial_credit": {
+                    "part": "all",
+                    "point_adjustment": "+2",
+                    "display_text": "Correct setup",
+                },
+            },
+        },
     }
+
+
+def _question_text_structure() -> dict:
+    return make_element_description(
+        "Prompt shown to the student; it should be wrapped in CDATA and may contain HTML markup.",
+        required=True,
+        multiple=False,
+        text_content=make_text_content_description(
+            "Question prompt body, typically stored in CDATA and optionally written as HTML.",
+            required=True,
+            type="html_or_text",
+            example="<p>State the sample space for a fair coin toss.</p>",
+        ),
+    )
+
+
+def _solution_structure() -> dict:
+    return make_element_description(
+        "Reference solution used during grading; it should be wrapped in CDATA and may contain HTML markup.",
+        required=True,
+        multiple=False,
+        text_content=make_text_content_description(
+            "Reference answer body, typically stored in CDATA and optionally written as HTML.",
+            required=True,
+            type="html_or_text",
+            example="<p>The sample space is {H, T}.</p>",
+        ),
+    )
+
+
+def _required_structure() -> dict:
+    return make_element_description(
+        "Whether the question must be answered.",
+        required=False,
+        multiple=False,
+        text_content=make_text_content_description(
+            "Boolean required flag.",
+            required=False,
+            type="boolean",
+            example="true",
+            allowed_values=["true", "false"],
+        ),
+    )
+
+
+def _partial_credit_structure() -> dict:
+    return make_element_description(
+        "Whether the question uses partial-credit rubric scoring.",
+        required=False,
+        multiple=False,
+        text_content=make_text_content_description(
+            "Boolean partial-credit flag.",
+            required=False,
+            type="boolean",
+            example="false",
+            allowed_values=["true", "false"],
+        ),
+    )
+
+
+def _tool_structure() -> dict:
+    return make_element_description(
+        "Optional built-in tool request for the grader.",
+        required=False,
+        multiple=False,
+        text_content=make_text_content_description(
+            "Built-in tool name.",
+            required=False,
+            type="string",
+            example="web_search",
+            allowed_values=["web_search"],
+        ),
+    )
+
+
+def _grading_notes_structure() -> dict:
+    return make_element_description(
+        "Instructor notes that guide grading interpretation.",
+        required=False,
+        multiple=False,
+        text_content=make_text_content_description(
+            "Free-form grading guidance.",
+            required=False,
+            type="text",
+            example="Accept equivalent notation.",
+        ),
+    )
+
+
+def _part_label_structure() -> dict:
+    return make_element_description(
+        "Logical label for the part.",
+        required=True,
+        multiple=False,
+        text_content=make_text_content_description(
+            "Part identifier.",
+            required=True,
+            type="string",
+            example="all",
+        ),
+    )
+
+
+def _points_structure() -> dict:
+    return make_element_description(
+        "Maximum score for the part.",
+        required=True,
+        multiple=False,
+        text_content=make_text_content_description(
+            "Point value for the part.",
+            required=True,
+            type="number",
+            example="1",
+        ),
+    )
+
+
+def _part_structure() -> dict:
+    return make_element_description(
+        "One scoring part within the question.",
+        required=True,
+        multiple=True,
+        children={
+            "part_label": _part_label_structure(),
+            "points": _points_structure(),
+        },
+    )
+
+
+def _parts_structure() -> dict:
+    return make_element_description(
+        "Point structure for the question.",
+        required=True,
+        multiple=False,
+        children={"part": _part_structure()},
+    )
+
+
+def _rubric_display_text_structure() -> dict:
+    return make_element_description(
+        "Short rubric label shown in feedback.",
+        required=True,
+        multiple=False,
+        text_content=make_text_content_description(
+            "Rubric item title.",
+            required=True,
+            type="text",
+            example="Correct final answer",
+        ),
+    )
+
+
+def _rubric_condition_structure() -> dict:
+    return make_element_description(
+        "Concrete evidence check for the rubric item.",
+        required=True,
+        multiple=False,
+        text_content=make_text_content_description(
+            "Rubric condition text.",
+            required=True,
+            type="text",
+            example="Student gives the correct final answer.",
+        ),
+    )
+
+
+def _rubric_notes_structure() -> dict:
+    return make_element_description(
+        "Optional internal rubric notes.",
+        required=False,
+        multiple=False,
+        text_content=make_text_content_description(
+            "Additional rubric note.",
+            required=False,
+            type="text",
+            example="Accept algebraically equivalent forms.",
+        ),
+    )
+
+
+def _rubric_item_structure() -> dict:
+    return make_element_description(
+        "One rubric condition or scoring rule.",
+        required=False,
+        multiple=True,
+        attributes={
+            "id": make_attribute_description(
+                "Unique rubric item identifier within the question.",
+                required=True,
+                type="string",
+                example="final_answer",
+            ),
+            "part": make_attribute_description(
+                "Part label affected by the rubric item.",
+                required=False,
+                type="string",
+                example="all",
+            ),
+            "condition_type": make_attribute_description(
+                "Binary rubric polarity.",
+                required=False,
+                type="string",
+                example="positive",
+                allowed_values=["positive", "negative"],
+            ),
+            "action": make_attribute_description(
+                "Binary rubric action.",
+                required=False,
+                type="string",
+                example="fail",
+                allowed_values=["fail", "feedback"],
+            ),
+            "point_adjustment": make_attribute_description(
+                "Partial-credit score adjustment.",
+                required=False,
+                type="string",
+                example="+2",
+            ),
+        },
+        children={
+            "display_text": _rubric_display_text_structure(),
+            "condition": _rubric_condition_structure(),
+            "notes": _rubric_notes_structure(),
+        },
+    )
+
+
+def _rubric_group_id_structure() -> dict:
+    return make_element_description(
+        "Reference to a rubric item id.",
+        required=True,
+        multiple=True,
+        text_content=make_text_content_description(
+            "Referenced rubric id.",
+            required=True,
+            type="string",
+            example="method_a",
+        ),
+    )
+
+
+def _rubric_group_structure() -> dict:
+    return make_element_description(
+        "Optional rubric group, typically for alternatives.",
+        required=False,
+        multiple=True,
+        attributes={
+            "type": make_attribute_description(
+                "Grouping mode.",
+                required=True,
+                type="string",
+                example="one_of",
+                allowed_values=["one_of"],
+            )
+        },
+        children={"id": _rubric_group_id_structure()},
+    )
+
+
+def _rubrics_structure() -> dict:
+    return make_element_description(
+        "Optional rubric items and grouping rules for grading.",
+        required=False,
+        multiple=False,
+        children={
+            "item": _rubric_item_structure(),
+            "group": _rubric_group_structure(),
+        },
+        related_tools=[
+            make_related_tool_description(
+                "llmgrader_explain_rubric_rules",
+                when_to_use="Use this tool for more detailed rubric authoring guidance, including binary versus partial-credit rubric rules and rubric_total behavior.",
+            )
+        ],
+    )
+
+
+def _rubric_total_structure() -> dict:
+    return make_element_description(
+        "Optional score aggregation mode when partial-credit rubrics are present.",
+        required=False,
+        multiple=False,
+        text_content=make_text_content_description(
+            "Rubric aggregation mode.",
+            required=False,
+            type="string",
+            example="sum_positive",
+            allowed_values=["sum_positive", "sum_negative", "flexible"],
+        ),
+    )
+
+
+def _question_structure() -> dict:
+    return make_element_description(
+        "One gradeable question in the unit.",
+        required=True,
+        multiple=True,
+        attributes={
+            "qtag": make_attribute_description(
+                "Question identifier unique within the unit.",
+                required=True,
+                type="string",
+                example="q1",
+            ),
+            "preferred_model": make_attribute_description(
+                "Optional model hint for grading this question.",
+                required=False,
+                type="string",
+                example="gpt-4.1-mini",
+            ),
+        },
+        children={
+            "question_text": _question_text_structure(),
+            "solution": _solution_structure(),
+            "required": _required_structure(),
+            "partial_credit": _partial_credit_structure(),
+            "tool": _tool_structure(),
+            "grading_notes": _grading_notes_structure(),
+            "parts": _parts_structure(),
+            "rubrics": _rubrics_structure(),
+            "rubric_total": _rubric_total_structure(),
+        },
+    )
+
+
+def _unit_structure() -> dict:
+    return make_element_description(
+        "Root element for one authoring unit.",
+        required=True,
+        multiple=False,
+        attributes={
+            "id": make_attribute_description(
+                "Unique unit identifier.",
+                required=True,
+                type="string",
+                example="probability_intro",
+            ),
+            "title": make_attribute_description(
+                "Human-readable unit title.",
+                required=False,
+                type="string",
+                example="Probability Intro",
+            ),
+            "version": make_attribute_description(
+                "Optional authoring version string.",
+                required=False,
+                type="string",
+                example="1.0",
+            ),
+        },
+        children={"question": _question_structure()},
+    )
 
 
 def explain_rubric_rules() -> dict:
@@ -178,31 +511,14 @@ def create_unit_xml_skeleton(
 
 
 def validate_unit_xml(*, unit_xml: str, workspace_root: str | None = None) -> dict:
-    try:
-        root = ET.fromstring(unit_xml)
-    except ET.ParseError as exc:
-        return {
-            "valid": False,
-            "errors": [f"Failed to parse XML: {exc}"],
-            "warnings": [],
-            "checked_rules": [],
-        }
-
-    parser_errors = _validate_unit_xml_with_parser(unit_xml)
-    authoring_errors, authoring_warnings = _validate_unit_authoring_conventions(root, workspace_root=workspace_root)
-    errors = parser_errors + authoring_errors
-
-    return {
-        "valid": not errors,
-        "errors": errors,
-        "warnings": authoring_warnings,
-        "checked_rules": [
-            "XML parsing",
-            "unit.xsd schema validation",
-            "existing unit semantic validation from UnitParser",
-            "high-confidence unit authoring checks from unitxml.md and rubrics.md",
-        ],
-    }
+    result = UnitParser.validate_unit_text(unit_xml, workspace_root=workspace_root)
+    result["checked_rules"] = [
+        "XML parsing",
+        "unit.xsd schema validation",
+        "existing unit semantic validation from UnitParser",
+        "high-confidence unit authoring checks from unitxml.md and rubrics.md",
+    ]
+    return result
 
 
 def scan_repo_for_unit_inputs(*, workspace_root: str) -> dict:
@@ -337,182 +653,3 @@ def _bool_text(value: object) -> str:
     return "true" if bool(value) else "false"
 
 
-def _validate_unit_xml_with_parser(unit_xml: str) -> list[str]:
-    with tempfile.TemporaryDirectory() as temp_dir:
-        temp_path = Path(temp_dir) / "candidate_unit.xml"
-        temp_path.write_text(unit_xml, encoding="utf-8")
-        return [
-            error.replace(str(temp_path), "<unit_xml>")
-            for error in UnitParser.validate_unit_file(str(temp_path))
-        ]
-
-
-def _validate_unit_authoring_conventions(root: ET.Element, *, workspace_root: str | None) -> tuple[list[str], list[str]]:
-    errors: list[str] = []
-    warnings: list[str] = []
-
-    if root.tag != "unit":
-        errors.append("Root element must be <unit>.")
-        return errors, warnings
-
-    unit_id = (root.get("id") or "").strip()
-    if not unit_id:
-        errors.append("Missing required unit id attribute on <unit>.")
-
-    questions = root.findall("question")
-    if not questions:
-        errors.append("A unit XML should contain at least one <question> element.")
-        return errors, warnings
-
-    seen_qtags: set[str] = set()
-    supported_tools = {"web_search"}
-
-    for index, question in enumerate(questions, start=1):
-        qtag = (question.get("qtag") or "").strip() or f"question[{index}]"
-        question_path = f"/unit/question[@qtag='{qtag}']"
-
-        if qtag in seen_qtags:
-            errors.append(f"{question_path}: Duplicate qtag '{qtag}'.")
-        seen_qtags.add(qtag)
-
-        question_text = (question.findtext("question_text") or "").strip()
-        if not question_text:
-            errors.append(f"{question_path}: Missing or empty <question_text>.")
-
-        solution = (question.findtext("solution") or "").strip()
-        if not solution:
-            errors.append(f"{question_path}: Missing or empty <solution>.")
-
-        partial_credit_text = (question.findtext("partial_credit") or "").strip().lower()
-        partial_credit = partial_credit_text == "true"
-        if partial_credit_text and partial_credit_text not in {"true", "false"}:
-            errors.append(f"{question_path}: <partial_credit> must be 'true' or 'false'.")
-
-        tool_value = (question.findtext("tool") or "").strip()
-        if tool_value and tool_value not in supported_tools:
-            warnings.append(
-                f"{question_path}: Unsupported tool '{tool_value}'. The current grader only supports web_search."
-            )
-
-        part_labels = _extract_part_labels(question)
-        rubric_ids: set[str] = set()
-        rubrics_elem = question.find("rubrics")
-        rubric_items = rubrics_elem.findall("item") if rubrics_elem is not None else []
-
-        for rubric_index, rubric_item in enumerate(rubric_items, start=1):
-            rubric_id = (rubric_item.get("id") or "").strip() or f"rubric[{rubric_index}]"
-            rubric_path = f"{question_path}/rubrics/item[@id='{rubric_id}']"
-
-            if rubric_id in rubric_ids:
-                errors.append(f"{rubric_path}: Duplicate rubric item id '{rubric_id}'.")
-            rubric_ids.add(rubric_id)
-
-            rubric_part = (rubric_item.get("part") or "").strip()
-            if not rubric_part:
-                part_elem = rubric_item.find("part")
-                rubric_part = (part_elem.text or "").strip() if part_elem is not None and part_elem.text else "all"
-
-            if rubric_part != "all" and rubric_part not in part_labels:
-                errors.append(f"{rubric_path}: References unknown part '{rubric_part}'.")
-
-            if partial_credit:
-                if rubric_item.get("point_adjustment") is None:
-                    errors.append(
-                        f"{rubric_path}: Partial-credit rubric items should include point_adjustment."
-                    )
-                if rubric_item.get("condition_type") is not None:
-                    warnings.append(
-                        f"{rubric_path}: condition_type is ignored for partial-credit rubric items."
-                    )
-                if rubric_item.get("action") is not None:
-                    warnings.append(f"{rubric_path}: action is ignored for partial-credit rubric items.")
-            else:
-                if rubric_item.get("point_adjustment") is not None:
-                    warnings.append(
-                        f"{rubric_path}: point_adjustment is ignored for binary rubric items."
-                    )
-                condition_type = (rubric_item.get("condition_type") or "").strip().lower()
-                if condition_type not in {"positive", "negative"}:
-                    warnings.append(
-                        f"{rubric_path}: Binary rubric items should set condition_type to 'positive' or 'negative'."
-                    )
-                action = (rubric_item.get("action") or "").strip().lower()
-                if action not in {"fail", "feedback"}:
-                    warnings.append(
-                        f"{rubric_path}: Binary rubric items should set action to 'fail' or 'feedback'."
-                    )
-
-        rubric_total = (question.findtext("rubric_total") or "").strip()
-        if rubric_total and not rubric_items:
-            warnings.append(f"{question_path}: rubric_total is ignored when there are no rubric items.")
-        if rubric_total and not partial_credit:
-            warnings.append(f"{question_path}: rubric_total is ignored on non-partial-credit questions.")
-
-        if rubrics_elem is not None:
-            for group_index, group_elem in enumerate(rubrics_elem.findall("group"), start=1):
-                group_path = f"{question_path}/rubrics/group[{group_index}]"
-                group_type = (group_elem.get("type") or "").strip()
-                if group_type != "one_of":
-                    warnings.append(
-                        f"{group_path}: Unsupported group type '{group_type or '(missing)'}'; only one_of is supported."
-                    )
-                    continue
-
-                valid_ids: list[str] = []
-                seen_group_ids: set[str] = set()
-                for child in group_elem.findall("id"):
-                    child_id = (child.text or "").strip()
-                    if not child_id:
-                        warnings.append(f"{group_path}: Empty rubric group id is ignored.")
-                        continue
-                    if child_id in seen_group_ids:
-                        warnings.append(f"{group_path}: Duplicate rubric group id '{child_id}' is ignored.")
-                        continue
-                    seen_group_ids.add(child_id)
-                    if child_id not in rubric_ids:
-                        warnings.append(f"{group_path}: Unknown rubric id '{child_id}' is ignored.")
-                        continue
-                    valid_ids.append(child_id)
-
-                if len(valid_ids) < 2:
-                    warnings.append(
-                        f"{group_path}: one_of groups should contain at least two valid rubric ids."
-                    )
-
-        if workspace_root:
-            warnings.extend(_warn_pkg_asset_references(question, question_path, workspace_root))
-
-    return errors, warnings
-
-
-def _extract_part_labels(question: ET.Element) -> set[str]:
-    part_labels: set[str] = set()
-    parts_elem = question.find("parts")
-    if parts_elem is None:
-        return part_labels
-
-    for part_elem in parts_elem.findall("part"):
-        part_label = (part_elem.findtext("part_label") or "").strip()
-        if not part_label:
-            part_label = (part_elem.get("id") or "").strip() or "all"
-        part_labels.add(part_label)
-
-    return part_labels
-
-
-def _warn_pkg_asset_references(question: ET.Element, question_path: str, workspace_root: str) -> list[str]:
-    warnings: list[str] = []
-    root = Path(workspace_root).expanduser().resolve()
-    if not root.exists():
-        return warnings
-
-    for elem_name in ["question_text", "solution"]:
-        elem = question.find(elem_name)
-        text = ET.tostring(elem, encoding="unicode") if elem is not None else ""
-        if "/pkg_assets/" in text:
-            config_path = root / "llmgrader_config.xml"
-            if not config_path.exists():
-                warnings.append(
-                    f"{question_path}: Found /pkg_assets/ reference in <{elem_name}> but no llmgrader_config.xml exists under the workspace root for cross-checking."
-                )
-    return warnings

@@ -2,6 +2,7 @@ import base64
 import mimetypes
 import os
 import re
+import tempfile
 import textwrap
 import xml.etree.ElementTree as ET
 import xml.parsers.expat as expat
@@ -9,7 +10,7 @@ import xml.parsers.expat as expat
 from dataclasses import dataclass
 from datetime import datetime
 from importlib import resources
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 
 import xmlschema
 
@@ -173,15 +174,53 @@ class UnitParser:
     def validate_unit_file(cls, unit_path: str) -> list[str]:
         schema = cls._load_schema("unit.xsd")
         schema_errors = cls._format_schema_errors(unit_path, list(schema.iter_errors(unit_path)))
-        if schema_errors:
-            return schema_errors
 
         try:
             root = ET.parse(unit_path).getroot()
         except Exception as exc:
             return [f"{unit_path}: /: Failed to parse XML: {exc}"]
 
-        return cls._validate_unit_semantics(unit_path, root)
+        authoring_errors, _ = cls._validate_unit_authoring_conventions(
+            root,
+            source_label=unit_path,
+            workspace_root=None,
+        )
+        if schema_errors:
+            return schema_errors + authoring_errors
+
+        return cls._validate_unit_semantics(unit_path, root) + authoring_errors
+
+    @classmethod
+    def validate_unit_text(cls, unit_xml: str, *, workspace_root: str | None = None) -> dict:
+        try:
+            root = ET.fromstring(unit_xml)
+        except ET.ParseError as exc:
+            return {
+                "valid": False,
+                "errors": [f"Failed to parse XML: {exc}"],
+                "warnings": [],
+            }
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir) / "candidate_unit.xml"
+            temp_path.write_text(unit_xml, encoding="utf-8")
+            parser_errors = [
+                error.replace(str(temp_path), "<unit_xml>")
+                for error in cls.validate_unit_file(str(temp_path))
+            ]
+
+        authoring_errors, authoring_warnings = cls._validate_unit_authoring_conventions(
+            root,
+            source_label="<unit_xml>",
+            workspace_root=workspace_root,
+        )
+        errors = parser_errors + [error for error in authoring_errors if error not in parser_errors]
+
+        return {
+            "valid": not errors,
+            "errors": errors,
+            "warnings": authoring_warnings,
+        }
 
     @staticmethod
     def _validate_package_destination(destination_path: str) -> str | None:
@@ -339,6 +378,202 @@ class UnitParser:
                     )
 
         return validation_errors
+
+    @classmethod
+    def _validate_unit_authoring_conventions(
+        cls,
+        root: ET.Element,
+        *,
+        source_label: str,
+        workspace_root: str | None,
+    ) -> tuple[list[str], list[str]]:
+        errors: list[str] = []
+        warnings: list[str] = []
+
+        if root.tag != "unit":
+            errors.append(f"{source_label}: /: Root element must be <unit>.")
+            return errors, warnings
+
+        unit_id = (root.get("id") or "").strip()
+        if not unit_id:
+            errors.append(f"{source_label}: /unit: Missing required unit id attribute on <unit>.")
+
+        questions = root.findall("question")
+        if not questions:
+            errors.append(f"{source_label}: /unit: A unit XML should contain at least one <question> element.")
+            return errors, warnings
+
+        seen_qtags: set[str] = set()
+        supported_tools = {"web_search"}
+
+        for index, question in enumerate(questions, start=1):
+            qtag = (question.get("qtag") or "").strip() or f"question[{index}]"
+            question_path = cls._question_path(qtag)
+
+            if qtag in seen_qtags:
+                errors.append(f"{source_label}: {question_path}: Duplicate qtag '{qtag}'.")
+            seen_qtags.add(qtag)
+
+            question_text = (question.findtext("question_text") or "").strip()
+            if not question_text:
+                errors.append(f"{source_label}: {question_path}: Missing or empty <question_text>.")
+
+            solution = (question.findtext("solution") or "").strip()
+            if not solution:
+                errors.append(f"{source_label}: {question_path}: Missing or empty <solution>.")
+
+            partial_credit_text = (question.findtext("partial_credit") or "").strip().lower()
+            partial_credit = partial_credit_text == "true"
+            if partial_credit_text and partial_credit_text not in {"true", "false"}:
+                errors.append(f"{source_label}: {question_path}: <partial_credit> must be 'true' or 'false'.")
+
+            tool_value = (question.findtext("tool") or "").strip()
+            if tool_value and tool_value not in supported_tools:
+                warnings.append(
+                    f"{source_label}: {question_path}: Unsupported tool '{tool_value}'. The current grader only supports web_search."
+                )
+
+            part_labels = cls._extract_part_labels_for_validation(question)
+            rubric_ids: set[str] = set()
+            rubrics_elem = question.find("rubrics")
+            rubric_items = rubrics_elem.findall("item") if rubrics_elem is not None else []
+
+            for rubric_index, rubric_item in enumerate(rubric_items, start=1):
+                rubric_id = (rubric_item.get("id") or "").strip() or f"rubric[{rubric_index}]"
+                rubric_path = f"{question_path}/rubrics/item[@id='{rubric_id}']"
+
+                if rubric_id in rubric_ids:
+                    errors.append(f"{source_label}: {rubric_path}: Duplicate rubric item id '{rubric_id}'.")
+                rubric_ids.add(rubric_id)
+
+                rubric_part = (rubric_item.get("part") or "").strip()
+                if not rubric_part:
+                    part_elem = rubric_item.find("part")
+                    rubric_part = (part_elem.text or "").strip() if part_elem is not None and part_elem.text else "all"
+
+                if rubric_part != "all" and rubric_part not in part_labels:
+                    errors.append(f"{source_label}: {rubric_path}: References unknown part '{rubric_part}'.")
+
+                if partial_credit:
+                    if rubric_item.get("point_adjustment") is None:
+                        errors.append(
+                            f"{source_label}: {rubric_path}: Partial-credit rubric items should include point_adjustment."
+                        )
+                    if rubric_item.get("condition_type") is not None:
+                        warnings.append(
+                            f"{source_label}: {rubric_path}: condition_type is ignored for partial-credit rubric items."
+                        )
+                    if rubric_item.get("action") is not None:
+                        warnings.append(
+                            f"{source_label}: {rubric_path}: action is ignored for partial-credit rubric items."
+                        )
+                else:
+                    if rubric_item.get("point_adjustment") is not None:
+                        warnings.append(
+                            f"{source_label}: {rubric_path}: point_adjustment is ignored for binary rubric items."
+                        )
+                    condition_type = (rubric_item.get("condition_type") or "").strip().lower()
+                    if condition_type not in {"positive", "negative"}:
+                        warnings.append(
+                            f"{source_label}: {rubric_path}: Binary rubric items should set condition_type to 'positive' or 'negative'."
+                        )
+                    action = (rubric_item.get("action") or "").strip().lower()
+                    if action not in {"fail", "feedback"}:
+                        warnings.append(
+                            f"{source_label}: {rubric_path}: Binary rubric items should set action to 'fail' or 'feedback'."
+                        )
+
+            rubric_total = (question.findtext("rubric_total") or "").strip()
+            if rubric_total and not rubric_items:
+                warnings.append(f"{source_label}: {question_path}: rubric_total is ignored when there are no rubric items.")
+            if rubric_total and not partial_credit:
+                warnings.append(f"{source_label}: {question_path}: rubric_total is ignored on non-partial-credit questions.")
+
+            if rubrics_elem is not None:
+                for group_index, group_elem in enumerate(rubrics_elem.findall("group"), start=1):
+                    group_path = f"{question_path}/rubrics/group[{group_index}]"
+                    group_type = (group_elem.get("type") or "").strip()
+                    if group_type != "one_of":
+                        warnings.append(
+                            f"{source_label}: {group_path}: Unsupported group type '{group_type or '(missing)'}'; only one_of is supported."
+                        )
+                        continue
+
+                    valid_ids: list[str] = []
+                    seen_group_ids: set[str] = set()
+                    for child in group_elem.findall("id"):
+                        child_id = (child.text or "").strip()
+                        if not child_id:
+                            warnings.append(f"{source_label}: {group_path}: Empty rubric group id is ignored.")
+                            continue
+                        if child_id in seen_group_ids:
+                            warnings.append(
+                                f"{source_label}: {group_path}: Duplicate rubric group id '{child_id}' is ignored."
+                            )
+                            continue
+                        seen_group_ids.add(child_id)
+                        if child_id not in rubric_ids:
+                            warnings.append(
+                                f"{source_label}: {group_path}: Unknown rubric id '{child_id}' is ignored."
+                            )
+                            continue
+                        valid_ids.append(child_id)
+
+                    if len(valid_ids) < 2:
+                        warnings.append(
+                            f"{source_label}: {group_path}: one_of groups should contain at least two valid rubric ids."
+                        )
+
+            if workspace_root:
+                warnings.extend(
+                    cls._warn_pkg_asset_references_for_validation(
+                        question,
+                        question_path=question_path,
+                        source_label=source_label,
+                        workspace_root=workspace_root,
+                    )
+                )
+
+        return errors, warnings
+
+    @staticmethod
+    def _extract_part_labels_for_validation(question: ET.Element) -> set[str]:
+        part_labels: set[str] = set()
+        parts_elem = question.find("parts")
+        if parts_elem is None:
+            return part_labels
+
+        for part_elem in parts_elem.findall("part"):
+            part_label = (part_elem.findtext("part_label") or "").strip()
+            if not part_label:
+                part_label = (part_elem.get("id") or "").strip() or "all"
+            part_labels.add(part_label)
+
+        return part_labels
+
+    @staticmethod
+    def _warn_pkg_asset_references_for_validation(
+        question: ET.Element,
+        *,
+        question_path: str,
+        source_label: str,
+        workspace_root: str,
+    ) -> list[str]:
+        warnings: list[str] = []
+        root = Path(workspace_root).expanduser().resolve()
+        if not root.exists():
+            return warnings
+
+        for elem_name in ["question_text", "solution"]:
+            elem = question.find(elem_name)
+            text = ET.tostring(elem, encoding="unicode") if elem is not None else ""
+            if "/pkg_assets/" in text:
+                config_path = root / "llmgrader_config.xml"
+                if not config_path.exists():
+                    warnings.append(
+                        f"{source_label}: {question_path}: Found /pkg_assets/ reference in <{elem_name}> but no llmgrader_config.xml exists under the workspace root for cross-checking."
+                    )
+        return warnings
 
     @classmethod
     def validate_course_package_config(cls, config_path: str) -> list[str]:

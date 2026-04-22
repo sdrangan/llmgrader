@@ -4,11 +4,11 @@ This repository includes a minimal MCP server for `llmgrader_config.xml` and uni
 
 ## What it provides
 
-- `llmgrader_explain_config`: quick authoring guidance
+- `llmgrader_get_llmgrader_config_structure`: nested guidance for the llmgrader_config.xml element tree and authoring constraints
 - `llmgrader_create_config_skeleton`: generate a skeleton XML from structured inputs
 - `llmgrader_validate_config_xml`: validate XML shape and destination-path rules
 - `llmgrader_scan_repo_for_config_inputs`: scan a workspace for likely unit XML / asset dirs
-- `llmgrader_explain_unit_xml`: quick guidance for authoring a unit XML file
+- `llmgrader_get_unit_xml_structure`: nested guidance for the unit XML element tree and authoring constraints
 - `llmgrader_explain_rubric_rules`: quick guidance for binary and partial-credit rubrics
 - `llmgrader_create_unit_xml_skeleton`: generate a starter unit XML from structured inputs
 - `llmgrader_validate_unit_xml`: validate unit XML structure and common rubric issues

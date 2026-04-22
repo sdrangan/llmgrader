@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from llmgrader.mcp.server import (
+from llmgrader.mcp.config_xml_tools import (
     create_config_skeleton,
     scan_repo_for_config_inputs,
     validate_config_xml,

@@ -1,9 +1,9 @@
 from pathlib import Path
 import shutil
 
-from llmgrader.mcp.server import (
+from llmgrader.mcp.config_xml_tools import (
     create_config_skeleton,
-    explain_config,
+    get_llmgrader_config_structure,
     scan_repo_for_config_inputs,
     validate_config_xml,
 )
@@ -22,13 +22,13 @@ def _copy_fixture_repo(tmp_path: Path, fixture_name: str) -> Path:
 def test_blind_empty_repo_guidance(tmp_path: Path) -> None:
     _copy_fixture_repo(tmp_path, "empty_course_repo")
 
-    result = explain_config()
+    result = get_llmgrader_config_structure()
 
     assert "llmgrader_config.xml" in result["summary"]
-    assert result["required_sections"]["course"]["required_fields"] == ["name", "term"]
-    assert result["required_sections"]["units"]["required_fields"] == ["name", "source", "destination"]
-    assert result["required_sections"]["units"]["minimum_items"] == 1
-    assert any(rule == "At least one <unit> is required." for rule in result["validation_rules"])
+    assert result["structure"]["llmgrader"]["children"]["course"]["required"] is True
+    assert result["structure"]["llmgrader"]["children"]["units"]["children"]["unit"]["multiple"] is True
+    assert result["structure"]["llmgrader"]["children"]["assets"]["required"] is False
+    assert any(rule == "At least one <unit> is required under <units>." for rule in result["semantic_rules"])
 
 
 def test_blind_probability_repo_scan(tmp_path: Path) -> None:

@@ -52,6 +52,39 @@ def test_validate_unit_file_reports_line_number_for_schema_error() -> None:
     assert "/unit/question/required" in errors[0]
 
 
+def test_validate_unit_file_reports_duplicate_qtag_authoring_error(tmp_path: Path) -> None:
+        unit_path = tmp_path / "unit_duplicate_qtag.xml"
+        unit_path.write_text(
+                """\
+<unit id="fixture_duplicate_qtag">
+    <question qtag="q1">
+        <question_text>Prompt A</question_text>
+        <solution>Solution A</solution>
+        <required>true</required>
+        <partial_credit>false</partial_credit>
+        <parts>
+            <part><part_label>all</part_label><points>1</points></part>
+        </parts>
+    </question>
+    <question qtag="q1">
+        <question_text>Prompt B</question_text>
+        <solution>Solution B</solution>
+        <required>true</required>
+        <partial_credit>false</partial_credit>
+        <parts>
+            <part><part_label>all</part_label><points>1</points></part>
+        </parts>
+    </question>
+</unit>
+""",
+                encoding="utf-8",
+        )
+
+        errors = UnitParser.validate_unit_file(str(unit_path))
+
+        assert any("Duplicate qtag 'q1'" in error for error in errors)
+
+
 def test_parse_matches_expected_snapshot_for_valid_package(tmp_path: Path) -> None:
     _stage_package(tmp_path, "config_good.xml")
 

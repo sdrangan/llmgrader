@@ -8,15 +8,17 @@ from typing import Any
 
 from openai import OpenAI
 
-from llmgrader.mcp.server import (
+from llmgrader.mcp.config_xml_tools import (
     create_config_skeleton,
-    explain_config,
-    explain_rubric_rules,
-    explain_unit_xml,
-    create_unit_xml_skeleton,
+    get_llmgrader_config_structure,
     scan_repo_for_config_inputs,
-    scan_repo_for_unit_inputs,
     validate_config_xml,
+)
+from llmgrader.mcp.unit_xml_tools import (
+    create_unit_xml_skeleton,
+    explain_rubric_rules,
+    get_unit_xml_structure,
+    scan_repo_for_unit_inputs,
     validate_unit_xml,
 )
 
@@ -28,11 +30,10 @@ def build_tool_schemas() -> list[dict[str, Any]]:
     return [
         {
             "type": "function",
-            "name": "explain_config",
+            "name": "get_llmgrader_config_structure",
             "description": (
-                "Explain the purpose and required structure of llmgrader_config.xml for "
-                "a first-time user. Use this when the user asks how to create or understand "
-                "the config format."
+                "Return a nested schema object for llmgrader_config.xml, including the "
+                "XML hierarchy, child elements, semantic rules, and example documents."
             ),
             "strict": True,
             "parameters": {
@@ -140,10 +141,10 @@ def build_tool_schemas() -> list[dict[str, Any]]:
         },
         {
             "type": "function",
-            "name": "explain_unit_xml",
+            "name": "get_unit_xml_structure",
             "description": (
-                "Explain the purpose, required structure, and authoring rules for a unit XML file. "
-                "Use this when the user asks how to create a unit XML or how questions, parts, and grading metadata fit together."
+                "Return a nested schema object for the unit XML hierarchy, including element metadata, "
+                "attributes, child elements, text content, semantic rules, and examples."
             ),
             "strict": True,
             "parameters": {
@@ -339,10 +340,10 @@ def resolve_openai_api_key(api_key: str | None = None) -> str:
 
 
 def execute_tool_call(name: str, arguments: dict[str, Any]) -> Any:
-    if name == "explain_config":
-        return explain_config()
-    if name == "explain_unit_xml":
-        return explain_unit_xml()
+    if name == "get_llmgrader_config_structure":
+        return get_llmgrader_config_structure()
+    if name == "get_unit_xml_structure":
+        return get_unit_xml_structure()
     if name == "explain_rubric_rules":
         return explain_rubric_rules()
     if name == "create_config_skeleton":
