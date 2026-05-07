@@ -981,20 +981,22 @@ function buildAdminGradingNotesHtml(question) {
 }
 
 // Admin View: Display selected question with reference solution and grading notes
-// Fixed: Uses q.solution_text (reference solution, not student solution)
-// Fixed: Grading notes formatting preserved via CSS white-space: pre-wrap
 function displayAdminQuestion(unit, qtag) {
-    // Fetch unit data to get question details
-    fetch(`/unit/${unit}`).then(r => r.json()).then(data => {
-        const q = data.items[qtag];
+    Promise.all([
+        fetch(`/unit/${unit}`).then(r => r.json()),
+        fetch(`/unit/${unit}/${qtag}/solution`).then(r => r.json()),
+    ]).then(([unitData, solnData]) => {
+        const q = unitData.items[qtag];
         if (!q) return;
+
+        const fullQ = { ...q, ...solnData };
 
         updateAdminPartialCreditIndicator(q);
 
-        const gradingNotesHtml = buildAdminGradingNotesHtml(q);
+        const gradingNotesHtml = buildAdminGradingNotesHtml(fullQ);
 
         document.getElementById("admin-question-text").innerHTML = q.question_text || "";
-        document.getElementById("admin-solution-text").innerHTML = q.solution || "";
+        document.getElementById("admin-solution-text").innerHTML = fullQ.solution || "";
         document.getElementById("admin-grading-notes").innerHTML = gradingNotesHtml;
 
         // Mirror into mobile panels if on mobile
@@ -1003,7 +1005,7 @@ function displayAdminQuestion(unit, qtag) {
             const ms = document.getElementById("admin-mobile-solution-text");
             const mn = document.getElementById("admin-mobile-grading-notes");
             if (mq) mq.innerHTML = q.question_text || "";
-            if (ms) ms.innerHTML = q.solution || "";
+            if (ms) ms.innerHTML = fullQ.solution || "";
             if (mn) mn.innerHTML = gradingNotesHtml;
         }
 
