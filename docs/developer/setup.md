@@ -30,9 +30,13 @@ MCP setup for developers is installed the same way as it is for regular users;
 see the [instructor-facing guide for MCP setup](../admin/setup/mcp_instructor.md).
 
 In practice, that means you should install `llmgrader` into the environment you
-want VS Code to use for MCP, and then start VS Code from that environment.
+want VS Code to use for MCP and then run:
 
-If you keep your virtual environment outside the repo on Windows, set
-`LLMGRADER_MCP_PYTHON` or `LLMGRADER_MCP_VENV` before starting VS Code so the
-checked-in MCP launcher uses the correct interpreter.
+```bash
+llmgrader_mcp_setup --workspace .
+```
+
+If you are working inside this source repository, the generated `.vscode/mcp.json`
+will contain an interpreter-specific absolute path, so treat it as a local
+workspace override rather than something to commit.
 

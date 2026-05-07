@@ -77,19 +77,13 @@ python -m venv .venv
 
 ### 2. Make sure VS Code can find the Python interpreter
 
-This repository includes a workspace MCP configuration in `.vscode/mcp.json`. If your Python environment is not in `.venv`, set one of the following environment variables before starting VS Code:
+After activating the environment where `llmgrader` is installed, run:
 
 ```powershell
-$env:LLMGRADER_MCP_PYTHON = 'C:\path\to\python.exe'
+llmgrader_mcp_setup --workspace .
 ```
 
-or
-
-```powershell
-$env:LLMGRADER_MCP_VENV = 'C:\path\to\your-venv'
-```
-
-If you set these after VS Code is already open, restart VS Code so the MCP host picks them up.
+This writes `.vscode/mcp.json` with the full path to the interpreter that ran the setup command. If `.vscode/mcp.json` already exists, rerun the command with `--force` to replace it.
 
 ### 3. Open the repository in VS Code and use Copilot Chat
 

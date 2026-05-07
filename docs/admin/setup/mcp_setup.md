@@ -7,154 +7,64 @@ has_children: false
 
 # Setting up The MCP Server
 
-## Overview 
+## Overview
 
-As described in the [instructor guide](../buildcourse/agent.md), LLM grader is being designed with agentic assitance to help instructors build course content.  To use this facility, you will ahve to set up the **model context protocol** or MCP server.  
+As described in the [instructor guide](../buildcourse/agent.md), LLM grader is being designed with agentic assistance to help instructors build course content. To use this facility, you will have to set up the **model context protocol** or MCP server. For now the setup is designed for users in VS Code. The process can be adapted for other IDEs such as Claude Code.
 
 ## Instructor Set-Up
 
-The simplest setup is:
+To set up the MCP server on VS Code, first follow the [instructions](./python.md) to create and activate a virtual environment, then install `llmgrader` into that environment. You can install from a cloned `llmgrader` repository or from a published package source, as long as the environment you activate contains `llmgrader`.
 
-- Follow the instructions for installing the LLM grader python package and [create a virtual environment](./python.md)
-- Start VS Code from that activated environment.
-As mentioned in the [editor section](./editor.md), VS Code is the currently the preferred IDE for LLM grader, although other platforms may be considered in the future.
+Independent of where the virtual environment is installed, navigate to the root folder of the repository where you wish to work:
 
-After VS Code is open, you will need to configure the `.vscode/mcp.json` in your course repo to run `llmgrader_mcp_server`.  The configuration depends on the OS:
+- If you are an instructor working in a repository with your class material, say `calculus_soln`, navigate to that repository;
+- If you are an LLM grader developer working on the `llmgrader` repository itself, navigate to the root of the `llmgrader` repository.
 
-## Windows Setup
-
-From PowerShell in your course repository:
-
-```powershell
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-pip install llmgrader
-code .
-```
-
-Then create `.vscode/mcp.json` with:
-
-```json
-{
-  "servers": {
-    "llmgrader": {
-      "type": "stdio",
-      "command": "llmgrader_mcp_server"
-    }
-  }
-}
-```
-
-If you are testing changes from a local clone of `llmgrader`, install from that
-clone instead:
-
-```powershell
-pip install -e <path-to-llmgrader>
-```
-
-## Linux or macOS Setup
-
-From a shell in your course repository:
+From there run:
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install llmgrader
+llmgrader_mcp_setup --workspace .
+```
+
+The function will copy a file, `.vscode/mcp.json` to the repostitory root that VS Code uses a configuration file for the MCP server.  If `.vscode/mcp.json` already exists, rerun the command with `--force` to replace it:
+
+```bash
+llmgrader_mcp_setup --workspace . --force
+```
+
+The setup command discovers its own interpreter path, verifies that `llmgrader.mcp.server` can be imported from that interpreter, and then writes `.vscode/mcp.json` for the workspace.
+
+In most cases this command only needs to be run once per workspace. If you later recreate or move the virtual environment, rerun `llmgrader_mcp_setup --workspace .` so `.vscode/mcp.json` points to the new interpreter path.
+
+After the command is run, you can launch VS Code from the command line:
+
+```bash
 code .
 ```
 
-Then create `.vscode/mcp.json` with:
+## Testing the MCP Server is Running
 
-```json
-{
-  "servers": {
-    "llmgrader": {
-      "type": "stdio",
-      "command": "llmgrader_mcp_server"
-    }
-  }
-}
-```
+The simplest way to confirm that the MCP server is running is:
 
-If `llmgrader_mcp_server` is not found, VS Code probably did not inherit the
-virtual environment `PATH`. In that case, close VS Code, activate the
-environment in a fresh shell, and start VS Code again from that shell with
-`code .`.
-
-## Optional Windows Environment Variable Override
-
-If the virtual environment is in the folder as the repo you are working on, the path to python with `llmgrader` and the other dependencies installed should be found.  However, if you prefer to keep your virtual environment outside the course repo
-and want an explicit local override, you can set one of these Windows
-environment variables before starting VS Code:
-
-```powershell
-$env:LLMGRADER_MCP_PYTHON = "C:\path\to\python.exe"
-```
-
-or:
-
-```powershell
-$env:LLMGRADER_MCP_VENV = "C:\path\to\your-venv"
-```
-
-
-These variables are useful only if your local MCP launch path actually uses a
-wrapper that reads them. They do not affect the plain
-`"command": "llmgrader_mcp_server"` setup by themselves.
-
-If you set one of these variables in a PowerShell session, start VS Code from
-that same session:
-
-```powershell
-code .
-```
-
-If you persist the variable with Windows system settings or `setx`.  For example,
-
-```powershell
-setx LLMGRADER_MCP_PYTHON "C:\path\to\python.exe"
-```
-
-Then, fully close and reopen VS Code so the MCP host inherits the new environment.
-
-## When `llmgrader_mcp_server` Works
-
-This command-based setup works when all of the following are true:
-
-- `llmgrader` is installed in the environment you want to use
-- the environment also contains the `mcp` dependency
-- VS Code inherited the `PATH` from that environment
-
-For most users, starting VS Code from the activated virtual environment is the
-important step.
-
-## Restarting the MCP Server
-
-After changing `mcp.json` or reinstalling packages, restart the server in VS
-Code:
-
-1. Open the Command Palette.
+1. In VS Code, Open the Command Palette.
 2. Run `MCP: List Servers`.
 3. Select `llmgrader`.
 4. Choose `Restart`, or `Stop` and then `Start`.
 
-You usually do not need to close and reopen VS Code unless you changed the
-environment after VS Code was already open.
+After changing `mcp.json` or reinstalling packages, you can also use the above procedure to restart the server in VS Code:
+
+You usually do not need to close and reopen VS Code unless you changed the environment after VS Code was already open.
 
 ## Troubleshooting
 
-- If you see `No module named mcp`, the interpreter used by VS Code does not
-  have the `mcp` package installed.
-- If you see `llmgrader_mcp_server` not found, VS Code is not using the virtual
-  environment where `llmgrader` was installed.
-- If the server looks stuck after you start it manually in a normal terminal,
-  that is expected for a stdio MCP server waiting for VS Code to connect.
+- If you see `No module named mcp`, the interpreter used by VS Code does not have the `mcp` package installed.
+- If `llmgrader_mcp_setup` fails, make sure you activated the intended environment before running it and that `pip install llmgrader` or `pip install -e <path-to-llmgrader>` completed successfully.
+- If the server looks stuck after you start it manually in a normal terminal, that is expected for a stdio MCP server waiting for VS Code to connect.
 
 ## Typical Copilot Usage
 
-Once the server is running, useful prompts include:
+Once the server is running, useful prompts in CoPilot chat include:
 
 - Explain how to create `llmgrader_config.xml`
-- Scan this repo for likely config inputs
-- Create a skeleton `llmgrader_config.xml` for this course
-- Validate this `llmgrader_config.xml` against the workspace
+- Create a unit on chain rule and write a simple problem on taking the derivative of `x*e^{-x}`.
+

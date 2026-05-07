@@ -84,9 +84,7 @@ build/
 # IDE/editor settings
 .vscode/
 .idea/
-!.vscode/
 .vscode/*
-!.vscode/mcp.json
 
 # OS-specific
 .DS_Store
@@ -167,6 +165,9 @@ scratch/
 # Questions directory
 soln_repo/
 local_test/
+
+# MCP files
+!**/mcp/resources/*.json
 
 # Allow test fixtures even though *.json and *.xml are ignored
 !tests/fixtures/**/*.json

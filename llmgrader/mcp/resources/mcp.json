@@ -1,0 +1,9 @@
+{
+  "servers": {
+    "llmgrader": {
+      "type": "stdio",
+      "command": "__LLMGRADER_PYTHON__",
+      "args": ["-m", "llmgrader.mcp.server"]
+    }
+  }
+}

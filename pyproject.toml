@@ -20,7 +20,7 @@ build-backend = "setuptools.build_meta"
 include = ["llmgrader*"]
 
 [tool.setuptools.package-data]
-llmgrader = ["schemas/*.xsd"]
+llmgrader = ["schemas/*.xsd", "mcp/resources/*.json"]
 
 [project.scripts]
 create_grading_json = "llmgrader.utils.create_grading_json:main"
@@ -28,4 +28,5 @@ build_autograder = "llmgrader.scripts.build_autograder:main"
 create_qfile = "llmgrader.scripts.create_qfile:main"
 create_soln_pkg = "llmgrader.scripts.create_soln_pkg:main"
 llmgrader_env_vars = "llmgrader.scripts.llmgrader_env_vars:main"
+llmgrader_mcp_setup = "llmgrader.scripts.llmgrader_mcp_setup:main"
 llmgrader_mcp_server = "llmgrader.mcp.server:main"

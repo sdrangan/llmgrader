@@ -1,0 +1,1 @@
+"""Packaged resources for MCP setup."""

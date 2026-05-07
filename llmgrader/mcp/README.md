@@ -29,33 +29,21 @@ llmgrader_mcp_server
 
 ## VS Code MCP wiring
 
-An example workspace config is provided at:
+For workspaces outside this source repository, the recommended setup is:
+
+```bash
+llmgrader_mcp_setup --workspace .
+```
+
+The setup command:
+
+- uses the Python interpreter running `llmgrader_mcp_setup`
+- verifies that `llmgrader.mcp.server` can be imported from that interpreter
+- writes `.vscode/mcp.json` with the full interpreter path embedded in the `command` field
+
+An example workspace config is also provided in this repository at:
 
 - `.vscode/mcp.json`
-
-The checked-in workspace config uses a repo-local launcher script on Windows instead of hardcoding a machine-specific Python path. The launcher tries, in order:
-
-- `LLMGRADER_MCP_PYTHON` if it points to a `python.exe`
-- `LLMGRADER_MCP_VENV` if it points to a virtual environment directory
-- the currently activated virtual environment via `VIRTUAL_ENV`
-- `.venv\\Scripts\\python.exe` under the workspace root
-- `venv\\Scripts\\python.exe` under the workspace root
-- `py -3`
-- `python`
-
-If your virtual environment is outside the repo, set one of these Windows environment variables before starting VS Code:
-
-```powershell
-$env:LLMGRADER_MCP_PYTHON = 'C:\path\to\python.exe'
-```
-
-or
-
-```powershell
-$env:LLMGRADER_MCP_VENV = 'C:\path\to\your-venv'
-```
-
-If you set the variable outside VS Code after VS Code is already open, fully restart VS Code so the MCP host picks up the new environment.
 
 For the most predictable setup, create a repo-local virtual environment and install the project into it:
 
@@ -65,7 +53,7 @@ python -m venv .venv
 .venv\\Scripts\\pip install -e .
 ```
 
-Then open this repo as a workspace, start Copilot Chat with MCP enabled, and call the `llmgrader_*` tools.
+Then run `llmgrader_mcp_setup --workspace .` in the target workspace, open that workspace in VS Code, start Copilot Chat with MCP enabled, and call the `llmgrader_*` tools.
 
 Useful prompts now include:
 
