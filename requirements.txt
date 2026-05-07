@@ -5,5 +5,4 @@ numpy
 requests
 openai
 pydantic>=2,<3
-pandas
 xmlschema>=3,<4
