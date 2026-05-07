@@ -1,0 +1,20 @@
+<llmgrader>
+  <course>
+    <name>Demo Class</name>
+    <semester>Spring 2026</semester>
+  </course>
+
+  <units>
+    <unit>
+      <name>Unit 1:  Calculus Review</name>
+      <source>unit1/calculus.xml</source>
+      <destination>unit1_calculus.xml</destination>
+    </unit>
+
+    <unit>
+      <name>Unit 2:  Python and ML</name>
+      <source>unit2/python.xml</source>
+      <destination>unit2_python.xml</destination>
+    </unit>
+  </units>
+</llmgrader>

@@ -1,0 +1,154 @@
+<unit id="calculus" title="Unit 1:  Calculus Review" version="1.0">
+    
+
+    <question qtag="Exponential derivative" preferred_model="gpt-4.1-mini">
+        <question_text><![CDATA[
+        <p>Compute the derivative of \(y = a^x\) with respect to \(x\). Show your work.</p>
+        ]]></question_text>
+
+        <solution><![CDATA[
+        <p>There are two standard methods.</p>
+
+        <p>One method is to take the natural logarithm of both sides and then differentiate implicitly:</p>
+
+        <p class="math">
+        \[
+            \begin{aligned}
+            &\ln(y) = \ln(a^x) = x\ln(a) \\
+            &\implies \frac{y'}{y} = \ln(a) \\
+            &\implies y' = y\ln(a) = a^x \ln(a)
+            \end{aligned}
+        \]
+        </p>
+
+        <p>A second method is to write \(a^x\) as \(e^{x\ln(a)}\) and then apply the chain rule:</p>
+        \[
+            \begin{aligned}
+            &y = e^{x\ln(a)} \\
+            &y' = e^{x\ln(a)} \cdot \ln(a) = a^x \ln(a)
+            \end{aligned}
+        \]
+        </p>
+        ]]></solution>
+        <partial_credit>false</partial_credit>
+        <required>false</required>
+        <parts>
+             <part>
+                    <part_label>all</part_label>
+                    <points>10</points>
+                </part>
+        </parts>
+        <rubrics>
+            <item id="taking_logarithm" condition_type="positive" action="fail">
+                <display_text>Taking logarithm</display_text>
+                <condition>Student takes the logarithm of both sides to facilitate differentiation, which is a common and valid approach to this problem.</condition>
+                <notes> This rubric can be skipped if the student uses an alternative valid method, such as chain rule.
+                </notes>
+            </item>
+            <item id="exponential_form" condition_type="positive" action="fail">
+                <display_text>Write the function in exponential form</display_text>
+                <condition>Student correctly rewrites the function in terms of the natural exponential function and applies the chain rule to find the derivative.</condition>
+                <notes> This rubric can be skipped if the student uses an alternative valid method, such as taking logarithms.
+                </notes>
+            </item>
+            <item id="polynomial_confusion" condition_type="negative" action="fail">
+                <display_text>Polynomial confusion</display_text>
+                <condition>Student confuses the exponential function with a polynomial function, leading to incorrect differentiation, e.g. $y' = xa^{x-1}$</condition>
+             </item>
+             <item id="final_answer" condition_type="positive" action="fail">
+                <display_text>Final answer</display_text>
+                <condition>Student provides the correct derivative $y' = a^x \ln(a)$.</condition>
+            </item>
+            <group type="one_of">
+                <id>taking_logarithm</id>
+                <id>exponential_form</id>
+            </group>
+        </rubrics>
+        
+    </question>
+
+    <question qtag="Integration by parts" preferred_model="gpt-4.1-mini">
+        <question_text><![CDATA[
+        <p>Use integration by parts to compute the integral of
+        \[
+            \int_{0}^{1} x e^{2x} \, dx
+        \]
+        Show your work.</p>
+        ]]></question_text>
+
+        <solution><![CDATA[
+        <p>We can use integration by parts, which states that:</p>
+        \[
+        \int u \, dv = uv - \int v \, du
+        \]
+
+        <p>Let \(u = x\) and \(dv = e^{2x} dx\). Then we have:</p>
+        \[
+        du = dx \quad \text{and} \quad v = \frac{1}{2} e^{2x}
+        \]
+
+        <p>Applying the integration by parts formula:</p>
+        \[
+        \begin{aligned}
+        \int x e^{2x} dx &= uv - \int v du \\
+                      &= x \cdot \frac{1}{2} e^{2x} - \int \frac{1}{2} e^{2x} dx \\
+                      &= \frac{1}{2} x e^{2x} - \frac{1}{4} e^{2x} + C \\
+                      &= \frac{1}{4} (2x - 1) e^{2x} + C
+        \end{aligned}
+        \]
+        where \(C\) is the constant of integration.
+        <p>Now we can apply the limits of integration:</p>
+        \[
+        \begin{aligned}
+        \int_{0}^{1} x e^{2x} dx &= \left[ \frac{1}{4} (2x - 1) e^{2x} \right]_{0}^{1} \\
+                                &= \frac{1}{4} (2(1) - 1) e^{2(1)} - \frac{1}{4} (2(0) - 1) e^{2(0)} \\
+                                &= \frac{1}{4} (1) e^{2} - \frac{1}{4} (-1) e^{0} \\
+                                &= \frac{e^{2}}{4} + \frac{1}{4} \\
+                                &= \frac{e^{2} + 1}{4} 
+        \end{aligned}
+        \] 
+        ]]></solution>
+        <partial_credit>true</partial_credit>
+        <required>true</required>
+        <parts>
+             <part>
+                <part_label>all</part_label>
+                <points>10</points>
+            </part>
+        </parts>
+        <rubrics>
+            <item id="correct_u_dv" point_adjustment="+3">
+                <display_text>Correct choice of u and dv</display_text>
+                <condition>Student correctly identifies \(u\) and \(dv\) for the integration by parts process.</condition>
+            </item>
+            <item id="correct_du_v" point_adjustment="+3">
+                <display_text>Correct computation of du and v</display_text>
+                <condition>Student correctly computes \(du\) and \(v\) based on their choices of \(u\) and \(dv\).
+                    If they make a minor algebraic error, 
+                    they may still receive partial credit.  For example, if they give
+                    \( v = e^{2x}\), forgetting the factor of \(\frac{1}{2}\), 
+                    they should receive 2 of the 3 points for this item.
+                </condition>
+            </item>
+            <item id="correct_integration_by_parts" point_adjustment="+2">
+                <display_text>Correct application of integration by parts</display_text>
+                <condition>Student correctly applies the integration by parts formula to
+                    compute the integral. Again, if they make a minor algebraic mistakes,
+                    such as forgeting the factor of \(\frac{1}{2}\), they may still receive at least 1 point</condition>
+            </item>
+            <item id="apply_limits" point_adjustment="+2">
+                <display_text>Apply integral limits</display_text>
+                <condition>Student correctly applies the limits of integration to compute the definite integral.
+                If there are minor algebraic errors in this step, they may still receive partial credit.
+                </condition>
+            </item>
+        </rubrics>
+        <rubric_total>sum_positive</rubric_total> <!-- sets score exactly equal to the sum of point adjustments -->
+
+        <grading_notes><![CDATA[
+        - Students may use different variables
+        ]]></grading_notes>
+    </question>
+
+
+</unit>

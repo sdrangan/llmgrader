@@ -1,0 +1,322 @@
+<unit id="demo_unit" title="Demo Unit" version="1.0">
+    <question qtag="Propagation delay" preferred_model="gpt-4.1-mini">
+        <question_text><![CDATA[
+        <p>A signal <code>x</code> has time-value change points:</p>
+        <p><code>(10, 0), (20, 4), (30, 2)</code></p>
+        <p>Time is in nanoseconds. The signal is passed through a circuit that produces <code>y = 2x + 1</code> with a propagation delay of 3 ns. What are the time-value change points of <code>y</code>? Use <code>X</code> for unknown values.</p>
+        ]]></question_text>
+
+        <solution><![CDATA[
+        <p>The change points of <code>y</code> are:</p>
+        <p><code>(10, X), (13, 1), (20, X), (23, 9), (30, X), (33, 5)</code></p>
+        <p>The output is unknown for 3 ns after each input change.</p>
+        ]]></solution>
+
+        <partial_credit>true</partial_credit>
+        <parts>
+             <part>
+                <part_label>all</part_label>
+                <points>10</points>
+            </part>
+        </parts>
+        <rubrics>
+            <item id="correct_values" point_adjustment="3">
+                <display_text>Correct stable values</display_text> 
+                <condition>Student correctly identifies the output values of 1, 9, and 5 corresponding to the input changes at 10 ns, 20 ns, and 30 ns respectively, using the formula y = 2x + 1.  This condition is awarded even if the corresponding times are incorrect or missing.</condition>
+                <part>all</part>
+            </item>
+            <item id="missing_unknowns" point_adjustment="-2">
+                <display_text>Missing unknown intervals</display_text>
+                <condition>Student fails to include the required unknown intervals (X) for the 3 ns propagation delay, or incorrectly substitutes known values during the delay window.
+                For example, if the student lists (10, 1), (20,9), (30, 5) which omits the unknown interval entirely. This would indicate a misunderstanding of the propagation delay and result in a deduction.</condition>
+                <part>all</part>
+            </item>
+        </rubrics>
+        <grading_notes>
+            - Units may be omitted with no loss of points
+            - The student may provide the (time , value) pairs in any format.  For example, they list the times and then list the values.
+            - No explanation is required as long as the correct (time , value) pairs are given.  If the student provides an explanation, it can be used to award partial credit if the answer is not fully correct.  
+        </grading_notes>
+    </question>
+
+
+    <question qtag="Exponential derivative" preferred_model="gpt-4.1-mini">
+        <question_text><![CDATA[
+        <p>Compute the derivative of $y = a^x$ with respect to $x$. Show your work.</p>
+        ]]></question_text>
+
+        <solution><![CDATA[
+        <p>There are two standard methods.</p>
+
+        <p>One method is to take the natural logarithm of both sides and then differentiate implicitly:</p>
+
+        <p class="math">
+        \[
+            \begin{aligned}
+            &\ln(y) = \ln(a^x) = x\ln(a) \\
+            &\implies \frac{y'}{y} = \ln(a) \\
+            &\implies y' = y\ln(a) = a^x \ln(a)
+            \end{aligned}
+        \]
+        </p>
+
+        <p>A second method is to write $a^x$ as $e^{x\ln(a)}$ and then apply the chain rule:</p>
+
+        <p class="math">
+        \[
+            \begin{aligned}
+            &y = e^{x\ln(a)} \\
+            &y' = e^{x\ln(a)} \cdot \ln(a) = a^x \ln(a)
+            \end{aligned}
+        \]
+        </p>
+        ]]></solution>
+        <partial_credit>false</partial_credit>
+        <required>false</required>
+        <parts>
+             <part>
+                    <part_label>all</part_label>
+                    <points>10</points>
+                </part>
+        </parts>
+        <rubrics>
+            <item id="taking_logarithm" condition_type="positive" action="fail">
+                <display_text>Taking logarithm</display_text>
+                <condition>Student takes the logarithm of both sides to facilitate differentiation, which is a common and valid approach to this problem.</condition>
+                <notes> This rubric can be skipped if the student uses an alternative valid method, such as chain rule.
+                </notes>
+            </item>
+            <item id="exponential_form" condition_type="positive" action="fail">
+                <display_text>Write the function in exponential form</display_text>
+                <condition>Student correctly rewrites the function in terms of the natural exponential function and applies the chain rule to find the derivative.</condition>
+                <notes> This rubric can be skipped if the student uses an alternative valid method, such as taking logarithms.
+                </notes>
+            </item>
+            <item id="polynomial_confusion" condition_type="negative" action="fail">
+                <display_text>Polynomial confusion</display_text>
+                <condition>Student confuses the exponential function with a polynomial function, leading to incorrect differentiation, e.g. $y' = xa^{x-1}$</condition>
+             </item>
+             <item id="final_answer" condition_type="positive" action="fail">
+                <display_text>Final answer</display_text>
+                <condition>Student provides the correct derivative $y' = a^x \ln(a)$.</condition>
+            </item>
+            <group type="one_of">
+                <id>taking_logarithm</id>
+                <id>exponential_form</id>
+            </group>
+        </rubrics>
+        
+    </question>
+
+    <question qtag="Integration by parts" preferred_model="gpt-4.1-mini">
+        <question_text><![CDATA[
+        <p>Use integration by parts to compute the integral of
+        \[
+            \int_{0}^{1} x e^{2x} \, dx
+        \]
+        Show your work.</p>
+        ]]></question_text>
+
+        <solution><![CDATA[
+        <p>We can use integration by parts, which states that:</p>
+        \[
+        \int u \, dv = uv - \int v \, du
+        \]
+
+        <p>Let $u = x$ and $dv = e^{2x} dx$. Then we have:</p>
+        \[
+        du = dx \quad \text{and} \quad v = \frac{1}{2} e^{2x}
+        \]
+
+        <p>Applying the integration by parts formula:</p>
+        \[
+        \begin{aligned}
+        \int x e^{2x} dx &= uv - \int v du \\
+                      &= x \cdot \frac{1}{2} e^{2x} - \int \frac{1}{2} e^{2x} dx \\
+                      &= \frac{1}{2} x e^{2x} - \frac{1}{4} e^{2x} + C \\
+                      &= \frac{1}{4} (2x - 1) e^{2x} + C
+        \end{aligned}
+        \]
+        where $C$ is the constant of integration.
+        ]]></solution>
+        <partial_credit>true</partial_credit>
+        <required>true</required>
+        <parts>
+             <part>
+                <part_label>all</part_label>
+                <points>10</points>
+            </part>
+        </parts>
+        <rubrics>
+            <item id="correct_u_dv" point_adjustment="+3">
+                <display_text>Correct choice of u and dv</display_text>
+                <condition>Student correctly identifies $u$ and $dv$ for the integration by parts process.</condition>
+            </item>
+            <item id="correct_du_v" point_adjustment="+3">
+                <display_text>Correct computation of du and v</display_text>
+                <condition>Student correctly computes $du$ and $v$ based on their choices of $u$ and $dv$.
+                    If they make a minor algebraic error, 
+                    they may still receive partial credit.  For example, if they give
+                    \( v = e^{2x}\), forgetting the factor of \(\frac{1}{2}\), 
+                    they should receive 2 of the 3 points for this item.
+                </condition>
+            </item>
+            <item id="correct_integration_by_parts" point_adjustment="+2">
+                <display_text>Correct application of integration by parts</display_text>
+                <condition>Student correctly applies the integration by parts formula to
+                    compute the integral. Again, if they make a minor algebraic mistakes,
+                    such as forgeting the factor of \(\frac{1}{2}\), they may still receive at least 1 point</condition>
+            </item>
+            <item id="apply_limits" point_adjustment="+2">
+                <display_text>Apply integral limits</display_text>
+                <condition>Student correctly applies the limits of integration to compute the definite integral.
+                If there are minor algebraic errors in this step, they may still receive partial credit.
+                </condition>
+            </item>
+        </rubrics>
+        <rubric_total>sum_positive</rubric_total> <!-- sets score exactly equal to the sum of point adjustments -->
+
+        <grading_notes><![CDATA[
+        - Students may use different variables
+        ]]></grading_notes>
+    </question>
+
+
+    <question qtag="ode_solver" preferred_model="gpt-5.4-mini">
+        <question_text><![CDATA[
+        <p>Write a Python function that implements a first-order Euler solution to the ODE:
+        \[
+        \frac{dx}{dt} = -a\,x(t) + b\,x(t)^2
+        \]
+        </p>
+
+        <p>
+            The function should take the initial condition, the parameters, the time step,
+            and the number of steps. It should return the full trajectory of \(x(t)\) as
+            an <code>ndarray</code>.
+        </p>
+        ]]></question_text>
+
+        <solution><![CDATA[
+        <p>One correct solution is:</p>
+
+        <pre><code>def sim(x0, a, b, tstep, nsteps):
+        x = np.zeros(nsteps + 1)
+        x[0] = x0
+        for i in range(nsteps):
+            f = -a * x[i] + b * x[i] ** 2
+            x[i + 1] = x[i] + tstep * f
+        return x</code></pre>
+        ]]></solution>
+
+        <partial_credit>true</partial_credit>
+        <required>false</required>
+        <parts>
+            <part>
+                <part_label>all</part_label>
+                <points>10</points>
+            </part>
+        </parts>
+
+        <rubrics>
+            <item id="arguments" part="all" point_adjustment="+4">
+                <display_text>Complete function interface</display_text>
+                <condition>Student includes the initial condition, model parameters, time step, and number of steps as inputs.</condition>
+                <notes>Different variable names, argument order, and omission of type hints are acceptable.</notes>
+            </item>
+
+            <item id="correct_update" part="all" point_adjustment="+4">
+                <display_text>Correct Euler update</display_text>
+                <condition>Student implements the mathematically correct Euler step for the given ODE.</condition>
+                <notes>Any equivalent implementation of the same update should receive this credit.</notes>
+            </item>
+
+            <item id="returns_array" part="all" point_adjustment="+2">
+                <display_text>Returns the full trajectory as an ndarray</display_text>
+                <condition>Student returns an array containing all iterates, not only the final value.  If returning a list, award only 1 point.</condition>
+            </item>
+            <item id="syntax_incorrect" part="all" point_adjustment="-2">
+                <display_text>Minor Python syntax errors</display_text>
+                <condition>Student's solution has minor Python syntax errors that do not obscure the intended algorithm. </condition>
+            </item>
+        </rubrics>
+        <rubric_total>sum_positive</rubric_total> <!-- sets score exactly equal to the sum of point adjustments -->
+
+        <grading_notes><![CDATA[
+        Any mathematically correct Euler implementation that satisfies the specification should receive full credit.
+        Do not require the exact variable names used in the reference solution.
+        If the student omits an explicit NumPy import but the intended use of ndarray is otherwise clear, do not penalize that separately.
+        ]]></grading_notes>
+    </question>
+    
+    <question qtag="regression" preferred_model="gpt-4.1-mini">
+        <question_text><![CDATA[
+        <p>Consider a logistic regression model for binary classification with a scalar feature \(x\) and parameters \(w\) and \(b\):
+        \[
+        p = Pr(y=1|x) = \sigma(wx + b) = \frac{1}{1 + e^{-(wx + b)}}
+        \]
+        </p>
+
+        <ol type="a">
+            <li>Find the \(w\) and \(b\) that \(p=0.5\) when \(x=0\) and \(p=0.8\) when \(x=1\). </li>
+            <li>What is the value of \(p\) when \(x=0.5\) using the parameters found in part (a)?</li>
+        </ol>
+
+        ]]></question_text>
+
+        <solution><![CDATA[
+        <p>a) To find \(w\) and \(b\), we can set up the equations based on the given conditions:  Let \(z = wx + b\).</p>
+        <p>When \(x=0\), \(p=0.5 \implies z = 0 \implies b = 0\).</p>
+        <p>When \(x=1\), \(p=0.8 \implies z = \ln\left(\frac{0.8}{0.2}\right) \implies w = \ln(4) \approx 1.386\).</p>
+        <p>b) Using the parameters found in part (a), when \(x=0.5\), \(p = \sigma(1.386 \cdot 0.5 + 0) \approx 0.667\).</p>
+
+        ]]></solution>
+        <parts>
+            <part>
+                <part_label>a</part_label>
+                <points>5</points>
+            </part>
+            <part>
+                <part_label>b</part_label>
+                <points>5</points>
+            </part>
+        </parts>
+
+        <partial_credit>true</partial_credit>
+        <required>false</required>
+       
+
+        <rubrics>
+            <item id="linear_system" part="a" point_adjustment="+3">
+                <display_text>Linear system of equations</display_text>
+                <condition>Correctly identified that the problem can be solved by setting up a linear system of equations based on the given conditions.</condition>
+                <notes>Simply writing the equations without solving them is sufficient for the full point award credit.</notes>
+            </item>
+
+            <item id="solution_param" part="a" point_adjustment="+2">
+                <display_text>Correct solution</display_text>
+                <condition>Student implements the mathematically correct solution for the given problem.</condition>
+                <notes>No work needs to be shown if the final answer is correct. If the solution is correct except for minor errors, award 1 point.</notes>
+            </item>
+
+            <item id="solution_prob" part="b" point_adjustment="+5">
+                <display_text>Correct probability calculation</display_text>
+                <condition>Student correctly calculates the probability for the given input using the parameters found in part (a).  Partial credit if the 
+                calculation is set up correctly but the final numerical answer is incorrect.</condition>
+            </item>
+
+            <item id="algebraic_mistakes" part="b" point_adjustment="-2">
+                <display_text>Minor algebraic mistakes</display_text>
+                <condition>Student's solution has minor algebraic mistakes that do not obscure the intended solution.  Do not apply this condition if the error was already considered in another rubric item.</condition>
+            </item>
+        </rubrics>
+        <rubric_total>sum_positive</rubric_total> <!-- sets score exactly equal to the sum of point adjustments -->
+
+        <grading_notes><![CDATA[
+        Any mathematically correct solution that satisfies the specification should receive full credit.
+        ]]></grading_notes>
+    </question>
+    
+
+   
+</unit>
