@@ -553,6 +553,11 @@ class APIController:
                 "validation_alert": getattr(self.grader, 'unit_validation_alert', None),
             })
 
+        STUDENT_EXCLUDED_FIELDS = {"solution", "solution_images", "grading_notes"}
+
+        def _strip_solution_fields(question: dict) -> dict:
+            return {k: v for k, v in question.items() if k not in STUDENT_EXCLUDED_FIELDS}
+
         @bp.get("/unit/<unit_name>")
         def unit(unit_name):
             units = self.grader.units
@@ -561,11 +566,28 @@ class APIController:
                 return jsonify({"error": "Unknown unit"}), 404
 
             u = units[unit_name]   # dict keyed by qtag
+            sanitized = {qtag: _strip_solution_fields(q) for qtag, q in u.items()}
 
             return jsonify({
                 "unit": unit_name,
                 "qtags": list(u.keys()),
-                "items": u
+                "items": sanitized
+            })
+
+        @bp.get("/unit/<unit_name>/<qtag>/solution")
+        @self.require_admin
+        def unit_solution(unit_name, qtag):
+            units = self.grader.units
+            if unit_name not in units:
+                return jsonify({"error": "Unknown unit"}), 404
+            u = units[unit_name]
+            if qtag not in u:
+                return jsonify({"error": "Unknown qtag"}), 404
+            q = u[qtag]
+            return jsonify({
+                "solution": q.get("solution", ""),
+                "solution_images": q.get("solution_images", []),
+                "grading_notes": q.get("grading_notes", ""),
             })
 
         @bp.post("/grade")
