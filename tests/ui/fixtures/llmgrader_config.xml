@@ -1,0 +1,13 @@
+<llmgrader>
+  <course>
+    <name>UI Test Course</name>
+    <term>Spring 2026</term>
+  </course>
+  <units>
+    <unit>
+      <name>Test Unit</name>
+      <source>test_unit.xml</source>
+      <destination>test_unit.xml</destination>
+    </unit>
+  </units>
+</llmgrader>

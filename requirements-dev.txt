@@ -87,6 +87,9 @@ pathspec
 pillow
 platformdirs
 playwright
+pytest-flask
+pytest-mock
+pytest-playwright
 pluggy
 prometheus_client
 prompt_toolkit

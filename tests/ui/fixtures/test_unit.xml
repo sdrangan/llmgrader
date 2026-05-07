@@ -1,0 +1,27 @@
+<unit id="test_unit" title="Test Unit" version="1.0">
+  <question qtag="q1" preferred_model="gpt-4.1-mini">
+    <question_text><![CDATA[
+    <p>What is 2 + 2?</p>
+    ]]></question_text>
+    <solution><![CDATA[
+    <p>The answer is 4.</p>
+    ]]></solution>
+    <grading_notes><![CDATA[
+    Accept any correct answer.
+    ]]></grading_notes>
+    <required>true</required>
+    <partial_credit>false</partial_credit>
+    <rubrics>
+      <item id="correct_answer" condition_type="positive" action="fail">
+        <display_text>Correct answer</display_text>
+        <condition>Student provides the correct answer of 4.</condition>
+      </item>
+    </rubrics>
+    <parts>
+      <part>
+        <part_label>all</part_label>
+        <points>1</points>
+      </part>
+    </parts>
+  </question>
+</unit>
