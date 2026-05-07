@@ -80,6 +80,22 @@ rmdir /s /q ci-test-env   # Windows
 # rm -rf ci-test-env       # macOS / Linux
 ```
 
+## UI Tests
+
+The UI test suite (`tests/ui/`) drives a real Chromium browser using Playwright and is excluded from the standard test run for speed. CI does not run these tests, but developers are encouraged to run them locally before merging changes that touch the frontend.
+
+Install the browser once:
+
+```bash
+playwright install chromium
+```
+
+Then run the suite:
+
+```bash
+pytest tests/ui/ -v
+```
+
 ---
 
 ## CI/CD in GitHub
