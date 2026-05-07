@@ -189,3 +189,7 @@ local_data/
 
 # Experiment directory
 experiment/
+
+# Test environment directory
+*-test-env/
+

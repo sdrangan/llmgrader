@@ -9,7 +9,10 @@ dependencies = [
     "flask",
     "xmlschema>=3,<4",
     "mcp>=1.27.0,<2",
-    "openai>=2,<3"
+    "openai>=2,<3",
+    "pydantic>=2,<3",
+    "pandas",
+    "requests"
 ]
 
 [build-system]
