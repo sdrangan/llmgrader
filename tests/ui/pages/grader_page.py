@@ -40,7 +40,18 @@ class GraderPage:
         )
 
     def wait_for_grade_view(self, timeout: int = 10_000) -> None:
-        """Wait until the dynamically loaded grade view is ready."""
+        """Wait until the dynamically loaded grade view is ready.
+
+        On mobile viewports the composer lives inside a tab panel that starts
+        hidden.  We click the Solution tab so grade_button / student_solution
+        become visible, matching the normal user flow.
+        """
+        self.grade_button.wait_for(state="attached", timeout=timeout)
+        mobile_solution_tab = self._page.locator(
+            ".mobile-tabs button[data-panel='solution']"
+        )
+        if mobile_solution_tab.is_visible():
+            mobile_solution_tab.click()
         self.grade_button.wait_for(state="visible", timeout=timeout)
         self.student_solution.wait_for(state="visible", timeout=timeout)
 
