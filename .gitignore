@@ -168,10 +168,14 @@ local_test/
 
 # MCP files
 !**/mcp/resources/*.json
+!llmgrader/mcp/examples/*.xml
 
 # Allow test fixtures even though *.json and *.xml are ignored
 !tests/fixtures/**/*.json
 !tests/fixtures/**/*.xml
+
+# Allow soln_repos XML files (demo/test course content)
+!soln_repos/*.xml
 
 # Remove the HTML and PDF files generated from the example files
 example_repo/**/*.html
