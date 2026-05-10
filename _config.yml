@@ -10,6 +10,7 @@ search_enabled: true
 exclude:
   - tests/fixtures
   - llmgrader/mcp
+  - CLAUDE.md
 
 # Markdown options
 markdown: kramdown
