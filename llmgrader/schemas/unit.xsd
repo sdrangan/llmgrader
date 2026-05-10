@@ -98,6 +98,7 @@
   <xs:element name="unit">
     <xs:complexType>
       <xs:sequence>
+        <xs:element name="digitalsign" type="trueFalseEnum" minOccurs="0"/>
         <xs:element name="question" type="questionType" minOccurs="0" maxOccurs="unbounded"/>
       </xs:sequence>
       <xs:attribute name="id" type="xs:string" use="optional"/>

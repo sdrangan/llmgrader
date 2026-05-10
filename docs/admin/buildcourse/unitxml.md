@@ -194,6 +194,32 @@ Use `false` for questions that should remain available in the unit but should no
 
 ---
 
+## 🔏 `<digitalsign>` Element (Optional)
+
+Controls whether the submission file downloaded by the student is digitally signed by the server.
+
+Example:
+
+```xml
+<digitalsign>true</digitalsign>
+```
+
+Allowed values:
+
+- `true` — the server signs each submission with the configured private key; the Gradescope autograder verifies the signature before accepting the file
+- `false` — no signing is performed (default)
+
+If omitted, the default is `false`.
+
+Setting this to `true` requires that:
+
+- `LLMGRADER_PRIVATE_KEY` is set as an environment variable on Render
+- `LLMGRADER_PUBLIC_KEY` is set in the local environment where `build_autograder` is run
+
+See [Submission Signing Keys](../gskeys.md) for setup instructions.
+
+---
+
 ## 🔧 `<tool>` Element (Optional)
 
 Requests a built-in tool for the LLM grader when grading this question.

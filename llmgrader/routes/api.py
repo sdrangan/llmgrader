@@ -6,6 +6,7 @@ import secrets
 import re
 import threading
 import time
+import uuid
 from functools import wraps
 from urllib.parse import urlencode
 from flask import Blueprint, request, jsonify
@@ -348,7 +349,7 @@ class APIController:
                 api_key=job["api_key"],
                 timeout=job["timeout"],
                 solution_images=job["solution_images"],
-                user_email=job["user_email"],
+                session_id=job["session_id"],
             )
         except Exception as exc:
             with self.grade_job_lock:
@@ -421,6 +422,11 @@ class APIController:
     def register(self, app):
         self.ensure_auth_tables()
         bp = Blueprint("api", __name__)
+
+        @bp.before_request
+        def ensure_session_id():
+            if "session_id" not in session:
+                session["session_id"] = uuid.uuid4().hex[:8]
 
         @bp.get("/")
         def home():
@@ -568,10 +574,12 @@ class APIController:
             u = units[unit_name]   # dict keyed by qtag
             sanitized = {qtag: _strip_solution_fields(q) for qtag, q in u.items()}
 
+            meta = self.grader.unit_metadata.get(unit_name, {})
             return jsonify({
                 "unit": unit_name,
                 "qtags": list(u.keys()),
-                "items": sanitized
+                "items": sanitized,
+                "digitalsign": meta.get("digitalsign", False),
             })
 
         @bp.get("/unit/<unit_name>/<qtag>/solution")
@@ -594,8 +602,7 @@ class APIController:
         @bp.post("/grade/jobs")
         def start_grade_job():
             data = request.get_json(silent=True) or {}
-            current_user = self.current_user()
-            user_email = self.normalize_email(current_user.get("email")) if current_user else None
+            session_id = session.get("session_id")
 
             unit = data.get("unit")
             qtag = data.get("qtag")
@@ -656,7 +663,7 @@ class APIController:
                     "api_key": api_key,
                     "timeout": timeout_seconds,
                     "solution_images": solution_images,
-                    "user_email": user_email,
+                    "session_id": session_id,
                     "tools": tools,
                 }
                 self.grade_jobs[job_id] = job
@@ -1014,5 +1021,28 @@ class APIController:
                 return {"error": "Invalid filename"}, 400
             images_dir = self.grader.get_soln_images_path()
             return send_from_directory(images_dir, filename)
+
+        @bp.post("/api/sign/<unit_name>")
+        def sign_submission(unit_name):
+            meta = self.grader.unit_metadata.get(unit_name, {})
+            if not meta.get("digitalsign", False):
+                return jsonify({"error": "Signing is not enabled for this unit"}), 400
+
+            from llmgrader.services.signing import private_key_from_env, sign_data
+            private_key_b64 = private_key_from_env()
+            if not private_key_b64:
+                return jsonify({"error": "Signing is not configured on this server (LLMGRADER_PRIVATE_KEY not set)"}), 503
+
+            data = request.get_json(silent=True) or {}
+            results_json_str = data.get("results_json")
+            if not results_json_str or not isinstance(results_json_str, str):
+                return jsonify({"error": "results_json is required"}), 400
+
+            try:
+                signature = sign_data(results_json_str.encode("utf-8"), private_key_b64)
+            except Exception as exc:
+                return jsonify({"error": f"Signing failed: {exc}"}), 500
+
+            return jsonify({"signature": signature})
 
         app.register_blueprint(bp)

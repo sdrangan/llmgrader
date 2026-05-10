@@ -47,6 +47,16 @@ In general, you want to be able to have the students see the grades as soon as t
 no submissions, on the bottom right, select **Publish Grades**.  This way students can see the grades as soon as the students submit
 
 
+## Submission Signing (Optional)
+
+If the unit XML has `<digitalsign>true</digitalsign>`, the portal signs each submission before the student downloads it. The autograder zip built by `build_autograder` contains the corresponding public key and verifies the signature automatically. No extra steps are needed during testing — a signed submission downloaded from the portal will verify correctly.
+
+If you upload a submission that was not signed, or one whose signature does not match, the autograder will reject it and report an error. This prevents students from uploading hand-crafted or altered JSON files.
+
+See [Submission Signing Keys](../gskeys.md) for how to generate keys and configure the environment.
+
+---
+
 ## Testing the Autograder
 
 To test the autograder:

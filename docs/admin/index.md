@@ -7,11 +7,11 @@ has_children: true
 
 # Administrator Guide
 
-This section contains documentation for instructors and administrators who manage the LLM Grader system.  
-You’ll find guidance on configuring the grader, enabling Google sign-in/admin access, reviewing logs, exporting submissions, and maintaining a smooth workflow for your course.
+This section contains documentation for instructors and administrators who wish to set-up and manage the LLM Grader system.  We recommend the following steps:
 
-Use the pages in this section to set up and operate the grader confidently throughout the semester.
+- [Set-up LLM grader](./setup/):  Install the LLM grader python package, IDE, and, optionally, a VS Code-based agentic service, on your local machine
+- [Build the course package](./buildcourse/) on the local machine.  The course package will include all the units in the class, and XML descriptions of the problems and grading rubrics
+- [Deploy the course on a web portal](./deploy/).  We recommend render.com.  At this point, students will be able to view and answer questions, and download submissions.
+- [Integrate with Gradescope](./gradescope/):  For each unit, create an assignment in Gradescope with an autograder that can receive the student submissions.
 
----
 
-Go to: [Package configuration](./pkgconfig.md)

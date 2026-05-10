@@ -1,19 +1,18 @@
 ---
 title: Setting up Google OAuth
 parent: Setting Up LLM Grader
-nav_order: 3
+nav_order: 2
 has_children: false
 ---
 
 # Setting up Google OAuth
 
 LLM Grader uses Google OAuth 2.0 for sign-in. Public/student functionality can
-still be used anonymously, but administrator actions are protected by login and
-server-side email authorization.
+be used anonymously, but administrator actions are protected by login and server-side email authorization.  See the [privacy notes](../../overview/dataprivacy.md) for discussion of what material is stored with the login.
 
 In practice, this means:
 
-- users sign in with a Google account
+- instructors and optionally users sign in with a Google account
 - the app stores the signed-in user in the Flask session
 - admin access is granted by email address on the server
 - the first admin can be bootstrapped from `LLMGRADER_INITIAL_ADMIN_EMAIL`

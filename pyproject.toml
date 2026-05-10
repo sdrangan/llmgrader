@@ -12,7 +12,8 @@ dependencies = [
     "openai>=2,<3",
     "pydantic>=2,<3",
     "pandas",
-    "requests"
+    "requests",
+    "cryptography>=43"
 ]
 
 [build-system]
@@ -39,3 +40,4 @@ create_soln_pkg = "llmgrader.scripts.create_soln_pkg:main"
 llmgrader_env_vars = "llmgrader.scripts.llmgrader_env_vars:main"
 llmgrader_mcp_setup = "llmgrader.scripts.llmgrader_mcp_setup:main"
 llmgrader_mcp_server = "llmgrader.mcp.server:main"
+generate_signing_keys = "llmgrader.scripts.generate_signing_keys:main"

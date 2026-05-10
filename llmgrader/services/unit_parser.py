@@ -7,7 +7,7 @@ import textwrap
 import xml.etree.ElementTree as ET
 import xml.parsers.expat as expat
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from importlib import resources
 from pathlib import Path, PurePosixPath
@@ -43,6 +43,7 @@ class UnitPackageData:
     soln_pkg_path: str
     validation_errors: list[str]
     validation_alert: str | None
+    unit_metadata: dict = field(default_factory=dict)
 
 
 class UnitParser:
@@ -1072,6 +1073,7 @@ class UnitParser:
                     return self._empty_package(soln_pkg_path)
 
                 units = {}
+                unit_metadata: dict[str, dict] = {}
 
                 for name, xml_path in zip(units_list, xml_path_list):
                     xml_path = os.path.normpath(xml_path)
@@ -1102,6 +1104,13 @@ class UnitParser:
                         validation_errors.append(error)
                         log.write(f"Validation error: {error}\n")
                         continue
+
+                    digitalsign_elem = root.find("digitalsign")
+                    digitalsign = (
+                        digitalsign_elem is not None
+                        and (digitalsign_elem.text or "").strip().lower() == "true"
+                    )
+                    unit_metadata[name] = {"digitalsign": digitalsign}
 
                     unit_dict = {}
 
@@ -1292,6 +1301,7 @@ class UnitParser:
                     soln_pkg_path=soln_pkg_path,
                     validation_errors=validation_errors,
                     validation_alert=self._build_validation_alert(validation_errors),
+                    unit_metadata=unit_metadata,
                 )
             except Exception as exc:
                 log.write(f"[ERROR] Exception during unit parsing: {exc}\n")

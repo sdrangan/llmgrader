@@ -19,6 +19,8 @@ ENV_VARS = [
     EnvVarSpec("LLMGRADER_INITIAL_ADMIN_EMAIL"),
     EnvVarSpec("LLMGRADER_AUTH_MODE"),
     EnvVarSpec("LLMGRADER_STORAGE_PATH"),
+    EnvVarSpec("LLMGRADER_PRIVATE_KEY", sensitive=True),
+    EnvVarSpec("LLMGRADER_PUBLIC_KEY"),
 ]
 
 

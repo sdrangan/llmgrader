@@ -379,10 +379,26 @@ async function downloadSubmission() {
 
         const resultsJson = buildResultsJson(unitName, sessionState, data.items);
         const resultsTxt = buildResultsTxt(unitName, sessionState, data.items);
+        const resultsJsonStr = JSON.stringify(resultsJson, null, 2);
 
         const zip = new JSZip();
-        zip.file('results.json', JSON.stringify(resultsJson, null, 2));
+        zip.file('results.json', resultsJsonStr);
         zip.file('results.txt', resultsTxt);
+
+        if (data.digitalsign) {
+            const signResp = await fetch(`/api/sign/${unitName}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ results_json: resultsJsonStr }),
+            });
+            if (!signResp.ok) {
+                const err = await signResp.json().catch(() => ({}));
+                alert(`Submission signing failed: ${err.error || signResp.statusText}. Please contact your instructor.`);
+                return;
+            }
+            const signData = await signResp.json();
+            zip.file('signature.txt', signData.signature);
+        }
 
         // Add solution images as separate files: images/<qtag>/<index>.<ext>
         const unitData = sessionState[unitName] || {};

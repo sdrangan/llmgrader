@@ -7,12 +7,10 @@ has_children: true
 
 # Overview
 
-LLM Grader has two key components:
+We recommend the following steps for instructors wishing to set-up LLM grader:
 
-- A Flask-based web app for the portal where students will see questions, input answers, and receive grades
-- A **course package** which is simply an archived set of XML files with the course information
-
-The Flask web app is realized as a Python package which also includes various utilities to assist in the creation of the course material.
-
-Setup topics in this section include Python installation, web app setup, OAuth,
-editor choice, and instructor-facing VS Code MCP configuration.
+- [Install the LLM Grader python package](./python.md) on a local machine
+- [Set the Google OAuth credentials](./oauth.md) for administrator access
+- [Selector an IDE](./editor.md) to edit the XML files for the class.  We recommend VS Code.
+- If you are using VS Code, optionally [configure an MCP server](./mcp_setup.md) to enable automatic agentic assistance in building the course material
+- [Set Gradescope keys](./gskeys.md) if you wish to use the digital signing feature with integration with Gradescope.

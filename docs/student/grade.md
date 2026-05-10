@@ -6,9 +6,15 @@ nav_order: 1
 
 # How to Answer and Grade Questions
 
+## Pre-requisites
+
 Before using the LLM grader, you will need to [register an OpenAI API key](./openai.md).  Loading the OpenAI API key takes just a moment and lets you control your own usage and costs — nothing is stored on the server, and you can turn it off anytime.
 
-Once you have set the OpenAI API key, go to the **Grade View** where you'll spend most of your time.  To open it, select **File → Switch View → Grade**.  In this view, you can read the question, write your answer, and get instant feedback from the LLM grader.
+Your instructor should provide you with the URL where they have deployed the class. Typically, this website is on `render.com`. For example, for the Introduction ot Hardware Design class at NYU, uses the following [render web portal](https://llmgrader-e6o7.onrender.com/)
+
+
+## Grade View
+Once you have set the OpenAI API key and a course URL, go to the **Grade View** where you'll spend most of your time.  To open it, select **File → Switch View → Grade**.  In this view, you can read the question, write your answer, and get instant feedback from the LLM grader.
 No mystery, no hidden steps — just a clean loop of *try → grade → improve*.
 
 - Select a unit from the **Unit** dropdown.
