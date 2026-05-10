@@ -110,6 +110,7 @@ Add these variables:
 | `LLMGRADER_INITIAL_ADMIN_EMAIL` | `you@example.com` | Bootstraps first admin |
 | `PYTHON_VERSION` | `3.12.3` | Update with python version |
 | `LLMGRADER_STORAGE_PATH` | /var/data/| Root for persistent storage |  
+| `LLMGRADER_PRIVATE_KEY` | (generated value) | Optional — required only if using [submission signing](../gskeys.md) |
 
 Example values for a Render deployment might look like this:
 
@@ -121,6 +122,7 @@ LLMGRADER_GOOGLE_REDIRECT_URI = https://your-service-name.onrender.com/auth/call
 LLMGRADER_INITIAL_ADMIN_EMAIL = you@example.com
 PYTHON_VERSION = 3.12.3
 LLMGRADER_STORAGE_PATH = /var/data
+LLMGRADER_PRIVATE_KEY = <base64-encoded private key from generate_signing_keys>
 ```
 
 For more detail on where the Google OAuth values come from, how to choose

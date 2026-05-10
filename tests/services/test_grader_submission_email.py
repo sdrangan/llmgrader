@@ -29,13 +29,13 @@ class _FakeProcessedResult:
 
 
 @pytest.mark.parametrize(
-    ("user_email", "expected_email"),
+    ("session_id", "expected_client_id"),
     [
-        ("student@example.com", "student@example.com"),
+        ("a1b2c3d4", "a1b2c3d4"),
         (None, None),
     ],
 )
-def test_grade_persists_optional_submission_user_email(tmp_path, monkeypatch, user_email, expected_email):
+def test_grade_persists_session_id_as_client_id(tmp_path, monkeypatch, session_id, expected_client_id):
     monkeypatch.setenv("LLMGRADER_STORAGE_PATH", str(tmp_path / "storage"))
     monkeypatch.setattr(Grader, "load_unit_pkg", lambda self: None)
     monkeypatch.setattr(
@@ -70,7 +70,7 @@ def test_grade_persists_optional_submission_user_email(tmp_path, monkeypatch, us
         provider="openai",
         model="gpt-5.4-mini",
         api_key="test-key",
-        user_email=user_email,
+        session_id=session_id,
     )
 
     assert grade["result"] == "pass"
@@ -78,9 +78,9 @@ def test_grade_persists_optional_submission_user_email(tmp_path, monkeypatch, us
     conn = sqlite3.connect(grader.db_path)
     try:
         row = conn.execute(
-            "SELECT user_email FROM submissions ORDER BY id DESC LIMIT 1"
+            "SELECT client_id FROM submissions ORDER BY id DESC LIMIT 1"
         ).fetchone()
     finally:
         conn.close()
 
-    assert row == (expected_email,)
+    assert row == (expected_client_id,)

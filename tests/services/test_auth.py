@@ -156,14 +156,8 @@ def test_dbviewer_rejects_non_readonly_sql(app_factory):
         assert allowed.get_json()["error"] is None
 
 
-@pytest.mark.parametrize(
-    ("signed_in_email", "expected_email"),
-    [
-        ("student@example.com", "student@example.com"),
-        (None, None),
-    ],
-)
-def test_grade_route_passes_optional_session_email(app_factory, monkeypatch, signed_in_email, expected_email):
+@pytest.mark.parametrize("signed_in_email", ["student@example.com", None])
+def test_grade_route_passes_session_id(app_factory, monkeypatch, signed_in_email):
     create, _ = app_factory
     captured = {}
 
@@ -180,7 +174,7 @@ def test_grade_route_passes_optional_session_email(app_factory, monkeypatch, sig
         self.units_order = []
 
     def fake_grade(self, **kwargs):
-        captured["user_email"] = kwargs.get("user_email")
+        captured["session_id"] = kwargs.get("session_id")
         return {"result": "pass", "full_explanation": "ok", "feedback": "ok"}
 
     monkeypatch.setattr(Grader, "load_unit_pkg", fake_load_unit_pkg)
@@ -221,7 +215,8 @@ def test_grade_route_passes_optional_session_email(app_factory, monkeypatch, sig
 
     assert final_payload is not None
     assert final_payload["result"] == "pass"
-    assert captured["user_email"] == expected_email
+    sid = captured.get("session_id")
+    assert sid is not None and len(sid) == 8 and sid.isalnum()
 
 
 def test_grade_job_start_rejects_concurrent_runs(app_factory, monkeypatch):

@@ -210,7 +210,6 @@ class Grader:
     DB_SCHEMA = {
         "timestamp": "TEXT NOT NULL",
         "client_id": "TEXT",
-        "user_email": "TEXT",
         "unit_name": "TEXT",
         "qtag": "TEXT",
         "part_label": "TEXT",
@@ -240,35 +239,6 @@ class Grader:
         "solution_image_paths_json": "TEXT",
     }
 
-    # Field formatting rules for submission detail view
-    FIELD_FORMAT = {
-        "timestamp": "short_datetime",
-        "question_text": "html",
-        "ref_soln": "html",
-        "grading_notes": "html",
-        "student_soln": "wrap80",
-        "raw_prompt": "wrap80",
-        "full_explanation": "wrap80",
-        "feedback": "wrap80",
-        "result": "text",
-        "model": "text",
-        "unit_name": "text",
-        "qtag": "text",
-        "part_label": "text",
-        "timeout": "text",
-        "latency_ms": "text",
-        "timed_out": "text",
-        "tokens_in": "text",
-        "tokens_out": "text",
-        "client_id": "text",
-        "user_email": "text",
-        "point_parts_json": "text",
-        "max_point_parts_json": "text",
-        "points": "text",
-        "max_points": "text",
-        "result_parts_json": "text",
-    }
-
     # Formats for displaying DB fields.
     # Fields not listed here default to "wrap" format,
     # meaning they will be wrapped in the UI.
@@ -287,6 +257,7 @@ class Grader:
         "tokens_in": "text",
         "tokens_out": "text",
         "tools_json": "text",
+        "client_id": "text",
     }
 
     
@@ -322,6 +293,7 @@ class Grader:
 
         # Initialize units dictionary
         self.units = {}
+        self.unit_metadata = {}
         self.units_order = []
         self.units_list = []
         self.xml_path_list = []
@@ -364,6 +336,7 @@ class Grader:
             "solution_image_paths_json": "TEXT",
             "points": "REAL",
             "max_points": "REAL",
+            "client_id": "TEXT",
         }
 
         # Add each column if missing
@@ -373,6 +346,11 @@ class Grader:
                     f"ALTER TABLE submissions ADD COLUMN {col_name} {col_type} DEFAULT NULL;"
                 )
                 conn.commit()
+
+        # Privacy scrub: erase any stored user emails from older schema
+        if "user_email" in columns:
+            cursor.execute("UPDATE submissions SET user_email = NULL WHERE user_email IS NOT NULL;")
+            conn.commit()
 
         conn.close()
 
@@ -425,7 +403,7 @@ class Grader:
         --------
         grader.insert_submission(
             timestamp="2026-01-28 12:34:56",
-            user_email="student@example.com",
+            client_id="a1b2c3d4",
             unit_name="unit1",
             qtag="basic_logic",
             student_soln="My answer...",
@@ -603,6 +581,7 @@ class Grader:
             # Defensive: treat as empty package
             self.soln_pkg = self.soln_pkg or None
             self.units = {}
+            self.unit_metadata = {}
             self.units_order = []
             self.units_list = []
             self.xml_path_list = []
@@ -612,6 +591,7 @@ class Grader:
 
         self.soln_pkg = unit_package.soln_pkg_path
         self.units = unit_package.units
+        self.unit_metadata = unit_package.unit_metadata
         self.units_order = unit_package.units_order
         self.units_list = unit_package.units_list
         self.xml_path_list = unit_package.xml_path_list
@@ -1342,7 +1322,7 @@ class Grader:
             api_key: str | None = None,
             timeout: float = 20.,
             solution_images: list[str] | None = None,
-            user_email: str | None = None) -> GradeResult:
+            session_id: str | None = None) -> GradeResult:
         """
         Grades a student's solution using the OpenAI API.
         
@@ -1369,9 +1349,8 @@ class Grader:
         solution_images: list[str] | None
             Optional list of base64 data URI strings representing images attached
             by the student alongside their solution.
-        user_email: str | None
-            Optional authenticated email address associated with the submission.
-            Anonymous submissions leave this as None.
+        session_id: str | None
+            Optional 8-character hex session UUID for analytics (no PII).
 
         Returns
         -------
@@ -1532,7 +1511,7 @@ class Grader:
         result_parts = grade.get("result_parts")
         self.insert_submission(
             timestamp=datetime.now(timezone.utc).isoformat(),
-            user_email=user_email,
+            client_id=session_id,
             question_text=question_text,
             ref_soln=solution,
             grading_notes=grading_notes,

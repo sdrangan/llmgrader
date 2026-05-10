@@ -28,6 +28,7 @@ The system is intentionally lightweight — a small core that instructors can un
 - **Seamless export to Gradescope**, including a standalone autograder that requires no LLM calls during grading.  
 - **Transparent, inspectable grading traces** so instructors can see *why* the model awarded points.
 - **Tool‑augmented evaluation**, including web‑search‑based retrieval of external artifacts (e.g., student GitHub repos, hosted figures, or reference materials) and, in the near future, optional Python execution for numeric checks.
+- **Privacy-by-design architecture** that ensures grading records are never linked to student identities. User interactions are pseudonymized via ephemeral session IDs, and high-stakes grade records remain exclusively within your university-approved LMS.
 
 ---
 
@@ -35,7 +36,7 @@ The system is intentionally lightweight — a small core that instructors can un
 
 The documentation is organized into four main sections:
 
-- [**Overview**](./overview/) for describing the architecture or how LLM grader workes
+- [**Overview**](./overview/) for describing the architecture or how LLM grader works and key features
 - [**Student Guide**](./student/) for answering questions and using the portal
 - [**Administrator Guide**](./admin/) for instructors for course setup, deployment, authoring, and operations
 - [**Analytics**](./analytics/) for grading and system visibility
