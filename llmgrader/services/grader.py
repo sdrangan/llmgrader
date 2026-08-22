@@ -36,6 +36,32 @@ def _ts():
     # timezone-aware UTC timestamp with millisecond precision
     return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S.%f")[:-3] + "Z"
 
+_SECRET_KEY_PATTERN = re.compile(r"key|token|secret", re.IGNORECASE)
+
+
+def redact_secrets(value):
+    """Return ``value`` with any secret-looking mapping entry masked.
+
+    Anything whose key name contains "key", "token" or "secret" is replaced
+    with a placeholder, recursively.  Use this before printing a config or
+    preferences dict: stdout is the deploy log stream, so a raw dump of admin
+    preferences publishes the shared OpenAI key.
+    """
+    if isinstance(value, dict):
+        return {k: _redact_entry(k, v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [redact_secrets(item) for item in value]
+    return value
+
+
+def _redact_entry(key, value):
+    # Only string values are masked, so a non-secret container that happens to
+    # match -- `tokenLimit` -- still shows its contents.
+    if isinstance(value, str) and value and _SECRET_KEY_PATTERN.search(str(key)):
+        return "[redacted]"
+    return redact_secrets(value)
+
+
 def log_error(msg: str):
     print(f"[{_ts()}] ERROR: {msg}", file=sys.stderr, flush=True)
 
@@ -1236,7 +1262,8 @@ class Grader:
         """
 
         prefs = self.load_admin_preferences()
-        print(f"Admin preferences loaded: {prefs}")
+        # stdout is the deploy log stream -- never dump prefs unredacted.
+        print(f"Admin preferences loaded: {redact_secrets(prefs)}")
         admin_key = prefs.get("openaiApiKey", None)
         
 
@@ -1311,7 +1338,6 @@ class Grader:
             )
 
         # 5. All checks passed
-        print('admin key=', admin_key)
         return admin_key, None
 
     def api_key_walkthrough(self) -> str:
