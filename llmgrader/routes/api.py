@@ -29,7 +29,10 @@ from llmgrader.services.models import (
 def get_default_admin_prefs():
     return {
         "openaiApiKey": "",
-        "allowedModels": [],
+        # None means "never configured", which migrate_allowed_models seeds
+        # from the registry. [] here would read as a deliberate "community key
+        # disabled" and leave a fresh install with no usable model.
+        "allowedModels": None,
         "tokenLimit": {
             "limit": 0,
             "period": "hour"
@@ -741,6 +744,9 @@ class APIController:
         def get_admin_preferences():
             pref_path = self.grader.get_admin_pref_path()
             defaults = get_default_admin_prefs()
+            # Seed before the early returns, so a fresh or unreadable config
+            # reports the same effective list the grader will enforce.
+            defaults["allowedModels"] = migrate_allowed_models(defaults.get("allowedModels"))
 
             if not os.path.exists(pref_path):
                 return jsonify(defaults)

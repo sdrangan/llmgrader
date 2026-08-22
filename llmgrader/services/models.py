@@ -364,20 +364,36 @@ def sorted_specs() -> list[ModelSpec]:
     return sorted(MODEL_REGISTRY.values(), key=lambda spec: TIERS.index(spec.tier))
 
 
+def default_free_models() -> list[str]:
+    """Live model ids offered on the shared community key by default."""
+    return [spec.id for spec in sorted_specs() if spec.offer_free]
+
+
 def migrate_allowed_models(allowed_models) -> list[str]:
-    """Map a stored admin allow-list onto live model ids.
+    """Resolve a stored admin allow-list to live model ids.
 
     A saved ``allowedModels`` list names the models the shared community key
-    may be used with.  After a slate refresh those ids are retired, and since
-    the gate is an exact-match test the community key would reject every model
-    the UI can still offer -- with an error telling the student to pick another
-    one, which is impossible.  So retired ids are mapped through
-    :data:`DEPRECATED_MODEL_ALIASES`, unresolvable ids are dropped, and the
-    result is de-duplicated with order preserved.
+    may be used with.  Three inputs, three meanings:
 
-    An empty list stays empty: that is a deliberate "community key disabled"
-    state, not a list waiting to be populated.
+    * ``None`` (never configured) -- seed from the registry, every live model
+      with ``offer_free=True``.  This is what stops a slate refresh from
+      leaving a fresh install with no usable community model.
+    * ``[]`` (explicitly emptied) -- stays empty.  That is a deliberate
+      "community key disabled" state and must not be helpfully repopulated.
+    * a non-empty list -- migrated, and never widened.  An admin who narrowed
+      the list keeps it narrow no matter what a later registry edit says.
+
+    Migration maps retired ids through :data:`DEPRECATED_MODEL_ALIASES`, drops
+    unresolvable ones, and de-duplicates with order preserved.  Without it the
+    gate -- an exact-match test -- would reject every model the UI can still
+    offer, with an error telling the student to pick another one, which is
+    impossible.
     """
+    if allowed_models is None:
+        seeded = default_free_models()
+        logger.info("No admin allowedModels configured; seeding %s", seeded)
+        return seeded
+
     if not allowed_models:
         return []
 

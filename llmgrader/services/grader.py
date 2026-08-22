@@ -30,7 +30,11 @@ import sys
 from datetime import datetime, timezone
 from llmgrader.services.prompt import PromptBuilder
 from llmgrader.services.unit_parser import UnitParser
-from llmgrader.services.models import DEFAULT_MODEL, get_spec, migrate_allowed_models
+from llmgrader.services.models import (
+    DEFAULT_MODEL,
+    get_spec,
+    migrate_allowed_models,
+)
 
 def _ts():
     # timezone-aware UTC timestamp with millisecond precision
@@ -1716,7 +1720,10 @@ class Grader:
         """
         defaults = {
             "openaiApiKey": "",
-            "allowedModels": [],
+            # None, not [] -- an absent config has never been configured, so
+            # migrate_allowed_models seeds it from the registry rather than
+            # reading it as a deliberate "community key disabled".
+            "allowedModels": None,
             "tokenLimit": {
                 "limit": 0,
                 "period": "unlimited"
@@ -1725,6 +1732,7 @@ class Grader:
 
         path = self.get_admin_pref_path()
         if not os.path.exists(path):
+            defaults["allowedModels"] = migrate_allowed_models(None)
             return defaults
 
         try:
@@ -1735,7 +1743,8 @@ class Grader:
 
         # A stored allow-list names models by id, so a slate refresh leaves it
         # pointing at retired ones -- which would block every model the UI can
-        # offer. Migrate on read rather than rewriting the file.
+        # offer. Migrate on read rather than rewriting the file. A missing key
+        # is seeded from the registry; an explicit [] stays disabled.
         prefs["allowedModels"] = migrate_allowed_models(prefs.get("allowedModels"))
         return prefs
             

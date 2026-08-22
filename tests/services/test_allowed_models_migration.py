@@ -16,6 +16,7 @@ from llmgrader.services.grader import Grader
 from llmgrader.services.models import (
     DEFAULT_MODEL,
     MODEL_REGISTRY,
+    default_free_models,
     migrate_allowed_models,
 )
 
@@ -86,12 +87,43 @@ def test_current_ids_are_left_untouched(grader: Grader) -> None:
     ]
 
 
-def test_missing_key_is_treated_as_disabled(grader: Grader) -> None:
+def test_missing_key_is_seeded_from_the_registry(grader: Grader) -> None:
+    """"Never configured" is not "deliberately emptied".
+
+    A config that has never carried an allowedModels key seeds from the
+    registry, so a fresh install -- or one that predates the key -- has a
+    usable community model instead of a silently disabled one. Contrast
+    test_an_empty_allow_list_stays_empty below.
+    """
     Path(grader.get_admin_pref_path()).write_text(
         json.dumps({"openaiApiKey": ADMIN_KEY}), encoding="utf-8"
     )
 
-    assert grader.load_admin_preferences()["allowedModels"] == []
+    assert grader.load_admin_preferences()["allowedModels"] == default_free_models()
+    assert grader.get_admin_key(DEFAULT_MODEL)[0] == ADMIN_KEY
+
+
+def test_a_missing_config_file_is_seeded_too(grader: Grader) -> None:
+    assert not Path(grader.get_admin_pref_path()).exists()
+
+    assert grader.load_admin_preferences()["allowedModels"] == default_free_models()
+
+
+def test_seeding_offers_only_the_free_tier(grader: Grader) -> None:
+    """Seeding must not put an expensive model on the shared key."""
+    seeded = migrate_allowed_models(None)
+
+    assert seeded == [DEFAULT_MODEL]
+    for model_id in seeded:
+        assert MODEL_REGISTRY[model_id].offer_free
+
+
+def test_a_stored_list_is_never_widened_by_the_registry(grader: Grader) -> None:
+    """An admin who narrowed the list keeps it narrow."""
+    _write_prefs(grader, ["gpt-5.6-terra"])
+
+    assert grader.load_admin_preferences()["allowedModels"] == ["gpt-5.6-terra"]
+    assert DEFAULT_MODEL not in grader.load_admin_preferences()["allowedModels"]
 
 
 # ---------------------------------------------------------------------------
@@ -121,3 +153,33 @@ def test_nothing_is_migrated_up_to_the_expensive_tier() -> None:
     for retired in ("gpt-4.1-mini", "gpt-5-mini", "gpt-5.1", "gpt-5.2",
                     "gpt-5.4", "gpt-5.4-mini", "gpt-5.4-nano"):
         assert migrate_allowed_models([retired])[0] not in strong
+
+
+def test_the_three_allow_list_inputs_mean_three_different_things() -> None:
+    assert migrate_allowed_models(None) == default_free_models()   # never configured
+    assert migrate_allowed_models([]) == []                        # deliberately off
+    assert migrate_allowed_models(["gpt-4.1-mini"]) == ["gpt-5.6-luna"]   # migrated
+
+
+def test_admin_preferences_endpoint_seeds_a_fresh_install(tmp_path, monkeypatch) -> None:
+    """The modal must show the effective list, or a Save would narrow it."""
+    from llmgrader.app import create_app
+
+    monkeypatch.setenv("LLMGRADER_AUTH_MODE", "dev-open")
+    monkeypatch.setenv("LLMGRADER_STORAGE_PATH", str(tmp_path / "storage"))
+    pkg = tmp_path / "soln_pkg"
+    pkg.mkdir()
+    (pkg / "llmgrader_config.xml").write_text(
+        "<llmgrader><course><name>C</name><term>T</term></course>"
+        "<units><section>S</section></units></llmgrader>",
+        encoding="utf-8",
+    )
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    app = create_app(scratch_dir=str(scratch), soln_pkg=str(pkg))
+    app.config["TESTING"] = True
+
+    with app.test_client() as client:
+        payload = client.get("/api/admin/preferences").get_json()
+
+    assert payload["allowedModels"] == default_free_models()
