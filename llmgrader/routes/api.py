@@ -17,6 +17,7 @@ import io
 from datetime import datetime, timezone
 import requests
 
+from llmgrader.services.grader import preferred_model_for
 from llmgrader.services.models import (
     DEFAULT_MODEL,
     DEFAULT_PROJECT_MODEL,
@@ -560,6 +561,13 @@ class APIController:
         def _strip_solution_fields(question: dict) -> dict:
             return {k: v for k, v in question.items() if k not in STUDENT_EXCLUDED_FIELDS}
 
+        def _for_student(qtag: str, question: dict) -> dict:
+            payload = _strip_solution_fields(question)
+            # The raw attribute may be symbolic ("strong"), so resolve it here
+            # rather than teaching the front end about tiers and aliases.
+            payload["preferred_model_resolved"] = preferred_model_for(question, qtag)
+            return payload
+
         @bp.get("/unit/<unit_name>")
         def unit(unit_name):
             units = self.grader.units
@@ -568,7 +576,7 @@ class APIController:
                 return jsonify({"error": "Unknown unit"}), 404
 
             u = units[unit_name]   # dict keyed by qtag
-            sanitized = {qtag: _strip_solution_fields(q) for qtag, q in u.items()}
+            sanitized = {qtag: _for_student(qtag, q) for qtag, q in u.items()}
 
             meta = self.grader.unit_metadata.get(unit_name, {})
             return jsonify({
@@ -630,11 +638,11 @@ class APIController:
                 return jsonify({"error": "unit, qtag and student_solution are required"}), 400
 
             part_label = data.get("part_label", "all")
-            model = data.get("model", DEFAULT_MODEL)
-            if not is_supported(model):
+            requested_model = data.get("model")
+            if requested_model is not None and not is_supported(requested_model):
                 offered = ", ".join(spec.id for spec in sorted_specs())
                 return jsonify({
-                    "error": f"Unknown model '{model}'. Choose one of: {offered}."
+                    "error": f"Unknown model '{requested_model}'. Choose one of: {offered}."
                 }), 400
 
             api_key = data.get("api_key", None)
@@ -652,6 +660,10 @@ class APIController:
 
             qdata = u[qtag]
             tools = qdata.get("tools", [])
+
+            # An explicitly chosen model always wins; preferred_model only sets
+            # the default for a client that sent none.
+            model = requested_model or preferred_model_for(qdata, qtag) or DEFAULT_MODEL
             with self.grade_job_lock:
                 self.expire_active_job_if_stale_locked()
                 self.prune_old_grade_jobs_locked()

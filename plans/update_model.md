@@ -1,6 +1,6 @@
 # Plan: Refresh the supported model slate
 
-Status: **steps 0-7 done** on `feature/model-registry` (8 commits, unpushed). Steps 8-10 outstanding.
+Status: **steps 0-7 merged to `main` and deployed**; steps A-C done on `feature/registry-flags` (3 commits, unpushed). Steps 8-10 outstanding.
 Date: 2026-08-22
 Scope: OpenAI only. Gemini support is deferred — see Appendix A.
 
@@ -18,9 +18,24 @@ Scope: OpenAI only. Gemini support is deferred — see Appendix A.
 | 7. Defaults + unknown-model 400 + allow-list migration | done, live-verified |
 | 8. `tests/live/` + marker | outstanding |
 | 9. Run live suite, flip default | outstanding |
-| 10. Docs + example XML | outstanding |
+| 10. Docs + example XML | outstanding, **and now larger** — see below |
+| A. `tier_default` / `offer_free` on the entries | done |
+| B. `offer_free` seeds an unset allow-list | done |
+| C. Symbolic `preferred_model`, wired up | done |
 
-Test suite: 94 → 138 → 163, all passing under `pytest --ignore=tests/ui/`.
+Test suite: 94 → 138 → 163 → 201, all passing under `pytest --ignore=tests/ui/`.
+
+**`preferred_model` was inert until step C.** `unit_parser.py` read it and put
+it in the question dict, `parselatex.py` did the same for LaTeX sources, and
+**nothing consumed it** — neither `routes/api.py` nor `Grader.grade()`
+consulted it, so the model was always whatever the client sent from the
+dropdown. Every `preferred_model` value in `example_repo/`, in
+`llmgrader/mcp/examples/`, and in instructors' own course repositories has
+therefore never influenced a grade, and none of them has ever been exercised.
+Two consequences for step 10: those values are untested data rather than
+working configuration, and they should be rewritten to the symbolic tier names
+(`cheap` / `mid` / `strong`) added in step C, so the next slate refresh does
+not require touching course packages at all.
 
 **Step 0 (unplanned, urgent).** `grader.py` printed the shared OpenAI key to
 stdout on every community-key grading request (`print('admin key=', ...)`) and
@@ -148,7 +163,7 @@ Every caller returns the same 4-tuple contract the current code already uses: `(
 - Replace the hard-coded server defaults listed in §1 with imports of `DEFAULT_MODEL`.
 - `api.py` grade-job handler: reject an unknown `model` with 400 rather than passing it through to the provider.
 
-Note: `preferred_model` in unit XML (`llmgrader/schemas/unit.xsd:95`) stays a free `xs:string` — do **not** enumerate models in the schema, or every course package breaks on each model refresh. Instead `UnitParser` warns (not errors) when `preferred_model` is not in the registry, and the grader falls back to `DEFAULT_MODEL`.
+Note: `preferred_model` in unit XML (`llmgrader/schemas/unit.xsd:95`) stays a free `xs:string` — do **not** enumerate models in the schema, or every course package breaks on each model refresh. Instead `UnitParser` warns (not errors) when `preferred_model` is not in the registry, and the grader falls back to `DEFAULT_MODEL`. **Done in step C**, along with the symbolic form: `resolve_preferred_model()` accepts a tier name (`cheap` / `mid` / `strong`) as well as a concrete or retired id, so a course package survives a slate refresh untouched. The attribute sets the *default selection* for a question and never locks it — a student with their own key may still pick a stronger model.
 
 ## 4. Model slate
 
@@ -330,6 +345,7 @@ Steps 6 and 7 remain independently shippable. Step 5 is the only one restructuri
 
 ## 9. Open questions
 
+- **`offer_free` is registry-side, `allowedModels` is admin-side.** The registry seeds the allow-list only when an admin has never configured one; a stored list, empty or not, always wins. So a later registry edit can never widen what an admin narrowed, and can never re-enable a community key an admin turned off.
 - ~~**Middle tier**~~ — **resolved 2026-08-22: include `gpt-5.6-terra`.** A diverse problem set has mid-weight work that luna under-serves and sol overpays for. The pick-badly risk is handled by the guidance requirements in §4 and by pushing course authors toward `preferred_model`.
 - **`long_context_threshold` is a guess (currently 128000).** OpenAI's pricing page shows separate short/long context input rates for the whole GPT-5.6 family but **does not state the token count where the long rate begins** — confirmed by re-reading it 2026-08-22. The value is presently unverifiable from the docs and impractical to determine empirically, since the API returns token counts but not billed cost.
 

@@ -34,6 +34,7 @@ from llmgrader.services.models import (
     DEFAULT_MODEL,
     get_spec,
     migrate_allowed_models,
+    resolve_preferred_model,
 )
 
 def _ts():
@@ -64,6 +65,18 @@ def _redact_entry(key, value):
     if isinstance(value, str) and value and _SECRET_KEY_PATTERN.search(str(key)):
         return "[redacted]"
     return redact_secrets(value)
+
+
+def preferred_model_for(question_dict, qtag: str | None = None) -> str | None:
+    """Resolve a question's authored ``preferred_model`` to a live model id.
+
+    Returns None when the question has no preference or names something that
+    cannot be resolved, so the caller falls back to DEFAULT_MODEL. This never
+    raises into a student's grading request -- a typo in course XML degrades
+    to the default and shows up in the logs.
+    """
+    spec = resolve_preferred_model((question_dict or {}).get("preferred_model"), qtag=qtag)
+    return spec.id if spec is not None else None
 
 
 def log_error(msg: str):
@@ -1355,7 +1368,7 @@ class Grader:
             unit_name: str = "",
             qtag: str = "",
             provider : str = "openai",
-            model: str=DEFAULT_MODEL,
+            model: str | None = None,
             api_key: str | None = None,
             timeout: float = 20.,
             solution_images: list[str] | None = None,
@@ -1377,8 +1390,9 @@ class Grader:
             The question tag identifier.
         provider: str
             The model provider to use for grading (currently only "openai").
-        model: str
-            The  model to use for grading.
+        model: str | None
+            The model to use for grading.  When None, the question's
+            preferred_model is used, falling back to DEFAULT_MODEL.
         api_key: str | None
             The API key (either OpenAI API key or Hugging Face token) to use for authentication.
         timeout: float
@@ -1395,6 +1409,10 @@ class Grader:
             The grading dictionary result containing 'result', 'full_explanation', and 'feedback'.
             Note the pydantic GradeResult model is converted to a dict before returning.
         """
+        # An explicitly requested model always wins; otherwise the question's
+        # preferred_model sets the default, and DEFAULT_MODEL backstops both.
+        model = model or preferred_model_for(question_dict, qtag) or DEFAULT_MODEL
+
         question_text = str(question_dict.get("question_text", ""))
         solution = str(question_dict.get("solution", ""))
         grading_notes = str(question_dict.get("grading_notes", ""))

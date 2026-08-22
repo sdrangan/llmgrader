@@ -14,6 +14,8 @@ from pathlib import Path, PurePosixPath
 
 import xmlschema
 
+from llmgrader.services.models import resolve_preferred_model
+
 
 def strip_code_block_leading_newlines(html_text: str) -> str:
     def strip_newlines_match(match):
@@ -1121,6 +1123,20 @@ class UnitParser:
                             continue
 
                         preferred_model = question.get("preferred_model", "")
+                        if preferred_model and resolve_preferred_model(
+                            preferred_model, qtag=qtag
+                        ) is None:
+                            # Warn, never fail: the unit still loads and the
+                            # grader falls back to DEFAULT_MODEL. Deliberately
+                            # not a validation_error -- that raises a banner
+                            # saying the file failed validation and was not
+                            # loaded, which would not be true.
+                            log.write(
+                                f"[WARN] Question '{qtag}' in unit {name}: "
+                                f"preferred_model '{preferred_model}' is not a tier "
+                                f"name or a known model; grading will use the "
+                                f"default model.\n"
+                            )
 
                         question_text_elem = question.find("question_text")
                         question_text = clean_cdata(question_text_elem.text if question_text_elem is not None else "")

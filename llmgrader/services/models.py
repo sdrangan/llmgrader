@@ -364,6 +364,63 @@ def sorted_specs() -> list[ModelSpec]:
     return sorted(MODEL_REGISTRY.values(), key=lambda spec: TIERS.index(spec.tier))
 
 
+def resolve_preferred_model(value, *, qtag: str | None = None) -> ModelSpec | None:
+    """Resolve a course-authored ``preferred_model`` to a live model.
+
+    Accepted, in order:
+
+    * a tier name from :data:`TIERS` -- ``"cheap"``, ``"mid"``, ``"strong"``
+      -- resolving to that tier's declared default.  This is the symbolic
+      form course authors should use: it survives a model refresh, so a slate
+      change does not mean rewriting every course package, including ones in
+      instructors' own repositories.
+    * a concrete live model id.
+    * a retired id, resolving to its replacement and logging the deprecation.
+      A preference names the model to *select*, so it resolves forward to
+      something currently offered rather than to the retired spec itself.
+
+    Anything else returns None, with a warning naming the value and the
+    question so a typo in course XML shows up in the logs instead of silently
+    grading with the wrong model.  An absent attribute -- None, or the empty
+    string the unit parser uses for one -- is not a typo, and is not logged:
+    it is the common case, and warning on it would fire for every question
+    without a preference on every grading request.
+    """
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return None
+
+    where = f" for question {qtag!r}" if qtag else ""
+
+    if isinstance(value, str):
+        candidate = value.strip()
+
+        if candidate in TIERS:
+            return _tier_default(candidate)
+
+        spec = MODEL_REGISTRY.get(candidate)
+        if spec is not None:
+            return spec
+
+        replacement = DEPRECATED_MODEL_ALIASES.get(candidate)
+        if replacement is not None:
+            logger.warning(
+                "preferred_model %r%s names a retired model; using %r instead.",
+                candidate,
+                where,
+                replacement,
+            )
+            return MODEL_REGISTRY[replacement]
+
+    logger.warning(
+        "Ignoring unresolvable preferred_model %r%s; expected a tier name "
+        "(%s) or a known model id.",
+        value,
+        where,
+        ", ".join(TIERS),
+    )
+    return None
+
+
 def default_free_models() -> list[str]:
     """Live model ids offered on the shared community key by default."""
     return [spec.id for spec in sorted_specs() if spec.offer_free]

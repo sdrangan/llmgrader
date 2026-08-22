@@ -1311,6 +1311,33 @@ function displayQuestion(qtag) {
 
     // Restore grading UI from session state for the currently selected part
     restorePartUI(qtag, partSelect.value);
+
+    applyPreferredModel(qtag, qdata);
+}
+
+
+// A question's preferred_model sets the default model for that question. It
+// deliberately does not lock the dropdown: a student using their own API key
+// is entitled to pick a stronger model, and re-selecting still persists
+// through the normal change handler.
+function applyPreferredModel(qtag, qdata) {
+    const preferred = qdata && qdata.preferred_model_resolved;
+    if (!preferred) return;
+
+    // The catalog may still be in flight when the first question renders.
+    loadModelCatalog().then(() => {
+        const modelSelect = document.getElementById("model-select");
+        if (!modelSelect || !MODEL_PROVIDER[preferred]) return;
+
+        // The question may have changed while the fetch was in flight.
+        const dropdown = document.getElementById("question-number");
+        if (dropdown && dropdown.value !== qtag) return;
+        if (modelSelect.value === preferred) return;
+
+        modelSelect.value = preferred;
+        modelSelect.dataset.provider = MODEL_PROVIDER[preferred] || "";
+        updateModelHelp(preferred);
+    });
 }
 
 
