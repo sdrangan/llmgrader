@@ -17,6 +17,12 @@ import io
 from datetime import datetime, timezone
 import requests
 
+from llmgrader.services.models import (
+    DEFAULT_MODEL,
+    DEFAULT_PROJECT_MODEL,
+    sorted_specs,
+)
+
 
 def get_default_admin_prefs():
     return {
@@ -596,6 +602,29 @@ class APIController:
                 "solution": q.get("solution", ""),
                 "solution_images": q.get("solution_images", []),
                 "grading_notes": q.get("grading_notes", ""),
+            })
+
+        @bp.get("/api/models")
+        def list_models():
+            """The supported model slate, ordered cheap -> mid -> strong.
+
+            Public and free of secrets: this is the front end's only source of
+            model ids, so `static/js/app.js` no longer duplicates the list.
+            """
+            return jsonify({
+                "models": [
+                    {
+                        "id": spec.id,
+                        "label": spec.label,
+                        "provider": spec.provider,
+                        "tier": spec.tier,
+                        "context_tokens": spec.context_tokens,
+                        "notes": spec.notes,
+                    }
+                    for spec in sorted_specs()
+                ],
+                "default_model": DEFAULT_MODEL,
+                "default_project_model": DEFAULT_PROJECT_MODEL,
             })
 
         @bp.post("/grade")

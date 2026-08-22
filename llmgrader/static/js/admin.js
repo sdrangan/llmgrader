@@ -118,12 +118,15 @@ window.initializeApiKeyWizard = initializeApiKeyWizard;
 
 let adminAllowedModels = [];
 
-function renderAdminModelList(allowedModels) {
+async function renderAdminModelList(allowedModels) {
     const container = document.getElementById("admin-model-list");
     if (!container) return;
     container.innerHTML = "";
 
-    Object.keys(MODEL_PROVIDER).forEach(modelName => {
+    // app.js fetches the slate from /api/models and publishes it here.
+    if (window.loadModelCatalog) await window.loadModelCatalog();
+
+    Object.keys(window.MODEL_PROVIDER || {}).forEach(modelName => {
         const row = document.createElement("div");
         row.className = "model-row";
         row.style.cssText = "display:flex; align-items:center; gap:8px; margin:4px 0;";
@@ -275,7 +278,7 @@ function initializeAdminPreferencesModal() {
             renderAdminUsers([]);
         }
 
-        renderAdminModelList(adminAllowedModels);
+        await renderAdminModelList(adminAllowedModels);
         adminPreferencesModal.style.display = "flex";
     });
 

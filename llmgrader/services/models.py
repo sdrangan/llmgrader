@@ -102,8 +102,7 @@ MODEL_REGISTRY: dict[str, ModelSpec] = {
         supports_images=True,
         notes=(
             "Best for routine short-answer questions and single derivations "
-            "— by far the cheapest at about $0.30 per 1,000 graded "
-            "questions, and quick at ~2.8 s each."
+            "— the cheapest at about $0.30 per 1,000 graded questions."
         ),
     ),
     "gpt-5.6-terra": ModelSpec(
@@ -121,10 +120,8 @@ MODEL_REGISTRY: dict[str, ModelSpec] = {
         supports_web_search=True,
         supports_images=True,
         notes=(
-            "Best for multi-part derivations, proofs and short code — work "
-            "that needs real reasoning but not a whole project's context. The "
-            "fastest option measured at ~2.2 s, about $2.21 per 1,000 graded "
-            "questions."
+            "Best for multi-part derivations, proofs and short code — the "
+            "fastest at ~2.2 s, about $2.21 per 1,000 graded questions."
         ),
     ),
     "gpt-5.6-sol": ModelSpec(
@@ -142,9 +139,8 @@ MODEL_REGISTRY: dict[str, ModelSpec] = {
         supports_web_search=True,
         supports_images=True,
         notes=(
-            "Best for projects and reports that need long context or web "
-            "search — the most capable and the most expensive at about "
-            "$3.89 per 1,000 graded questions, ~3.1 s each."
+            "Best for projects and reports needing long context or web search "
+            "— the most capable, about $3.89 per 1,000 graded questions."
         ),
     ),
 }

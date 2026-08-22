@@ -24,29 +24,69 @@ function maybeShowValidationAlert(message) {
     alert(message);
 }
 
-const MODEL_PROVIDER = {
-    "gpt-4.1-mini": "openai",
-    "gpt-5-mini": "openai",
-    "gpt-5.1": "openai",
-    "gpt-5.2": "openai",
-    "gpt-5.4-nano": "openai",
-    "gpt-5.4-mini": "openai",
-    "gpt-5.4": "openai"
-};
+// The model slate comes from GET /api/models; llmgrader/services/models.py is
+// the source of truth. MODEL_PROVIDER stays a global (window.MODEL_PROVIDER)
+// because admin.js reads it to render the allow-list.
+var MODEL_PROVIDER = {};
+let MODEL_CATALOG = [];        // full specs, already ordered cheap -> mid -> strong
+let DEFAULT_MODEL = "";
+let modelCatalogPromise = null;
 
-const DEFAULT_MODEL = "gpt-4.1-mini";
 const GRADE_POLL_INTERVAL_MS = 1000;
 const GRADE_MAX_POLL_DURATION_SECONDS = 300;
 
-function populateModelSelect() {
+function loadModelCatalog() {
+    if (!modelCatalogPromise) {
+        modelCatalogPromise = fetch("/api/models")
+            .then(resp => {
+                if (!resp.ok) throw new Error(`GET /api/models failed: ${resp.status}`);
+                return resp.json();
+            })
+            .then(data => {
+                MODEL_CATALOG = Array.isArray(data.models) ? data.models : [];
+                DEFAULT_MODEL = data.default_model || (MODEL_CATALOG[0] || {}).id || "";
+                const providers = {};
+                MODEL_CATALOG.forEach(spec => { providers[spec.id] = spec.provider; });
+                MODEL_PROVIDER = providers;
+                window.MODEL_PROVIDER = providers;
+                return MODEL_CATALOG;
+            })
+            .catch(err => {
+                console.error("Could not load the model list:", err);
+                modelCatalogPromise = null;   // let the next caller retry
+                return [];
+            });
+    }
+    return modelCatalogPromise;
+}
+window.loadModelCatalog = loadModelCatalog;
+
+function getModelSpec(modelId) {
+    return MODEL_CATALOG.find(spec => spec.id === modelId) || null;
+}
+
+// Guidance is the reason offering three models is reasonable, so show it
+// rather than making the student read the docs to pick.
+function updateModelHelp(modelId) {
+    const help = document.getElementById("model-help");
+    if (!help) return;
+    const spec = getModelSpec(modelId);
+    help.textContent = spec ? spec.notes : "";
+}
+
+async function populateModelSelect() {
     const modelSelect = document.getElementById("model-select");
     if (!modelSelect) return;
+
+    await loadModelCatalog();
+
     const previousValue = modelSelect.value;
     modelSelect.innerHTML = "";
-    Object.keys(MODEL_PROVIDER).forEach(model => {
+    MODEL_CATALOG.forEach(spec => {
         const opt = document.createElement("option");
-        opt.value = model;
-        opt.textContent = model;
+        opt.value = spec.id;
+        opt.textContent = spec.notes ? `${spec.label} — ${spec.notes}` : spec.label;
+        opt.title = spec.notes || "";
         modelSelect.appendChild(opt);
     });
 
@@ -55,6 +95,7 @@ function populateModelSelect() {
     } else if (MODEL_PROVIDER[DEFAULT_MODEL]) {
         modelSelect.value = DEFAULT_MODEL;
     }
+    updateModelHelp(modelSelect.value);
 }
 
 // sessionState[unitName][qtag] = {
@@ -82,8 +123,9 @@ let sessionState = {};
 // Create menu system on page load
 document.addEventListener("DOMContentLoaded", () => {
     initializeMenuSystem();
-    populateModelSelect();
-    initializeModelSelection();
+    // The select is filled from /api/models, so the saved-selection pass has
+    // to wait for the fetch.
+    populateModelSelect().then(initializeModelSelection);
     initializeAdminPreferencesModal();
     initializeApiKeyWizard();
     loadView("grade");   // or whatever your default view is
@@ -107,6 +149,7 @@ function initializeModelSelection() {
         const provider = MODEL_PROVIDER[model];
         sessionStorage.setItem("selectedModel", model);
         modelSelect.dataset.provider = provider || "";
+        updateModelHelp(model);
     };
 
     if (!modelSelect.dataset.modelSelectionBound) {
