@@ -230,6 +230,158 @@ def normalize_json_response_text(text: str) -> str:
     return normalized
 
 
+def _build_message_content(task, ref_images, student_images):
+    """Assemble the user message for a grading request.
+
+    Returns ``(text, image_uris)``: the task annotated with which image sets
+    are attached, and the data URIs in canonical order -- reference solution
+    images first, then the student's.  Providers differ only in how they wrap
+    a URI into a content part, so everything above that lives here; keeping it
+    per-provider is how the two paths silently drifted apart before.
+
+    ``image_uris`` is empty when there are no images, in which case the caller
+    sends ``text`` on its own rather than a content-part list.
+    """
+    ref_images = ref_images or []
+    student_images = student_images or []
+
+    if not ref_images and not student_images:
+        return task, []
+
+    text = task
+    if ref_images:
+        text += "\n\n--- REFERENCE SOLUTION IMAGES ---\nSee reference solution images below."
+    if student_images:
+        text += "\n\n--- STUDENT SOLUTION IMAGES ---\nSee attached student images below."
+
+    return text, [*ref_images, *student_images]
+
+
+def _make_openai_caller(*, model, api_key, task, timeout, tools, ref_images,
+                        student_images, supported_tools):
+    """Build the callable that grades one request through the Responses API."""
+    client = OpenAI(api_key=api_key)
+    requested_tools = [tool for tool in (tools or []) if tool in supported_tools]
+
+    text, image_uris = _build_message_content(task, ref_images, student_images)
+    if image_uris:
+        # Responses API expects top-level input items to be messages, not raw
+        # content parts.
+        message_content = [{"type": "input_text", "text": text}]
+        for data_uri in image_uris:
+            message_content.append({"type": "input_image", "image_url": data_uri})
+        openai_input = [{"role": "user", "content": message_content}]
+    else:
+        openai_input = text
+
+    spec = get_spec(model)
+
+    def call_openai():
+        request_kwargs = {
+            "model": model,
+            "input": openai_input,
+            "timeout": timeout,
+        }
+
+        # Grading wants a deterministic answer, so ask for temperature 0
+        # where the model allows it. The GPT-5.6 family rejects the
+        # parameter outright (Unsupported parameter: temperature is not
+        # supported with this model), so the key must be absent rather than
+        # set to any value. Unknown models are treated the same way --
+        # omitting is the safe default.
+        if spec is not None and spec.supports_temperature:
+            request_kwargs["temperature"] = 0
+
+        if "web_search" in requested_tools:
+            request_kwargs["tools"] = [{"type": "web_search"}]
+        else:
+            request_kwargs["text"] = {
+                "format": {
+                    "type": "json_object"
+                }
+            }
+
+        resp = client.responses.create(**request_kwargs)
+
+        response_text = resp.output_text or ""
+        if not response_text.strip():
+            raise ValueError("OpenAI response did not contain output_text.")
+
+        normalized_response_text = normalize_json_response_text(response_text)
+
+        try:
+            parsed = GraderRawResult.model_validate_json(normalized_response_text)
+        except ValidationError as exc:
+            raise ValueError(f"Failed to parse OpenAI JSON response: {exc}") from exc
+
+        tool_call_summary = summarize_tool_calls(resp)
+
+        # Get the total tokens used (input + output)
+        if resp.usage is not None:
+            inputs_tokens = resp.usage.input_tokens
+            output_tokens = resp.usage.output_tokens
+        else:
+            inputs_tokens = 0
+            output_tokens = 0
+        return parsed, inputs_tokens, output_tokens, tool_call_summary
+
+    return call_openai
+
+
+def _make_hf_caller(*, model, api_key, task, timeout, tools, ref_images,
+                    student_images, supported_tools):
+    """Build the callable that grades one request through the HF router."""
+    import requests
+    hf_model = model.replace("hf:", "")
+    url = f"https://router.huggingface.co/models/{hf_model}/v1/chat/completions"
+    headers = {"Authorization": f"Bearer {api_key}"}
+
+    text, image_uris = _build_message_content(task, ref_images, student_images)
+    if image_uris:
+        message_content = [{"type": "text", "text": text}]
+        for data_uri in image_uris:
+            message_content.append({
+                "type": "image_url",
+                "image_url": {"url": data_uri}
+            })
+    else:
+        message_content = text
+
+    def call_hf():
+        payload = {
+            "model": hf_model,
+            "messages": [
+                {"role": "user", "content": message_content}
+            ],
+            "temperature": 0,
+        }
+
+        resp = requests.post(url, headers=headers, json=payload, timeout=timeout)
+        resp.raise_for_status()
+        data = resp.json()
+
+        # Extract assistant message
+        text_out = data["choices"][0]["message"]["content"]
+
+        # Set tokens to 0 now since HF API does not provide then
+        input_tokens = 0
+        output_tokens = 0
+
+        # Parse using your existing GradeResult model
+        return GraderRawResult.model_validate_json(normalize_json_response_text(text_out)), input_tokens, output_tokens, None
+
+    return call_hf
+
+
+#: Provider dispatch table. `ModelSpec.provider` is the key, so the registry
+#: and this table stay in sync by construction -- adding a provider is one new
+#: factory plus one entry here, with no edits to grade() or the dispatch.
+PROVIDER_CALLERS = {
+    "openai": _make_openai_caller,
+    "hf": _make_hf_caller,
+}
+
+
 class Grader:
     SUPPORTED_TOOLS = ["web_search"]
 
@@ -1087,7 +1239,10 @@ class Grader:
     def _make_llm_caller(self, provider, model, api_key, task, timeout, tools=None, solution_images=None, ref_solution_images=None):
         """
         Creates a function that calls the specified LLM provider with the given parameters.
-        
+
+        Dispatch only: the per-provider work lives in the factories registered
+        in :data:`PROVIDER_CALLERS`.
+
         Parameters
         ----------
         provider: str
@@ -1112,144 +1267,31 @@ class Grader:
         Returns
         -------
         function
-            A function that, when called, will execute the API call to the 
-            specified LLM provider and return: 
+            A function that, when called, will execute the API call to the
+            specified LLM provider and return:
                 result:  GradeResult
                     Grading result
                 input_tokens, output_tokens: int
                     Number of tokens used in the API call (input & output)
+                tool_call_summary: str | None
+                    Summary of any built-in tool calls made
         """
-        student_images = solution_images or []
-        ref_images = ref_solution_images or []
+        try:
+            factory = PROVIDER_CALLERS[provider]
+        except KeyError:
+            raise ValueError(f"Unknown provider '{provider}'") from None
 
-        if provider == "openai":
-            client = OpenAI(api_key=api_key)
-            requested_tools = [tool for tool in (tools or []) if tool in self.SUPPORTED_TOOLS]
+        return factory(
+            model=model,
+            api_key=api_key,
+            task=task,
+            timeout=timeout,
+            tools=tools,
+            ref_images=ref_solution_images or [],
+            student_images=solution_images or [],
+            supported_tools=self.SUPPORTED_TOOLS,
+        )
 
-            # Responses API expects top-level input items to be messages, not raw content parts.
-            if ref_images or student_images:
-                task_hint = task
-                if ref_images:
-                    task_hint += "\n\n--- REFERENCE SOLUTION IMAGES ---\nSee reference solution images below."
-                if student_images:
-                    task_hint += "\n\n--- STUDENT SOLUTION IMAGES ---\nSee attached student images below."
-                message_content = [{"type": "input_text", "text": task_hint}]
-                for data_uri in ref_images:
-                    message_content.append({"type": "input_image", "image_url": data_uri})
-                for data_uri in student_images:
-                    message_content.append({"type": "input_image", "image_url": data_uri})
-                openai_input = [{"role": "user", "content": message_content}]
-            else:
-                openai_input = task
-
-            spec = get_spec(model)
-
-            def call_openai():
-                request_kwargs = {
-                    "model": model,
-                    "input": openai_input,
-                    "timeout": timeout,
-                }
-
-                # Grading wants a deterministic answer, so ask for temperature 0
-                # where the model allows it. The GPT-5.6 family rejects the
-                # parameter outright ("Unsupported parameter: 'temperature' is
-                # not supported with this model"), so the key must be absent
-                # rather than set to any value. Unknown models are treated the
-                # same way -- omitting is the safe default.
-                if spec is not None and spec.supports_temperature:
-                    request_kwargs["temperature"] = 0
-
-                if "web_search" in requested_tools:
-                    request_kwargs["tools"] = [{"type": "web_search"}]
-                else:
-                    request_kwargs["text"] = {
-                        "format": {
-                            "type": "json_object"
-                        }
-                    }
-
-                resp = client.responses.create(**request_kwargs)
-
-                response_text = resp.output_text or ""
-                if not response_text.strip():
-                    raise ValueError("OpenAI response did not contain output_text.")
-
-                normalized_response_text = normalize_json_response_text(response_text)
-
-                try:
-                    parsed = GraderRawResult.model_validate_json(normalized_response_text)
-                except ValidationError as exc:
-                    raise ValueError(f"Failed to parse OpenAI JSON response: {exc}") from exc
-
-                tool_call_summary = summarize_tool_calls(resp)
-
-                # Get the total tokens used (input + output)
-                if resp.usage is not None:
-                    inputs_tokens = resp.usage.input_tokens
-                    output_tokens = resp.usage.output_tokens
-                else:
-                    inputs_tokens = 0
-                    output_tokens = 0
-                return parsed, inputs_tokens, output_tokens, tool_call_summary
-            
-            return call_openai
-
-        elif provider == "hf":
-            import requests
-            hf_model = model.replace("hf:", "")
-            url = f"https://router.huggingface.co/models/{hf_model}/v1/chat/completions"
-            headers = {"Authorization": f"Bearer {api_key}"}
-
-            # Build message content: multimodal list when any images are present
-            if ref_images or student_images:
-                task_hint = task
-                if ref_images:
-                    task_hint += "\n\n--- REFERENCE SOLUTION IMAGES ---\nSee reference solution images below."
-                if student_images:
-                    task_hint += "\n\n--- STUDENT SOLUTION IMAGES ---\nSee attached student images below."
-                message_content = [{"type": "text", "text": task_hint}]
-                for data_uri in ref_images:
-                    message_content.append({
-                        "type": "image_url",
-                        "image_url": {"url": data_uri}
-                    })
-                for data_uri in student_images:
-                    message_content.append({
-                        "type": "image_url",
-                        "image_url": {"url": data_uri}
-                    })
-            else:
-                message_content = task
-
-            def call_hf():
-                payload = {
-                    "model": hf_model,
-                    "messages": [
-                        {"role": "user", "content": message_content}
-                    ],
-                    "temperature": 0,
-                }
-
-                resp = requests.post(url, headers=headers, json=payload, timeout=timeout)
-                resp.raise_for_status()
-                data = resp.json()
-
-                # Extract assistant message
-                text = data["choices"][0]["message"]["content"]
-
-                # Set tokens to 0 now since HF API does not provide then
-                input_tokens = 0
-                output_tokens = 0
-
-                # Parse using your existing GradeResult model
-                return GraderRawResult.model_validate_json(normalize_json_response_text(text)), input_tokens, output_tokens, None
-
-            return call_hf
-
-        else:
-            raise ValueError(f"Unknown provider '{provider}'")
-        
     def get_admin_key(self, model: str) -> tuple[str | None, str | None]:
         """
         Determine whether the admin key may be used for this grading request.
