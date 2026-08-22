@@ -239,25 +239,16 @@ function initializeMenuSystem() {
 
     function populateKeyFields() {
         var openaiKey = localStorage.getItem('openai_api_key') || '';
-        var hfKey = localStorage.getItem('hfToken') || '';
 
         var okInput = document.getElementById('openai-key-input');
         var okArea  = document.getElementById('openai-key-textarea');
         var okBtn   = document.getElementById('openai-key-toggle');
-        var hfInput = document.getElementById('hf-key-input');
-        var hfArea  = document.getElementById('hf-key-textarea');
-        var hfBtn   = document.getElementById('hf-key-toggle');
 
         if (okInput) { okInput.dataset.realValue = openaiKey; okInput.value = maskKey(openaiKey); }
         if (okArea)  { okArea.value = ''; okArea.classList.add('hidden'); }
         if (okBtn)   { okBtn.textContent = 'Show'; okBtn.dataset.state = 'masked'; }
 
-        if (hfInput) { hfInput.dataset.realValue = hfKey; hfInput.value = maskKey(hfKey); }
-        if (hfArea)  { hfArea.value = ''; hfArea.classList.add('hidden'); }
-        if (hfBtn)   { hfBtn.textContent = 'Show'; hfBtn.dataset.state = 'masked'; }
-
         if (okInput) okInput.classList.remove('hidden');
-        if (hfInput) hfInput.classList.remove('hidden');
     }
 
     function setupKeyToggle(inputId, areaId, btnId) {
@@ -284,7 +275,6 @@ function initializeMenuSystem() {
     }
 
     setupKeyToggle('openai-key-input', 'openai-key-textarea', 'openai-key-toggle');
-    setupKeyToggle('hf-key-input', 'hf-key-textarea', 'hf-key-toggle');
 
     function openPreferencesModal() {
         if (!preferencesModal) return;
@@ -315,9 +305,6 @@ function initializeMenuSystem() {
             var okInput = document.getElementById('openai-key-input');
             var okArea  = document.getElementById('openai-key-textarea');
             var okBtn   = document.getElementById('openai-key-toggle');
-            var hfInput = document.getElementById('hf-key-input');
-            var hfArea  = document.getElementById('hf-key-textarea');
-            var hfBtn   = document.getElementById('hf-key-toggle');
 
             // If shown: read the textarea. If masked: check whether the user
             // typed a new value (differs from the masked display) — if so use
@@ -330,17 +317,8 @@ function initializeMenuSystem() {
                 var typedOk  = okInput ? okInput.value : '';
                 openaiKey = (typedOk !== maskKey(storedOk)) ? typedOk : storedOk;
             }
-            var hfKey;
-            if (hfBtn && hfBtn.dataset.state === 'shown') {
-                hfKey = hfArea ? hfArea.value : '';
-            } else {
-                var storedHf = hfInput ? (hfInput.dataset.realValue || '') : '';
-                var typedHf  = hfInput ? hfInput.value : '';
-                hfKey = (typedHf !== maskKey(storedHf)) ? typedHf : storedHf;
-            }
 
             localStorage.setItem('openai_api_key', openaiKey);
-            localStorage.setItem('hfToken', hfKey);
             // Save model selection
             if (preferencesModelSelect) {
                 sessionStorage.setItem('selectedModel', preferencesModelSelect.value);

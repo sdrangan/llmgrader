@@ -328,6 +328,11 @@ function getApiKey() {
     return localStorage.getItem("openai_api_key") || "";
 }
 
+// provider (see ModelSpec.provider) -> how to read that provider's key.
+const API_KEY_READERS = {
+    openai: getApiKey,
+};
+
 
 //
 // ---------------------------
@@ -1540,13 +1545,14 @@ async function gradeCurrentQuestion() {
     const provider = MODEL_PROVIDER[model];
 
 
-    if (provider === "openai") {
-        apiKey = getApiKey();
-    }
-    else {
-        alert("Only OpenAI models are supported.");
+    // Key lookup by provider, so a second provider is a table entry rather
+    // than another branch here.
+    const readProviderApiKey = API_KEY_READERS[provider];
+    if (!readProviderApiKey) {
+        alert(`No API key is configured for the "${provider || "unknown"}" provider. Please choose a different model.`);
         return;
     }
+    apiKey = readProviderApiKey();
 
     const gradeBtn = document.getElementById("grade-button");
     const liveStatus = document.getElementById("grade-live-status");
@@ -1820,29 +1826,3 @@ document.addEventListener("DOMContentLoaded", () => {
 
 });
 
-// ---------------------------
-//  Gets the Hugging Face token to use for HF models, checking user token first then falling back to admin token
-// ---------------------------
-async function getHfToken() {
-    // 1. User token (localStorage)
-    const userToken = localStorage.getItem("hfToken");
-    if (userToken && userToken.trim() !== "") {
-        return userToken.trim();
-    }
-
-    // 2. Admin token (persistent storage via backend)
-    try {
-        const resp = await fetch("/api/admin/hf-token");
-        if (resp.ok) {
-            const data = await resp.json();
-            if (data.token && data.token.trim() !== "") {
-                return data.token.trim();
-            }
-        }
-    } catch (err) {
-        console.error("Error fetching admin HF token:", err);
-    }
-
-    // 3. Nothing found
-    return null;
-}

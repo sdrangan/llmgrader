@@ -160,7 +160,6 @@ async function renderAdminModelList(allowedModels) {
 
 async function saveAdminPreferences(closeModal) {
     const openaiKey = (document.getElementById("admin-openai-token")?.value ?? "").trim();
-    const hfToken   = (document.getElementById("admin-hf-token")?.value ?? "").trim();
 
     const checkboxes = document.querySelectorAll("#admin-model-list .model-allowed-checkbox");
     const allowedModels = Array.from(checkboxes)
@@ -172,7 +171,6 @@ async function saveAdminPreferences(closeModal) {
 
     const prefs = {
         openaiApiKey:  openaiKey,
-        hfToken:       hfToken,
         allowedModels: allowedModels,
         tokenLimit: {
             limit:  limitRaw !== undefined && limitRaw !== "" ? Number(limitRaw) : 0,
@@ -261,9 +259,6 @@ function initializeAdminPreferencesModal() {
 
             const openaiInput = document.getElementById("admin-openai-token");
             if (openaiInput) openaiInput.value = prefs.openaiApiKey ?? "";
-
-            const hfInput = document.getElementById("admin-hf-token");
-            if (hfInput) hfInput.value = prefs.hfToken ?? "";
 
             const limitInput = document.getElementById("admin-token-limit");
             if (limitInput) limitInput.value = prefs.tokenLimit?.limit ?? 0;

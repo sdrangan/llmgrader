@@ -27,7 +27,6 @@ from llmgrader.services.models import (
 def get_default_admin_prefs():
     return {
         "openaiApiKey": "",
-        "hfToken": "",
         "allowedModels": [],
         "tokenLimit": {
             "limit": 0,
@@ -398,20 +397,6 @@ class APIController:
             return f(*args, **kwargs)
         return decorated_function
     
-    def read_admin_hf_token(self) -> str | None:
-        """Returns the admin HF token from persistent storage, or None if missing."""
-        path = self.grader.get_admin_pref_path()
-        if not os.path.exists(path):
-            return None
-
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-                token = data.get("adminHfToken", "").strip()
-                return token if token else None
-        except Exception:
-            return None
-
     def require_admin(self, f):
         @wraps(f)
         def decorated_function(*args, **kwargs):

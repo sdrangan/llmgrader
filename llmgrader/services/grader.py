@@ -328,57 +328,11 @@ def _make_openai_caller(*, model, api_key, task, timeout, tools, ref_images,
     return call_openai
 
 
-def _make_hf_caller(*, model, api_key, task, timeout, tools, ref_images,
-                    student_images, supported_tools):
-    """Build the callable that grades one request through the HF router."""
-    import requests
-    hf_model = model.replace("hf:", "")
-    url = f"https://router.huggingface.co/models/{hf_model}/v1/chat/completions"
-    headers = {"Authorization": f"Bearer {api_key}"}
-
-    text, image_uris = _build_message_content(task, ref_images, student_images)
-    if image_uris:
-        message_content = [{"type": "text", "text": text}]
-        for data_uri in image_uris:
-            message_content.append({
-                "type": "image_url",
-                "image_url": {"url": data_uri}
-            })
-    else:
-        message_content = text
-
-    def call_hf():
-        payload = {
-            "model": hf_model,
-            "messages": [
-                {"role": "user", "content": message_content}
-            ],
-            "temperature": 0,
-        }
-
-        resp = requests.post(url, headers=headers, json=payload, timeout=timeout)
-        resp.raise_for_status()
-        data = resp.json()
-
-        # Extract assistant message
-        text_out = data["choices"][0]["message"]["content"]
-
-        # Set tokens to 0 now since HF API does not provide then
-        input_tokens = 0
-        output_tokens = 0
-
-        # Parse using your existing GradeResult model
-        return GraderRawResult.model_validate_json(normalize_json_response_text(text_out)), input_tokens, output_tokens, None
-
-    return call_hf
-
-
 #: Provider dispatch table. `ModelSpec.provider` is the key, so the registry
 #: and this table stay in sync by construction -- adding a provider is one new
 #: factory plus one entry here, with no edits to grade() or the dispatch.
 PROVIDER_CALLERS = {
     "openai": _make_openai_caller,
-    "hf": _make_hf_caller,
 }
 
 
@@ -1246,7 +1200,7 @@ class Grader:
         Parameters
         ----------
         provider: str
-            The LLM provider to use ("openai" or "hf").
+            The LLM provider to use (currently only "openai").
         model: str
             The model to use for grading.
         api_key: str
@@ -1418,7 +1372,7 @@ class Grader:
         qtag: str
             The question tag identifier.
         provider: str
-            The model provider to use for grading (e.g., "openai" or "hf").
+            The model provider to use for grading (currently only "openai").
         model: str
             The  model to use for grading.
         api_key: str | None
@@ -1762,7 +1716,6 @@ class Grader:
         """
         defaults = {
             "openaiApiKey": "",
-            "hfToken": "",
             "allowedModels": [],
             "tokenLimit": {
                 "limit": 0,
