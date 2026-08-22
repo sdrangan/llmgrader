@@ -30,6 +30,7 @@ import sys
 from datetime import datetime, timezone
 from llmgrader.services.prompt import PromptBuilder
 from llmgrader.services.unit_parser import UnitParser
+from llmgrader.services.models import get_spec
 
 def _ts():
     # timezone-aware UTC timestamp with millisecond precision
@@ -1115,13 +1116,23 @@ class Grader:
             else:
                 openai_input = task
 
+            spec = get_spec(model)
+
             def call_openai():
                 request_kwargs = {
                     "model": model,
                     "input": openai_input,
-                    "temperature": 1 if model.startswith("gpt-5-mini") else 0,
                     "timeout": timeout,
                 }
+
+                # Grading wants a deterministic answer, so ask for temperature 0
+                # where the model allows it. The GPT-5.6 family rejects the
+                # parameter outright ("Unsupported parameter: 'temperature' is
+                # not supported with this model"), so the key must be absent
+                # rather than set to any value. Unknown models are treated the
+                # same way -- omitting is the safe default.
+                if spec is not None and spec.supports_temperature:
+                    request_kwargs["temperature"] = 0
 
                 if "web_search" in requested_tools:
                     request_kwargs["tools"] = [{"type": "web_search"}]

@@ -79,3 +79,41 @@ def test_openai_multimodal_payload_wraps_content_in_user_message(tmp_path, monke
     assert request_kwargs["model"] == "gpt-5.4-mini"
     assert request_kwargs["timeout"] == 20
     assert request_kwargs["text"] == {"format": {"type": "json_object"}}
+
+
+def _request_kwargs_for_model(model, tmp_path, monkeypatch):
+    monkeypatch.setenv("LLMGRADER_STORAGE_PATH", str(tmp_path / "storage"))
+    monkeypatch.setattr("llmgrader.services.grader.OpenAI", _FakeOpenAI)
+    monkeypatch.setattr(Grader, "load_unit_pkg", lambda self: None)
+
+    grader = Grader(scratch_dir=str(tmp_path / "scratch"), soln_pkg=str(tmp_path / "pkg"))
+    call_llm = grader._make_llm_caller(
+        provider="openai",
+        model=model,
+        api_key="test-key",
+        task="Grade this solution.",
+        timeout=20,
+    )
+    call_llm()
+    return _FakeOpenAI.last_instance.responses.calls[0]
+
+
+def test_temperature_omitted_for_model_that_rejects_it(tmp_path, monkeypatch) -> None:
+    """gpt-5.6-* 400s on `temperature`, so the key must not be sent at all."""
+    request_kwargs = _request_kwargs_for_model("gpt-5.6-luna", tmp_path, monkeypatch)
+
+    assert "temperature" not in request_kwargs
+    assert request_kwargs["model"] == "gpt-5.6-luna"
+
+
+def test_temperature_sent_for_model_that_supports_it(tmp_path, monkeypatch) -> None:
+    request_kwargs = _request_kwargs_for_model("gpt-4.1-mini", tmp_path, monkeypatch)
+
+    assert request_kwargs["temperature"] == 0
+
+
+def test_temperature_omitted_for_unknown_model(tmp_path, monkeypatch) -> None:
+    """Omitting is the safe default: a wrong `temperature` is a hard 400."""
+    request_kwargs = _request_kwargs_for_model("gpt-from-the-future", tmp_path, monkeypatch)
+
+    assert "temperature" not in request_kwargs
