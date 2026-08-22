@@ -1,8 +1,33 @@
 # Plan: Refresh the supported model slate
 
-Status: draft (not yet implemented)
+Status: **steps 1-4 done** on `feature/model-registry` (3 commits, unpushed). Steps 5-10 outstanding.
 Date: 2026-08-22
 Scope: OpenAI only. Gemini support is deferred — see Appendix A.
+
+## Implementation status
+
+| Step | State |
+|---|---|
+| 1. Verify IDs and pricing | done — §4 |
+| 2. `services/models.py` + registry tests | done |
+| 3. `supports_temperature` replaces the prefix hack | done, live-verified |
+| 4. `GET /api/models` + JS wiring | done |
+| 5. `PROVIDER_CALLERS` refactor | outstanding |
+| 6. Remove Hugging Face | outstanding |
+| 7. Replace hard-coded defaults | outstanding |
+| 8. `tests/live/` + marker | outstanding |
+| 9. Run live suite, flip default | outstanding |
+| 10. Docs + example XML | outstanding |
+
+Test suite: 94 → 138, all passing under `pytest --ignore=tests/ui/`.
+
+**Independently verified 2026-08-22** (not taken from the implementation report): all 138 tests pass; every `supports_temperature` flag in both the live and deprecated registries was probed against the real API and **all seven retired models match reality**, including the non-obvious `gpt-5-mini=False`. See §9 for the one value that remains unconfirmed.
+
+Three design decisions were made during implementation that this plan had underspecified, and they are now the spec:
+
+1. **Retired models get their own `ModelSpec`, not just an alias.** §6a said aliases "resolve to live registry entries"; that is true of the alias *map*, but a spec must describe the model actually on the wire, so `get_spec("gpt-4.1-mini")` returns a `gpt-4.1-mini` spec and logs the deprecation. Both structures exist.
+2. **`gpt-5-mini` is `supports_temperature=False`**, unlike the other six retired models. The hack being removed set `temperature: 1` for it precisely because it rejects any non-default value. Since 1 is the API default, omitting the key reproduces the old wire behavior exactly. Confirmed by probe.
+3. **No tier replacement maps to `gpt-5.6-sol`.** Auto-upgrading a retired mid-tier model to $4/$20 on the shared community key is the exact risk §9 flags. `gpt-5.1`/`5.2`/`5.4` → terra; the minis and nano → luna.
 
 ## 1. Problem
 
@@ -271,7 +296,7 @@ Keep the fixture unit tiny and self-contained under `tests/live/fixtures/` (mode
 4. Add `GET /api/models`; move `app.js` / `admin.js` onto it.
 5. Refactor `_make_llm_caller` into the `PROVIDER_CALLERS` table plus an extracted shared message builder (§3).
 6. Remove Hugging Face (§5).
-7. Replace the six hard-coded server-side defaults with `DEFAULT_MODEL`.
+7. Replace the six hard-coded server-side defaults with `DEFAULT_MODEL`. **Also do the deferred piece of §3's Wiring here:** rejecting an unknown `model` with a 400 in the grade handler was consciously left out of step 4, because it pairs with this cleanup — while `gpt-4.1-mini` is still hard-coded as the default in six places, a strict unknown-model check would reject the app's own fallback.
 8. Add `tests/live/` and the `live` marker config.
 9. Run the live suite, capture the cost report, confirm rubric adherence on real submissions, then flip the default. Use the same run to sanity-check the tier boundaries — if terra and sol grade a mid-weight problem identically, the guidance in `notes` should say so.
 10. Docs and example XML.
@@ -283,6 +308,9 @@ Steps 6 and 7 remain independently shippable. Step 5 is the only one restructuri
 ## 9. Open questions
 
 - ~~**Middle tier**~~ — **resolved 2026-08-22: include `gpt-5.6-terra`.** A diverse problem set has mid-weight work that luna under-serves and sol overpays for. The pick-badly risk is handled by the guidance requirements in §4 and by pushing course authors toward `preferred_model`.
+- **`long_context_threshold` is a guess (currently 128000).** OpenAI's pricing page shows separate short/long context input rates for the whole GPT-5.6 family but **does not state the token count where the long rate begins** — confirmed by re-reading it 2026-08-22. The value is presently unverifiable from the docs and impractical to determine empirically, since the API returns token counts but not billed cost.
+
+  Impact is narrow but real: routine grading runs ~200-400 tokens, nowhere near any plausible threshold, so `cheap` and `mid` are unaffected regardless. It only matters for `sol` on long project submissions — which is exactly the case the §6b cost report exists to price. **Do not let the step-9 cost report be trusted for project grading until this is pinned down**, either from a model detail page or by comparing the billing dashboard before and after one deliberately large request. Until then, treat long-context costs as a lower bound.
 - **Admin allow-list migration:** existing `allowedModels` lists reference retired IDs. Auto-map them to the tier replacement, or reset the list and make the admin re-pick? Auto-map is friendlier; resetting is safer against accidentally enabling an expensive model on the shared community key — and with sol at $4/$20 that risk is now larger than it was under the old slate.
 
 ---
