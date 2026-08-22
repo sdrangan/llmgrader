@@ -1,6 +1,6 @@
 # Plan: Refresh the supported model slate
 
-Status: **steps 1-4 done** on `feature/model-registry` (3 commits, unpushed). Steps 5-10 outstanding.
+Status: **steps 0-7 done** on `feature/model-registry` (8 commits, unpushed). Steps 8-10 outstanding.
 Date: 2026-08-22
 Scope: OpenAI only. Gemini support is deferred — see Appendix A.
 
@@ -8,26 +8,49 @@ Scope: OpenAI only. Gemini support is deferred — see Appendix A.
 
 | Step | State |
 |---|---|
+| 0. Stop logging the shared API key | done — see below |
 | 1. Verify IDs and pricing | done — §4 |
 | 2. `services/models.py` + registry tests | done |
 | 3. `supports_temperature` replaces the prefix hack | done, live-verified |
 | 4. `GET /api/models` + JS wiring | done |
-| 5. `PROVIDER_CALLERS` refactor | outstanding |
-| 6. Remove Hugging Face | outstanding |
-| 7. Replace hard-coded defaults | outstanding |
+| 5. `PROVIDER_CALLERS` refactor | done, no behavior change |
+| 6. Remove Hugging Face | done |
+| 7. Defaults + unknown-model 400 + allow-list migration | done, live-verified |
 | 8. `tests/live/` + marker | outstanding |
 | 9. Run live suite, flip default | outstanding |
 | 10. Docs + example XML | outstanding |
 
-Test suite: 94 → 138, all passing under `pytest --ignore=tests/ui/`.
+Test suite: 94 → 138 → 163, all passing under `pytest --ignore=tests/ui/`.
+
+**Step 0 (unplanned, urgent).** `grader.py` printed the shared OpenAI key to
+stdout on every community-key grading request (`print('admin key=', ...)`) and
+dumped the whole prefs dict, including `openaiApiKey` and `hfToken`, one line
+above. On Render stdout is the log stream, so both were live credential leaks.
+Fixed in its own commit: the key print is gone, the prefs print goes through a
+new `redact_secrets()` helper. **The leaked key still needs rotating — that is
+a human action and has not been done.** A sweep of the rest of `llmgrader/`
+found no other site that prints a secret; `llmgrader_env_vars.py` masks by
+default and `generate_signing_keys.py` prints a keypair by design.
+
+**Step 7c is the deploy blocker and is now handled.** Production's
+`admin-config.json` has `allowedModels: ["gpt-4.1-mini"]`, which after the
+slate refresh matched nothing the UI could offer — every student on the
+community key would have been hard-blocked with an error telling them to pick
+another model. `Grader.load_admin_preferences` now migrates the list on read
+through `migrate_allowed_models()`: **`["gpt-4.1-mini"]` becomes
+`["gpt-5.6-luna"]`**, so the community key serves the cheap tier only and the
+admin can widen it in the UI. `GET /api/admin/preferences` applies the same
+migration so the modal cannot silently re-save a narrower list.
 
 **Independently verified 2026-08-22** (not taken from the implementation report): all 138 tests pass; every `supports_temperature` flag in both the live and deprecated registries was probed against the real API and **all seven retired models match reality**, including the non-obvious `gpt-5-mini=False`. See §9 for the one value that remains unconfirmed.
 
-Three design decisions were made during implementation that this plan had underspecified, and they are now the spec:
+Five design decisions were made during implementation that this plan had underspecified, and they are now the spec:
 
 1. **Retired models get their own `ModelSpec`, not just an alias.** §6a said aliases "resolve to live registry entries"; that is true of the alias *map*, but a spec must describe the model actually on the wire, so `get_spec("gpt-4.1-mini")` returns a `gpt-4.1-mini` spec and logs the deprecation. Both structures exist.
 2. **`gpt-5-mini` is `supports_temperature=False`**, unlike the other six retired models. The hack being removed set `temperature: 1` for it precisely because it rejects any non-default value. Since 1 is the API default, omitting the key reproduces the old wire behavior exactly. Confirmed by probe.
-3. **No tier replacement maps to `gpt-5.6-sol`.** Auto-upgrading a retired mid-tier model to $4/$20 on the shared community key is the exact risk §9 flags. `gpt-5.1`/`5.2`/`5.4` → terra; the minis and nano → luna.
+3. **No tier replacement maps to `gpt-5.6-sol`.** Auto-upgrading a retired mid-tier model to $4/$20 on the shared community key is the exact risk §9 flags. `gpt-5.1`/`5.2`/`5.4` → terra; the minis and nano → luna. This is also what makes the §9 allow-list question safe to answer with auto-map rather than reset.
+4. **`_build_message_content` is provider-neutral.** It returns `(text, image_uris)` — the annotated task and the data URIs in canonical order — and each factory wraps a URI into its own content-part shape. That is the part that had drifted between the two providers, and it is the part now covered by a test.
+5. **`mcp/blind_user_llm.py` takes the mid tier, not `DEFAULT_MODEL`.** It hard-coded `gpt-4.1`, a flagship-class model, and drives a tool-calling authoring loop rather than routine grading; dropping it to the cheap tier would be a capability downgrade. It now uses `default_for_tier("mid").id`.
 
 ## 1. Problem
 
@@ -311,7 +334,7 @@ Steps 6 and 7 remain independently shippable. Step 5 is the only one restructuri
 - **`long_context_threshold` is a guess (currently 128000).** OpenAI's pricing page shows separate short/long context input rates for the whole GPT-5.6 family but **does not state the token count where the long rate begins** — confirmed by re-reading it 2026-08-22. The value is presently unverifiable from the docs and impractical to determine empirically, since the API returns token counts but not billed cost.
 
   Impact is narrow but real: routine grading runs ~200-400 tokens, nowhere near any plausible threshold, so `cheap` and `mid` are unaffected regardless. It only matters for `sol` on long project submissions — which is exactly the case the §6b cost report exists to price. **Do not let the step-9 cost report be trusted for project grading until this is pinned down**, either from a model detail page or by comparing the billing dashboard before and after one deliberately large request. Until then, treat long-context costs as a lower bound.
-- **Admin allow-list migration:** existing `allowedModels` lists reference retired IDs. Auto-map them to the tier replacement, or reset the list and make the admin re-pick? Auto-map is friendlier; resetting is safer against accidentally enabling an expensive model on the shared community key — and with sol at $4/$20 that risk is now larger than it was under the old slate.
+- ~~**Admin allow-list migration**~~ — **resolved 2026-08-22: auto-map, in step 7c.** The safety objection to auto-mapping was that a retired mid-tier model could silently become a $4/$20 one; since no alias routes to `gpt-5.6-sol`, that cannot happen, so the friendlier option is also the safe one. Production's `["gpt-4.1-mini"]` migrates to `["gpt-5.6-luna"]`.
 
 ---
 

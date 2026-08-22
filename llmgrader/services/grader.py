@@ -30,7 +30,7 @@ import sys
 from datetime import datetime, timezone
 from llmgrader.services.prompt import PromptBuilder
 from llmgrader.services.unit_parser import UnitParser
-from llmgrader.services.models import get_spec
+from llmgrader.services.models import DEFAULT_MODEL, get_spec, migrate_allowed_models
 
 def _ts():
     # timezone-aware UTC timestamp with millisecond precision
@@ -540,7 +540,7 @@ class Grader:
             unit_name="unit1",
             qtag="basic_logic",
             student_soln="My answer...",
-            model="gpt-4.1-mini"
+            model="gpt-5.6-luna"
         )
         """
         # Build record dictionary from DB_SCHEMA columns
@@ -1351,7 +1351,7 @@ class Grader:
             unit_name: str = "",
             qtag: str = "",
             provider : str = "openai",
-            model: str="gpt-4.1-mini",
+            model: str=DEFAULT_MODEL,
             api_key: str | None = None,
             timeout: float = 20.,
             solution_images: list[str] | None = None,
@@ -1730,9 +1730,14 @@ class Grader:
         try:
             with open(path, "r", encoding="utf-8") as f:
                 prefs = json.load(f)
-                return prefs
         except (json.JSONDecodeError, OSError):
             return defaults
+
+        # A stored allow-list names models by id, so a slate refresh leaves it
+        # pointing at retired ones -- which would block every model the UI can
+        # offer. Migrate on read rather than rewriting the file.
+        prefs["allowedModels"] = migrate_allowed_models(prefs.get("allowedModels"))
+        return prefs
             
 
     

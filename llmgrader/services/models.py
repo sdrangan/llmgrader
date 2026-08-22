@@ -296,3 +296,35 @@ def is_supported(model_id: str | None) -> bool:
 def sorted_specs() -> list[ModelSpec]:
     """Live registry entries ordered cheap -> mid -> strong, for the UI."""
     return sorted(MODEL_REGISTRY.values(), key=lambda spec: TIERS.index(spec.tier))
+
+
+def migrate_allowed_models(allowed_models) -> list[str]:
+    """Map a stored admin allow-list onto live model ids.
+
+    A saved ``allowedModels`` list names the models the shared community key
+    may be used with.  After a slate refresh those ids are retired, and since
+    the gate is an exact-match test the community key would reject every model
+    the UI can still offer -- with an error telling the student to pick another
+    one, which is impossible.  So retired ids are mapped through
+    :data:`DEPRECATED_MODEL_ALIASES`, unresolvable ids are dropped, and the
+    result is de-duplicated with order preserved.
+
+    An empty list stays empty: that is a deliberate "community key disabled"
+    state, not a list waiting to be populated.
+    """
+    if not allowed_models:
+        return []
+
+    migrated: list[str] = []
+    for model_id in allowed_models:
+        if not isinstance(model_id, str):
+            continue
+        resolved = model_id if model_id in MODEL_REGISTRY else DEPRECATED_MODEL_ALIASES.get(model_id)
+        if resolved and resolved not in migrated:
+            migrated.append(resolved)
+
+    if migrated != list(allowed_models):
+        logger.info(
+            "Migrated admin allowedModels %s -> %s", list(allowed_models), migrated
+        )
+    return migrated

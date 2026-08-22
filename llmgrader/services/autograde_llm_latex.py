@@ -5,6 +5,7 @@ from agents import function_tool
 import textwrap
 import argparse
 from xilinxutils.parselatex import parse_latex_soln
+from llmgrader.services.models import DEFAULT_MODEL
 import json
 import pandas as pd
 
@@ -207,7 +208,7 @@ async def main():
     arg_parser.add_argument('--schema', type=str, default="grade_schema.csv", help='Schema file (default: grade_schema.csv)')
     arg_parser.add_argument('--qnum', type=int, nargs='+', default=None, help='Question number(s) to grade (default: None)')
     arg_parser.add_argument('--part', type=str, nargs='+', default=None, help='Part label(s) to grade (default: None)')
-    arg_parser.add_argument('--model', type=str, default="gpt-4.1-mini", help='AI model to use (default: gpt-4.1-mini)')
+    arg_parser.add_argument('--model', type=str, default=DEFAULT_MODEL, help=f'AI model to use (default: {DEFAULT_MODEL})')
     arg_parser.add_argument('--ref', type=str, default="ref_soln.tex", help='Reference solution file (default: ref_soln.tex)')
     arg_parser.add_argument('--student', type=str, default="student_soln.tex", help='Student solution file (default: student_soln.tex)')
     arg_parser.add_argument('--output', type=str, default="results.txt", help='Output file (default: results.txt)')

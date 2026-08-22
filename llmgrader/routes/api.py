@@ -20,6 +20,8 @@ import requests
 from llmgrader.services.models import (
     DEFAULT_MODEL,
     DEFAULT_PROJECT_MODEL,
+    is_supported,
+    migrate_allowed_models,
     sorted_specs,
 )
 
@@ -625,7 +627,13 @@ class APIController:
                 return jsonify({"error": "unit, qtag and student_solution are required"}), 400
 
             part_label = data.get("part_label", "all")
-            model = data.get("model", "gpt-4.1-mini")
+            model = data.get("model", DEFAULT_MODEL)
+            if not is_supported(model):
+                offered = ", ".join(spec.id for spec in sorted_specs())
+                return jsonify({
+                    "error": f"Unknown model '{model}'. Choose one of: {offered}."
+                }), 400
+
             api_key = data.get("api_key", None)
             provider = data.get("provider", None)
             timeout_seconds = self.parse_timeout_seconds(data.get("timeout", 20))
@@ -744,6 +752,9 @@ class APIController:
                 return jsonify(defaults)
 
             merged = {**defaults, **config}
+            # Show the admin the list the grader will actually enforce, so
+            # saving the modal cannot silently narrow it.
+            merged["allowedModels"] = migrate_allowed_models(merged.get("allowedModels"))
             return jsonify(merged)
 
         @bp.post("/api/admin/preferences")

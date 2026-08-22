@@ -10,6 +10,7 @@ from llmgrader.mcp.description_utils import (
     make_related_tool_description,
     make_text_content_description,
 )
+from llmgrader.services.models import DEFAULT_MODEL
 from llmgrader.services.unit_parser import UnitParser
 
 
@@ -492,7 +493,7 @@ def _question_structure() -> dict:
                 "Optional model hint for grading this question.",
                 required=False,
                 type="string",
-                example="gpt-4.1-mini",
+                example=DEFAULT_MODEL,
             ),
         },
         children={

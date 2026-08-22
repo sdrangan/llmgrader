@@ -7,6 +7,7 @@ from openai import OpenAI
 import json
 import xml.etree.ElementTree as ET
 from llmgrader.services.parselatex import parse_latex_soln, parse_grade_schema
+from llmgrader.services.models import DEFAULT_MODEL
 
 
 def compare_qtags(
@@ -118,8 +119,8 @@ def parse_args():
     parser.add_argument(
         "--model",
         type=str,
-        default="gpt-4.1-mini",
-        help="OpenAI model to use (default: gpt-4.1-mini)"
+        default=DEFAULT_MODEL,
+        help=f"OpenAI model to use (default: {DEFAULT_MODEL})"
     )
     parser.add_argument(
         "--no_openai",
