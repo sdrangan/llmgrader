@@ -57,6 +57,14 @@ class ModelSpec:
     notes: str
         USER-FACING one-line guidance rendered next to the model in the UI.
         Required, non-empty -- a blank one ships a bare model id to a student.
+    tier_default: bool
+        This model is the one its tier resolves to.  Exactly one live model
+        per tier must set it; the registry refuses to import otherwise.  A
+        retired model never sets it.
+    offer_free: bool
+        This model is offered on the shared community key by default.  It
+        seeds `allowedModels` only when an admin has never configured one --
+        a stored list always wins.  A retired model never sets it.
     """
 
     id: str
@@ -73,6 +81,8 @@ class ModelSpec:
     supports_web_search: bool
     supports_images: bool
     notes: str
+    tier_default: bool = False
+    offer_free: bool = False
 
 
 # The GPT-5.6 family (launched 2026-07-09) shares a context window, a knowledge
@@ -104,6 +114,11 @@ MODEL_REGISTRY: dict[str, ModelSpec] = {
             "Best for routine short-answer questions and single derivations "
             "— the cheapest at about $0.30 per 1,000 graded questions."
         ),
+        tier_default=True,
+        # The only model on the shared community key by default: terra and sol
+        # cost 7x and 13x per graded question, which is not something to opt an
+        # admin into by editing a registry.
+        offer_free=True,
     ),
     "gpt-5.6-terra": ModelSpec(
         id="gpt-5.6-terra",
@@ -123,6 +138,7 @@ MODEL_REGISTRY: dict[str, ModelSpec] = {
             "Best for multi-part derivations, proofs and short code — the "
             "fastest at ~2.2 s, about $2.21 per 1,000 graded questions."
         ),
+        tier_default=True,
     ),
     "gpt-5.6-sol": ModelSpec(
         id="gpt-5.6-sol",
@@ -142,14 +158,47 @@ MODEL_REGISTRY: dict[str, ModelSpec] = {
             "Best for projects and reports needing long context or web search "
             "— the most capable, about $3.89 per 1,000 graded questions."
         ),
+        tier_default=True,
     ),
 }
 
+def _tier_default(tier: str) -> ModelSpec:
+    """Return the model declared as ``tier``'s default.
+
+    Raises
+    ------
+    ValueError
+        If the tier has no live model, or does not have exactly one marked
+        ``tier_default``.  A registry that cannot say which model a tier means
+        should fail at startup rather than serve whichever entry happens to be
+        listed first.
+    """
+    candidates = [spec for spec in MODEL_REGISTRY.values() if spec.tier == tier]
+    if not candidates:
+        raise ValueError(f"No model registered for tier {tier!r}")
+
+    defaults = [spec for spec in candidates if spec.tier_default]
+    if len(defaults) != 1:
+        raise ValueError(
+            f"Tier {tier!r} must have exactly one model with tier_default=True; "
+            f"found {len(defaults)}: {[spec.id for spec in defaults]}"
+        )
+    return defaults[0]
+
+
+def _validate_tier_defaults() -> None:
+    """Every tier is populated and names exactly one default. Import-time."""
+    for tier in TIERS:
+        _tier_default(tier)
+
+
+_validate_tier_defaults()
+
 #: The cheap-tier default, used when no model is requested.
-DEFAULT_MODEL = "gpt-5.6-luna"
+DEFAULT_MODEL = _tier_default("cheap").id
 
 #: The strong-tier default, used for project and report grading.
-DEFAULT_PROJECT_MODEL = "gpt-5.6-sol"
+DEFAULT_PROJECT_MODEL = _tier_default("strong").id
 
 
 # ---------------------------------------------------------------------------
@@ -210,6 +259,10 @@ def _retired(
         supports_temperature=supports_temperature,
         supports_web_search=True,
         supports_images=True,
+        # A retired model is never a tier default and is never offered on the
+        # shared key: it stays resolvable, nothing more.
+        tier_default=False,
+        offer_free=False,
         notes=(
             f"Retired — {label} is no longer offered. "
             f"Use {replacement.label} instead."
@@ -241,6 +294,19 @@ DEPRECATED_MODEL_REGISTRY: dict[str, ModelSpec] = {
     "gpt-5.4-mini": _retired("gpt-5.4-mini", "GPT-5.4 Mini", 272_000, 0.75, 4.50),
     "gpt-5.4-nano": _retired("gpt-5.4-nano", "GPT-5.4 Nano", 272_000, 0.20, 1.20),
 }
+
+
+def _validate_retired_flags() -> None:
+    """No retired model may be a tier default or an offer-free model."""
+    for spec in DEPRECATED_MODEL_REGISTRY.values():
+        if spec.tier_default or spec.offer_free:
+            raise ValueError(
+                f"Retired model {spec.id!r} must have tier_default and "
+                f"offer_free both False"
+            )
+
+
+_validate_retired_flags()
 
 
 # ---------------------------------------------------------------------------
@@ -275,17 +341,17 @@ def get_spec(model_id: str | None) -> ModelSpec | None:
 
 
 def default_for_tier(tier: str) -> ModelSpec:
-    """Return the default (first-listed) live model for ``tier``.
+    """Return the live model declared as ``tier``'s default.
+
+    Selection is by the ``tier_default`` flag, not by position in the
+    registry.
 
     Raises
     ------
     ValueError
-        If no live model serves that tier.
+        If the tier has no live model or no single declared default.
     """
-    for spec in MODEL_REGISTRY.values():
-        if spec.tier == tier:
-            return spec
-    raise ValueError(f"No model registered for tier '{tier}'")
+    return _tier_default(tier)
 
 
 def is_supported(model_id: str | None) -> bool:
