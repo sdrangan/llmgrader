@@ -1,0 +1,336 @@
+# Plan: Refresh the supported model slate
+
+Status: draft (not yet implemented)
+Date: 2026-08-22
+Scope: OpenAI only. Gemini support is deferred — see Appendix A.
+
+## 1. Problem
+
+The supported-model list lives in the front end, is duplicated, and is stale.
+
+- `llmgrader/static/js/app.js:27-37` — `MODEL_PROVIDER` map plus `DEFAULT_MODEL = "gpt-4.1-mini"`. This is the *only* real registry.
+- `llmgrader/static/js/admin.js:126` — reads the same `MODEL_PROVIDER` global to render the admin allow-list checkboxes (implicit cross-file coupling; `admin.js` has no import).
+- Server-side defaults are hard-coded separately and drift:
+  - `llmgrader/routes/api.py:614` — `model = data.get("model", "gpt-4.1-mini")`
+  - `llmgrader/services/grader.py:1321` — `model: str = "gpt-4.1-mini"`
+  - `llmgrader/services/autograde_llm_latex.py:210`, `llmgrader/utils/create_grading_json.py:121` — CLI defaults
+  - `llmgrader/mcp/blind_user_llm.py:31` — `DEFAULT_MODEL = "gpt-4.1"`
+  - `llmgrader/mcp/unit_xml_tools.py:495` — `preferred_model` example
+- The server never validates `model` against a registry; it only checks the admin allow-list (`grader.py:1239`) when the admin key is used. A user with their own key can send any string.
+- Model-specific quirks are hard-coded as string prefix hacks: `grader.py:1122` sets `"temperature": 1 if model.startswith("gpt-5-mini") else 0`. **Confirmed by probe 2026-08-22:** all three GPT-5.6 models reject the parameter outright with `400 Unsupported parameter: 'temperature' is not supported with this model`. This is not a latent risk — it is a hard blocker on the entire slate, and it makes the fix a *prerequisite* for exposing any new model rather than a later cleanup (see §8).
+- Hugging Face is a second provider (`grader.py:1163-1211`) that is unreachable from the UI — `app.js:1500-1505` hard-fails with "Only OpenAI models are supported." Dead code plus a live token-storage surface.
+- There are no tests that any advertised model actually works.
+
+## 2. Goals
+
+1. Pick a current, small, defensible model slate.
+2. One cheap default good enough for routine question grading.
+3. One strong long-context model for project/report grading.
+4. Remove Hugging Face entirely.
+5. Add a live model test suite that is opt-in (needs a real API key).
+
+Explicitly out of scope: Gemini / multi-provider support (Appendix A).
+
+## 3. Design: a single server-side model registry
+
+Create `llmgrader/services/models.py` as the one source of truth. Everything else reads from it.
+
+```python
+@dataclass(frozen=True)
+class ModelSpec:
+    id: str                 # provider-native model id sent on the wire
+    provider: str           # dispatch key into PROVIDER_CALLERS (§3)
+    label: str              # UI display name
+    tier: str               # "cheap" | "mid" | "strong"
+    context_tokens: int
+    # OpenAI prices a long-context request higher. Store the break and both
+    # rate pairs so the cost report is not silently ~2x optimistic on exactly
+    # the project-grading requests we care most about.
+    long_context_threshold: int | None
+    usd_per_mtok_in: float
+    usd_per_mtok_out: float
+    usd_per_mtok_in_long: float | None
+    usd_per_mtok_out_long: float | None
+    supports_temperature: bool
+    supports_web_search: bool
+    supports_images: bool
+    notes: str              # USER-FACING one-line guidance, rendered in the UI
+                            # (§4) — not an internal comment. Required, non-empty.
+
+MODEL_REGISTRY: dict[str, ModelSpec]   # keyed by id
+DEFAULT_MODEL: str                     # the cheap tier default
+DEFAULT_PROJECT_MODEL: str             # the strong tier default
+```
+
+Helpers: `get_spec(model_id)`, `default_for_tier(tier)`, `is_supported(model_id)`.
+
+**Why server-side:** it lets the grader make capability decisions (temperature, tools, images) from data rather than `startswith` checks, lets the API reject unknown models, and removes the JS duplication.
+
+**On the provider seam.** The multi-provider abstraction stays — more providers are expected later (Appendix A, and others). But *keeping* it should not mean leaving it as it is. Today's `_make_llm_caller` (`grader.py:1060-1215`) is one long `if/elif/else` with the multimodal image-prep block duplicated verbatim between the openai and hf branches; that shape is why adding a provider is a scary edit rather than a drop-in.
+
+Refactor it into a real seam:
+
+```python
+# grader.py — or a new services/providers.py if it grows
+def _build_message_content(task, ref_images, student_images): ...   # shared, extracted once
+
+def _make_openai_caller(spec, model, api_key, task, timeout, tools, ...): ...
+
+PROVIDER_CALLERS: dict[str, Callable[..., Callable[[], tuple]]] = {
+    "openai": _make_openai_caller,
+}
+
+def _make_llm_caller(self, provider, model, ...):
+    try:
+        factory = PROVIDER_CALLERS[provider]
+    except KeyError:
+        raise ValueError(f"Unknown provider '{provider}'")
+    return factory(...)
+```
+
+Every caller returns the same 4-tuple contract the current code already uses: `(GraderRawResult, input_tokens, output_tokens, tool_call_summary)`. Adding a provider then means writing one factory and adding one dict entry — no edits to `grade()` or to the dispatch itself.
+
+`provider` on `ModelSpec` is the dispatch key, so the registry and the caller table stay in sync by construction (tested in §6a).
+
+### Wiring
+
+- New endpoint `GET /api/models` in `llmgrader/routes/api.py` returning `[{id, label, provider, tier, context_tokens, notes}, ...]` plus `default_model`. Public — no secrets in it.
+- `app.js`: delete the `MODEL_PROVIDER` literal and `DEFAULT_MODEL`; `populateModelSelect()` becomes async and fetches `/api/models`, caching the result. Keep the existing global-name contract (expose `window.MODEL_PROVIDER` derived from the fetch) so `admin.js:126` needs only a one-line change.
+- Render `notes` as guidance, per §4: append it to the option label (e.g. "GPT-5.6 Luna — best for routine problems, fastest and cheapest") and show it as a help line under the select when a model is chosen. Order options `cheap` → `mid` → `strong` so the list reads as a ramp. With three same-family models, `<optgroup>` is not worth it.
+- Replace the hard-coded server defaults listed in §1 with imports of `DEFAULT_MODEL`.
+- `api.py` grade-job handler: reject an unknown `model` with 400 rather than passing it through to the provider.
+
+Note: `preferred_model` in unit XML (`llmgrader/schemas/unit.xsd:95`) stays a free `xs:string` — do **not** enumerate models in the schema, or every course package breaks on each model refresh. Instead `UnitParser` warns (not errors) when `preferred_model` is not in the registry, and the grader falls back to `DEFAULT_MODEL`.
+
+## 4. Model slate
+
+Prices verified 2026-08-22 against the OpenAI docs. Re-confirm against the account before coding, since entitlements differ per org:
+
+```bash
+curl https://api.openai.com/v1/models -H "Authorization: Bearer $OPENAI_API_KEY"
+```
+
+### Current landscape
+
+OpenAI's GPT-5.6 family (launched 2026-07-09) dropped the `mini`/`nano` suffixes for three named tiers. All three share a ~1.05M-token context window, a 128K max output, and a 2026-02-16 knowledge cutoff, and all are Responses API models — which matches the existing call path at `grader.py:1132`.
+
+USD per 1M tokens, short context / long context:
+
+| Model | Input | Cached in | Output |
+|---|---|---|---|
+| `gpt-5.6-sol` | $4.00 / $8.00 | $0.40 / $0.80 | $20.00 / $30.00 |
+| `gpt-5.6-terra` | $2.00 / $4.00 | $0.20 / $0.40 | $12.00 / $18.00 |
+| `gpt-5.6-luna` | $0.20 / $0.40 | $0.02 / $0.04 | $1.20 / $1.80 |
+| `gpt-5.4` (272K ctx) | $2.50 / $5.00 | $0.25 / $0.50 | $15.00 / $22.50 |
+| `gpt-5.4-mini` | $0.75 | $0.075 | $4.50 |
+| `gpt-4.1-mini` *(today's default)* | $0.40 | $0.10 | $1.60 |
+
+`gpt-5.6-luna` undercuts the current `gpt-4.1-mini` default on both rates — half the input price, and $1.20 vs $1.60 output. Moving to the newest generation makes the cheap path cheaper, not more expensive. An earlier draft of this plan proposed `gpt-5.4-mini` / `gpt-5.4`; that slate is superseded and was strictly the worse buy.
+
+### Measured, not estimated (probe run 2026-08-22)
+
+List prices mislead for this workload. Grading is **output-dominated** — a typical single-question request is ~200 input / ~200 output tokens — so the output rate drives cost, not the headline input rate. Measured against the real request shape (Responses API, `json_object`, one correct and one wrong answer to a 2-point chain-rule rubric):
+
+| Model | $/question | $/1000 questions | Latency | Correctness floor |
+|---|---|---|---|---|
+| `gpt-5.6-luna` | $0.000305 | $0.30 | 2.8s | **PASS** |
+| `gpt-5.6-terra` | $0.002207 | $2.21 | 2.2s | PASS |
+| `gpt-5.6-sol` | $0.003894 | $3.89 | 3.1s | PASS |
+| `gpt-4.1-mini` *(current default)* | $0.000390 | $0.39 | 4.1s | **FAIL** |
+
+Consequences for the slate:
+
+- The luna → 4.1-mini saving is **~22%, not ~50%**. Real, but do not oversell it; cost is not the main argument for this migration.
+- The luna → sol gap is **~13x realized**, not the ~20x list prices suggest. Still large enough to justify two tiers rather than three.
+- All three 5.6 models are *faster* than the 4.1-mini they replace.
+- `gpt-4.1-mini` awarded **1/2 points and "partial"** to an answer that missed the chain rule entirely and satisfied zero rubric items. All three 5.6 models correctly returned 0 / "fail". **This is n=1 and not conclusive** — it is the reason §6b must run against real submissions before the default flips, not a substitute for having done so. But the direction favors the migration, and the *cheapest* new model got it right.
+
+Verified the same day: all of `gpt-5.6-luna`, `gpt-5.6-terra`, `gpt-5.6-sol` are visible to the account, as are all seven models slated for retirement (124 models total). Nothing in the slate is entitlement-blocked.
+
+### Proposed slate (3 entries — the full GPT-5.6 family)
+
+| Tier | Model | Role | Measured |
+|---|---|---|---|
+| `cheap` | `gpt-5.6-luna` | **Default.** Routine short-answer and single-derivation grading. | $0.30/1000, 2.8s |
+| `mid` | `gpt-5.6-terra` | Multi-part derivations, proofs, short code — work that needs real reasoning but not a project's context. | $2.21/1000, 2.2s |
+| `strong` | `gpt-5.6-sol` | Projects and reports; long context and web-search tool use. | $3.89/1000, 3.1s |
+
+Rationale:
+
+- `gpt-4.1-mini`, `gpt-5-mini`, `gpt-5.1`, `gpt-5.2`, `gpt-5.4`, `gpt-5.4-mini`, `gpt-5.4-nano` — all retire. Every one is dominated on price *and* capability by a 5.6 tier.
+- `gpt-5.6-terra` — **include.** A course with a diverse problem set has genuinely mid-weight work that luna under-serves and sol overpays for, and terra was the fastest model measured (2.2s) while passing the correctness floor. Taking the whole 5.6 family also keeps the registry conceptually simple: one generation, three tiers, no mixed-vintage explanations.
+
+The risk of a three-way choice is that students pick badly. That is answered with guidance, not by removing the option — which makes the guidance a **deliverable of this plan**, not an aspiration:
+
+- `ModelSpec.notes` is the user-facing one-line guidance string ("Best for routine problems — fastest and cheapest"), not an internal comment. Every entry must have one.
+- `/api/models` returns `notes`, and the UI renders it — as the option label suffix and as a help line under the select when a model is chosen. A student should not have to read the docs to pick correctly.
+- Course authors get the sharper tool: `preferred_model` in unit XML already pins a model per question (`unit.xsd:95`), so the right default is set by whoever wrote the problem. §7 docs should push authors toward setting it rather than leaving the choice to students.
+
+With `preferred_model` doing the real work, the student-facing selector is an override for the unusual case, and three options is not a burden.
+
+**Nothing currently listed is deprecated.** Only `gpt-4.1-nano` (shutdown 2026-10-23 → `gpt-5.6-luna`) and various `-chat-latest` / `-codex` variants appear in the deprecation notices, and none of those are in `MODEL_PROVIDER`. So this refresh is not urgent-broken — it is stale and overpriced. No emergency, but no reason to defer either: the migration *saves* money.
+
+Selection criteria applied, in priority order: (1) rubric adherence / instruction following on a held-out sample of real submissions, (2) reliable JSON-object output, (3) price per graded question, (4) context window for the strong tier, (5) image input support — the grader passes student and reference images (`grader.py:1098-1118`). Criteria 2-5 are settled by the table above; **criterion 1 is not, and is the thing the live suite in §6b must actually establish** before the default flips.
+
+Keep the retired IDs working server-side for one release: accept them, log a deprecation, and map them to their tier replacement. Stored `preferred_model` values in existing course XML and saved admin `allowedModels` will otherwise break.
+
+## 5. Remove Hugging Face
+
+Delete, in this order:
+
+1. `grader.py:1163-1211` — the `elif provider == "hf"` branch and its `requests` import. This removes the *HF provider*, not the provider abstraction: after the §3 refactor it is one deleted factory function and one deleted `PROVIDER_CALLERS` entry, leaving `{"openai": ...}`. Update the `provider` docstrings at `grader.py:1067` and `1342` to stop enumerating `"hf"`.
+
+   Note the HF branch is also the *only* existing example of a Chat Completions-shaped caller, which is the shape Gemini needs (Appendix A). Delete it from the live path, but it is worth reading once while writing the Gemini factory rather than starting from scratch — git history has it.
+2. `api.py:395-410` — `read_admin_hf_token` and its `/api/admin/hf-token` route; `"hfToken": ""` from `get_default_admin_prefs` (`api.py:24`) and from `grader.py:1686`.
+3. `app.js:1783-1806` — `getHfToken()`.
+4. `admin.js:159-172, 262-263` — `hfToken` read/write.
+5. `menu.js:242-343` — `hfToken` localStorage, `hf-key-*` element wiring, `setupKeyToggle('hf-key-input', ...)`.
+6. `index.html:197-201, 232-234` — the HF key input, the toggle, and the admin HF token row. Delete outright; git history has the markup if a second-provider key field is ever needed again.
+7. Docs: grep for `huggingface` under `docs/`.
+
+**Migration:** existing `admin-config.json` files contain `hfToken` / `adminHfToken`. Do not fail on unknown keys — `set_admin_preferences` (`api.py:737`) should drop them silently on the next save. Note in the release notes that the stored HF token is discarded, and that it should be revoked on the Hugging Face side.
+
+## 6. Tests
+
+### 6a. Offline (always run)
+
+`tests/services/test_model_registry.py` — no network, no key:
+
+- every registry entry has a non-empty `id` and a `tier` in `{cheap, mid, strong}`
+- **every registry entry has non-empty `notes`** — it is user-facing guidance (§4), and a blank one ships a bare model ID to a student
+- `DEFAULT_MODEL` and `DEFAULT_PROJECT_MODEL` are both in the registry, with the expected tiers
+- all three tiers are covered
+- ids are unique and each map key equals `spec.id`
+- deprecated-id aliases all resolve to live registry entries
+- **every distinct `spec.provider` in the registry has an entry in `PROVIDER_CALLERS`** — this is the test that keeps the seam honest, and the one that fails loudly if a future provider's models are added to the registry before its caller is written
+- an unknown provider raises `ValueError` from `_make_llm_caller` rather than falling through
+- the shared message builder produces identical image-part output for the same inputs regardless of caller, so the multimodal contract cannot silently diverge per provider again
+- `GET /api/models` returns every registry entry and leaks no key material
+- capability flags drive the request payload: extend `tests/services/test_grader_openai_payload.py` with a case asserting `temperature` is *absent* for a `supports_temperature=False` model and present for one that supports it — this is the regression test for the `startswith("gpt-5-mini")` hack
+
+### 6b. Live (opt-in)
+
+New `tests/live/test_models_live.py`.
+
+**Gating — two independent conditions, both required:**
+
+```python
+pytestmark = pytest.mark.live
+
+@pytest.fixture(scope="session")
+def live_enabled():
+    if os.getenv("LLMGRADER_RUN_LIVE_TESTS") != "1":
+        pytest.skip("set LLMGRADER_RUN_LIVE_TESTS=1 to run live model tests")
+    if not os.getenv("OPENAI_API_KEY"):
+        pytest.skip("OPENAI_API_KEY not set")
+```
+
+Register the marker and exclude it by default in `pyproject.toml` — the `[tool.pytest.ini_options]` block is currently empty except for comments:
+
+```toml
+[tool.pytest.ini_options]
+markers = [
+    "live: hits the real OpenAI API; requires an API key and costs money",
+]
+addopts = "-m 'not live'"
+```
+
+`addopts` keeps bare `pytest` and CI green with no key. Running them is then explicit:
+
+```bash
+LLMGRADER_RUN_LIVE_TESTS=1 OPENAI_API_KEY=... pytest tests/live -m live
+```
+
+**What each live test asserts,** parametrized over `MODEL_REGISTRY` so adding a model automatically adds coverage:
+
+1. *Reachability* — a trivial grading call returns without an API error. Catches retired/renamed IDs, which is the failure mode that produced this whole task.
+2. *Schema* — the response parses as `GraderRawResult` and `grade_post_process` yields a `GradeResult` with `0 <= points <= max_points`.
+3. *Correctness floor* — a small fixture where an unambiguously correct answer scores full marks and an unambiguously wrong one scores zero. Two questions: one recall, one short derivation. Keep it coarse — this is a smoke test, not a benchmark, and a flaky assertion here is worse than no assertion.
+4. *Capability flags* — if `supports_images`, send a tiny inline PNG and assert no error; if `supports_web_search`, run one tool-enabled call and assert a non-empty `tool_call_summary`.
+5. *Cost/latency report* — record `input_tokens`, `output_tokens`, and wall-clock per model, write `tests/live/_report.json` (gitignored), and print a summary table at session teardown. Price it from the `ModelSpec` rate fields, **selecting the long-context rate when input tokens exceed `long_context_threshold`** — otherwise project-grading cost comes out ~2x optimistic, which is the one number this report exists to get right. This is the artifact used to re-justify the slate at the next refresh.
+
+Keep the fixture unit tiny and self-contained under `tests/live/fixtures/` (model the XML on `tests/fixtures/unit_parser/unit_good.xml`). Budget: 3 models x ~5 calls x ~1-2k tokens. From the measured per-question costs in §4, a full run is roughly $0.03 — sol dominates it, and it is still negligible.
+
+**Not in CI by default.** Optionally add a manually-dispatched GitHub Actions workflow (`workflow_dispatch` plus a monthly `schedule`) that runs the live suite with a repo secret, so a silently-retired model ID is caught within a month instead of by a student mid-term.
+
+## 7. Docs
+
+- `docs/student/openai.md:34-39` — rewrite the model guidance and pricing for the three-model slate. This is the long form of the `notes` strings, with worked examples: which tier for a one-line derivative, which for a multi-part proof, which for a project. Use the measured per-question costs from §4, not list prices.
+- **New, for course authors:** a short section pushing `preferred_model` as the right place to make the choice. Per §4, if authors pin the model per question, students rarely touch the selector at all — this is the main mitigation for offering three options, so it should not be a footnote.
+- `docs/admin/buildcourse/unitxml.md:261-262` — the `preferred_model` list still says `gpt-4o-mini` / `gpt-4o`; replace with the registry and point at `/api/models` as the live list.
+- `docs/admin/buildcourse/rubrics.md:53,164` and the `example_repo/` + `llmgrader/mcp/examples/` XML — update `preferred_model` attributes to current IDs.
+- `docs/overview/dataprivacy.md:27` — the sample log line names `gpt-4.1-mini`.
+- `CLAUDE.md` — mention `services/models.py` as the model registry.
+- Add a short "How to add or retire a model" section: edit `models.py`, run the live suite, update docs. One file, one test command.
+
+## 8. Order of work
+
+1. ~~Verify live model IDs and pricing against the account~~ — **done 2026-08-22**, see §4.
+2. Add `llmgrader/services/models.py` plus `tests/services/test_model_registry.py` (offline).
+3. **Replace the `startswith` temperature hack with the `supports_temperature` flag** (`grader.py:1122`). Small and surgical — not the `PROVIDER_CALLERS` refactor, just the one capability check.
+4. Add `GET /api/models`; move `app.js` / `admin.js` onto it.
+5. Refactor `_make_llm_caller` into the `PROVIDER_CALLERS` table plus an extracted shared message builder (§3).
+6. Remove Hugging Face (§5).
+7. Replace the six hard-coded server-side defaults with `DEFAULT_MODEL`.
+8. Add `tests/live/` and the `live` marker config.
+9. Run the live suite, capture the cost report, confirm rubric adherence on real submissions, then flip the default. Use the same run to sanity-check the tier boundaries — if terra and sol grade a mid-weight problem identically, the guidance in `notes` should say so.
+10. Docs and example XML.
+
+**Ordering constraint discovered by the probe.** The temperature fix was originally bundled into the `PROVIDER_CALLERS` refactor and sequenced *after* the registry work. That is wrong: the moment `/api/models` serves a GPT-5.6 model, a user can select it, and every grading request for it 400s until `grader.py:1122` is fixed. So the temperature fix is now step 3 — before the endpoint, after the registry that supplies the flag. Steps 2-4 must ship together as one unit.
+
+Steps 6 and 7 remain independently shippable. Step 5 is the only one restructuring the grading hot path.
+
+## 9. Open questions
+
+- ~~**Middle tier**~~ — **resolved 2026-08-22: include `gpt-5.6-terra`.** A diverse problem set has mid-weight work that luna under-serves and sol overpays for. The pick-badly risk is handled by the guidance requirements in §4 and by pushing course authors toward `preferred_model`.
+- **Admin allow-list migration:** existing `allowedModels` lists reference retired IDs. Auto-map them to the tier replacement, or reset the list and make the admin re-pick? Auto-map is friendlier; resetting is safer against accidentally enabling an expensive model on the shared community key — and with sol at $4/$20 that risk is now larger than it was under the old slate.
+
+---
+
+## Appendix A: deferred — Gemini support
+
+**Deferred 2026-08-22. Low priority.** Recorded here so the work does not have to be re-derived.
+
+### Why it was deferred
+
+The original motivation was a report that students can get free Gemini API credits. That appears to be a misunderstanding of two real but different things:
+
+- **Google AI Pro / AI Plus student offer** (live as of 2026-08-20): US students get 12 months of AI Pro free ($240 value), 140+ other countries get AI Plus; redeemable through 2026-12-31. This is a *consumer subscription to the Gemini app* — study notebooks, flashcards, deep research. Google's API pricing documentation does not indicate it confers any API quota or credits.
+- **The Gemini API free tier**, which is real and separate: limited model access, free input/output tokens, AI Studio access, open to any Google account. Rate-limited, with "higher rate limits for production deployments" reserved for the paid tier.
+
+So a student could call the Gemini API for free, but not via the student offer, and not at rates suitable for a class-wide grading service. That removes the cost argument that motivated this work. What remains is second-vendor redundancy and the 2M-token context window — real but not urgent.
+
+### Model candidates (verified 2026-08-22, re-verify before use)
+
+| Tier | Model | Notes |
+|---|---|---|
+| cheap | `gemini-3.7-flash` | Stable, launched 2026-08-13. $0.75/$3.75 per 1M. ~1.05M ctx. |
+| strong | `gemini-3.1-pro-preview` | $2.00/$12.00 per 1M. 2M ctx — the largest available anywhere. |
+| (cheapest) | `gemini-3.5-flash-lite` | $0.10/$0.40 per 1M, if raw cost ever dominates. |
+| (stable fallback) | `gemini-2.5-pro` | Stable but a generation behind. |
+
+**Preview caveat.** The Gemini flagship is still `-preview` while Flash has shipped stable through 3.7 — a version skew suggesting the Pro line is mid-transition. Preview models can be withdrawn with little notice. If Gemini lands, add a `stability: "stable" | "preview"` field to `ModelSpec` and **exclude preview models from the admin community-key allow-list**, so a withdrawal can only break a user running their own key, never the shared service.
+
+### Integration sketch
+
+Two options:
+
+**A. OpenAI-compatibility endpoint (recommended for a first cut).** Point the existing OpenAI SDK at `https://generativelanguage.googleapis.com/v1beta/openai/` with the Gemini key. No new dependency. Caveat: that surface is Chat Completions, not the Responses API, so `client.responses.create` (`grader.py:1132`) does not apply — a `chat.completions.create` branch is needed, with `response_format={"type": "json_object"}` and `image_url` content parts.
+
+**B. Native `google-genai` SDK.** Full feature access (Google Search grounding as the `web_search` equivalent, native structured output). Costs a new dependency and a second response-parsing path.
+
+Ship A; move to B only if Google Search grounding is wanted for project grading, or if A's `json_object` / image-part handling diverges enough to need compatibility shims. Under A, mark `supports_web_search=False` on Gemini entries and have the UI hide the tool checkbox — `grader.py:1126-1136` would otherwise silently send an OpenAI-only `tools` payload.
+
+Implementation reduces to: write `_make_gemini_caller` (Chat Completions shaped — read the deleted HF factory in git history for the shape), add `"gemini"` to `PROVIDER_CALLERS`, and add the model entries to `MODEL_REGISTRY`. The §6a provider-coverage test fails until the caller exists, which is the intended order.
+
+### Key management
+
+- `localStorage` `geminiApiKey` for the student-supplied key.
+- Admin pref `geminiApiKey` in `admin-config.json` plus `GET /api/admin/gemini-key`, mirroring the `read_admin_hf_token` shape that §5 deletes.
+- `Grader.get_admin_key` (`grader.py:1216`) must become provider-aware — it reads `openaiApiKey` unconditionally and would hand an OpenAI key to Gemini.
+- `app.js:1497-1505` picks the key by `provider` instead of alerting.
+- Env fallback `LLMGRADER_GEMINI_API_KEY`.
+
+### Prerequisite
+
+Confirm the Gemini API tier in use does not train on submitted content, since student work is being sent. This is a hard gate, not a nice-to-have — `docs/overview/dataprivacy.md` makes claims that must stay true. `docs/overview/dataprivacy.md` would also need a note that grading requests go to Google when a Gemini model is selected.
