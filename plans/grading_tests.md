@@ -131,6 +131,10 @@ spread, and every result line needs a **margin** column: how close the score
 landed to the nearest band edge. A case sitting on the boundary is the one that
 flakes next month; the report should say so before it does.
 
+**Corrected during implementation:** "nearest band edge" over-reports, because
+some edges cannot be crossed. See the margin entry under "Implementation
+status" for the rule that shipped.
+
 ### 4. One test file per unit, not one per solution
 
 Six cases on a hard question and one on an easy one is the normal shape; one

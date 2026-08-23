@@ -16,5 +16,6 @@ unit.
 - [Unit XML](unitxml.md)
 - [Rubrics and grading notes](./rubrics.md)
 - [HTML notes](htmlnotes.md)
+- [Testing the solution](./solntest.md)
 - [Testing your grading](./gradetests.md)
 - [Upload](upload.md)

@@ -25,6 +25,7 @@ The system is intentionally lightweight — a small core that instructors can un
 - **Agent-assisted course building** through an MCP-based authoring workflow that can scan course materials, inspect example questions, draft XML, and validate the result before packaging.  
 - **LLM‑based evaluation** of student reasoning using OpenAI models, with optional tool‑assisted checks (Python execution, numeric verification, and web‑search‑augmented fact checking).  
 - **Flexible scoring logic** that instructors can customize, inspect, and iterate on.  
+- **Testable grading**, using a software unit‑testing methodology: instructors author trial solutions alongside their questions, declare the outcome each one should receive, and re‑run the whole suite from the command line to confirm that a rubric edit — or a new model — still grades the course the way they intended.  
 - **Seamless export to Gradescope**, including a standalone autograder that requires no LLM calls during grading.  
 - **Transparent, inspectable grading traces** so instructors can see *why* the model awarded points.
 - **Tool‑augmented evaluation**, including web‑search‑based retrieval of external artifacts (e.g., student GitHub repos, hosted figures, or reference materials) and, in the near future, optional Python execution for numeric checks.
