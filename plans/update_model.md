@@ -1,6 +1,6 @@
 # Plan: Refresh the supported model slate
 
-Status: **steps 0-7 merged to `main` and deployed**; steps A-C done on `feature/registry-flags` (3 commits, unpushed). Steps 8-10 outstanding.
+Status: **steps 0-7 merged to `main` and deployed**; steps A-C and 8 done on `feature/registry-flags` (4 commits, unpushed). Steps 9-10 outstanding.
 Date: 2026-08-22
 Scope: OpenAI only. Gemini support is deferred — see Appendix A.
 
@@ -16,14 +16,16 @@ Scope: OpenAI only. Gemini support is deferred — see Appendix A.
 | 5. `PROVIDER_CALLERS` refactor | done, no behavior change |
 | 6. Remove Hugging Face | done |
 | 7. Defaults + unknown-model 400 + allow-list migration | done, live-verified |
-| 8. `tests/live/` + marker | outstanding |
-| 9. Run live suite, flip default | outstanding |
+| 8. `tests/live/` + marker | done — suite run live, §4 |
+| 9. Run live suite, flip default | outstanding — live suite is green (§4); the default flip still needs real submissions |
 | 10. Docs + example XML | outstanding, **and now larger** — see below |
 | A. `tier_default` / `offer_free` on the entries | done |
 | B. `offer_free` seeds an unset allow-list | done |
 | C. Symbolic `preferred_model`, wired up | done |
 
-Test suite: 94 → 138 → 163 → 201, all passing under `pytest --ignore=tests/ui/`.
+Test suite: 94 → 138 → 163 → 201, all passing under `pytest --ignore=tests/ui/`,
+plus 49 under `pytest tests/ui/ --browser chromium`. Step 8 adds 24 live tests,
+deselected by default and reported as `201 passed, 24 deselected`.
 
 **`preferred_model` was inert until step C.** `unit_parser.py` read it and put
 it in the question dict, `parselatex.py` did the same for LaTeX sources, and
@@ -210,6 +212,49 @@ Consequences for the slate:
 
 Verified the same day: all of `gpt-5.6-luna`, `gpt-5.6-terra`, `gpt-5.6-sol` are visible to the account, as are all seven models slated for retirement (124 models total). Nothing in the slate is entitlement-blocked.
 
+### Measured by the live suite (step 8, 2026-08-22)
+
+Second independent measurement, from `pytest tests/live -m live` — six calls per
+model through the real `Grader`, so this prices the app's actual request shape
+(system prompt, rubric block, JSON contract) rather than a probe script's.
+Latency is `latency_ms` as the app records it, which includes post-processing,
+not just the API call. Raw per-call data is in `tests/live/_report.json`
+(gitignored; regenerate by re-running the suite).
+
+| Model | $/question | $/1000 questions | Mean latency | $/web-search call | Correctness floor |
+|---|---|---|---|---|---|
+| `gpt-5.6-luna` | $0.000303 | $0.30 | 2.2s | $0.0012 | **PASS** |
+| `gpt-5.6-terra` | $0.002844 | $2.84 | 2.2s | $0.0117 | PASS |
+| `gpt-5.6-sol` | $0.005350 | $5.35 | 2.9s | $0.0225 | PASS |
+
+Full run: **$0.078**, 24 tests, 44s wall clock. Token totals per model: 8,890
+in / ~700 out across the six calls.
+
+- **`$/question` here excludes the web-search call.** Search results come back
+  inside the next request's input — 4,997 tokens against ~520 for a routine
+  question — so a blended average runs about 3x the routine figure and would
+  misprice the thing the slate is chosen for. The report keeps the two
+  separate, and the `$/web-search call` column is the price of the one
+  tool-enabled call per model.
+- **luna reproduces the probe almost exactly** ($0.000303 vs $0.000305). terra
+  and sol come in ~30-40% above it, because the fixture's rubric-bearing
+  derivation question is a longer prompt than the probe's and the wrong-answer
+  calls draw more output. Treat the higher figures as the better estimate: they
+  are measured through the code path a student actually hits.
+- **All three passed the correctness floor**, on both the recall and the
+  derivation question, in both directions (full marks for correct, zero for
+  wrong). No flakiness across three runs of the suite.
+- The luna → sol gap measures **~18x** here rather than the probe's ~13x.
+- **Nothing in this run exceeded `long_context_threshold`** (largest input:
+  4,997 tokens), so every figure above is at the short-context rate and none of
+  the long-context uncertainty in §9 applies to it. That uncertainty is still
+  live for project grading, and the report labels long-context costs a lower
+  bound.
+- This is a smoke test, not a benchmark. It establishes that each model is
+  reachable, returns parseable JSON, and can tell right from wrong on
+  unambiguous input. **It does not establish rubric adherence on real student
+  work**, which is what step 9 still needs.
+
 ### Proposed slate (3 entries — the full GPT-5.6 family)
 
 | Tier | Model | Role | Measured |
@@ -313,6 +358,36 @@ LLMGRADER_RUN_LIVE_TESTS=1 OPENAI_API_KEY=... pytest tests/live -m live
 5. *Cost/latency report* — record `input_tokens`, `output_tokens`, and wall-clock per model, write `tests/live/_report.json` (gitignored), and print a summary table at session teardown. Price it from the `ModelSpec` rate fields, **selecting the long-context rate when input tokens exceed `long_context_threshold`** — otherwise project-grading cost comes out ~2x optimistic, which is the one number this report exists to get right. This is the artifact used to re-justify the slate at the next refresh.
 
 Keep the fixture unit tiny and self-contained under `tests/live/fixtures/` (model the XML on `tests/fixtures/unit_parser/unit_good.xml`). Budget: 3 models x ~5 calls x ~1-2k tokens. From the measured per-question costs in §4, a full run is roughly $0.03 — sol dominates it, and it is still negligible.
+
+**As built (step 8, 2026-08-22).** `tests/live/` holds `conftest.py`,
+`test_models_live.py` and a two-file fixture package under `fixtures/`. 24
+tests = 3 models x 8 assertions, costing 6 API calls per model. Four points
+where this section was wrong or underspecified:
+
+1. **`Grader.grade()` swallows API errors, it does not raise.** A retired model
+   id comes back as `{"result": "error", "full_explanation": "openai API call
+   failed: ..."}`, indistinguishable from a graded submission unless the test
+   looks. So "returns without an API error" is asserted as `result != "error"`
+   with the explanation surfaced in the failure message — this is the whole
+   point of the suite and it would have silently passed written naively.
+2. **`grade()` returns no token counts.** It records them by writing a
+   submission row, so the cost report reads `tokens_in` / `tokens_out` /
+   `latency_ms` back out of the run's SQLite DB (redirected to a temp dir via
+   `LLMGRADER_STORAGE_PATH`). That also means latency is the app's own
+   measurement, including post-processing, not a bare API timing.
+3. **`tool_call_summary` never reaches the caller either.** `grade_post_process`
+   folds it into `full_explanation` under a `Tool Summary:` header that appears
+   only when the summary is non-empty, so that header is the non-empty
+   assertion §6b asked for.
+4. **The blended `$/question` this section implies is misleading.** A
+   web-search call carries the search results in its *input* — 4,997 tokens
+   against ~520 for a routine question — so averaging tool-enabled and routine
+   calls together triples the per-question figure. The report separates them;
+   see §4.
+
+The cost estimate was also low: **$0.078 per full run, not ~$0.03**, because
+§6b's budget assumed ~5 calls of ~1-2k tokens and did not account for the
+web-search call's input. Still negligible.
 
 **Not in CI by default.** Optionally add a manually-dispatched GitHub Actions workflow (`workflow_dispatch` plus a monthly `schedule`) that runs the live suite with a repo secret, so a silently-retired model ID is caught within a month instead of by a student mid-term.
 

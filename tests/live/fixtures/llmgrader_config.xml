@@ -1,0 +1,13 @@
+<llmgrader>
+  <course>
+    <name>Live Smoke Course</name>
+    <term>Fall 2026</term>
+  </course>
+  <units>
+    <unit>
+      <name>Live Smoke Unit</name>
+      <source>unit_live.xml</source>
+      <destination>unit_live.xml</destination>
+    </unit>
+  </units>
+</llmgrader>

@@ -31,6 +31,13 @@ llmgrader = ["schemas/*.xsd", "mcp/resources/*.json"]
 #   pytest tests/ui/ --browser chromium
 # Regular unit tests exclude the UI suite:
 #   pytest --ignore=tests/ui/
+# Live model tests hit the real API and cost money, so they are deselected by
+# default; running them is explicit:
+#   LLMGRADER_RUN_LIVE_TESTS=1 OPENAI_API_KEY=... pytest tests/live -m live
+markers = [
+    "live: hits the real OpenAI API; requires an API key and costs money",
+]
+addopts = "-m 'not live'"
 
 [project.scripts]
 create_grading_json = "llmgrader.utils.create_grading_json:main"

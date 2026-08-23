@@ -1,0 +1,92 @@
+<unit id="live_smoke" title="Live Smoke Unit" version="1.0">
+
+  <!-- Recall. Binary credit: one part, one point, no rubric. The answer is a
+       single agreed-on fact, so "correct scores full marks, wrong scores zero"
+       is a claim about the model reading the rubric, not about its physics. -->
+  <question qtag="q_recall">
+    <question_text><![CDATA[
+    <p>Name the SI base unit of electric current and give its symbol.</p>
+    ]]></question_text>
+    <solution><![CDATA[
+    <p>The ampere, symbol <code>A</code>.</p>
+    ]]></solution>
+    <grading_notes><![CDATA[
+    Pass only if the answer names the ampere (amp) and gives the symbol A.
+    Any other unit is a fail. Spelling and capitalization do not matter.
+    ]]></grading_notes>
+    <required>true</required>
+    <partial_credit>false</partial_credit>
+    <parts>
+      <part>
+        <part_label>all</part_label>
+        <points>1</points>
+      </part>
+    </parts>
+  </question>
+
+  <!-- Short derivation. Partial credit with two rubric items of 1 point each,
+       so the awards sum to the part total and a fully correct answer can reach
+       full marks. Both items are tied to the correct result, so an answer that
+       integrates instead of differentiating earns neither. -->
+  <question qtag="q_derive">
+    <question_text><![CDATA[
+    <p>Compute the derivative of <code>f(x) = x^3</code> with respect to
+    <code>x</code>. Show the rule you used.</p>
+    ]]></question_text>
+    <solution><![CDATA[
+    <p>By the power rule, <code>f'(x) = 3x^2</code>.</p>
+    ]]></solution>
+    <grading_notes><![CDATA[
+    Award the rubric items only for a derivative. An answer that gives an
+    antiderivative such as x^4/4 earns zero on both items.
+    ]]></grading_notes>
+    <required>true</required>
+    <partial_credit>true</partial_credit>
+    <rubrics>
+      <item id="power_rule" point_adjustment="1">
+        <display_text>Applies the power rule</display_text>
+        <condition>Student differentiates using the power rule, bringing the exponent 3 down as a coefficient.</condition>
+      </item>
+      <item id="final_answer" point_adjustment="1">
+        <display_text>Correct derivative</display_text>
+        <condition>Student's final answer is 3x^2, or an exactly equivalent form.</condition>
+      </item>
+    </rubrics>
+    <parts>
+      <part>
+        <part_label>all</part_label>
+        <points>2</points>
+      </part>
+    </parts>
+  </question>
+
+  <!-- Web-search capability probe. Graded only for "the tool-enabled call came
+       back", never for its score: enabling a tool drops the json_object
+       response format, so this is the one question whose output shape is the
+       model's own doing. -->
+  <question qtag="q_web">
+    <question_text><![CDATA[
+    <p>In one sentence, state how the SI defines the ampere, and name the
+    source you used.</p>
+    ]]></question_text>
+    <solution><![CDATA[
+    <p>The ampere is defined by fixing the elementary charge <code>e</code> to
+    1.602176634 x 10^-19 coulomb, with the coulomb equal to one ampere
+    second.</p>
+    ]]></solution>
+    <grading_notes><![CDATA[
+    Accept any answer that reflects the 2019 SI redefinition in terms of the
+    elementary charge.
+    ]]></grading_notes>
+    <required>false</required>
+    <partial_credit>false</partial_credit>
+    <tool>web_search</tool>
+    <parts>
+      <part>
+        <part_label>all</part_label>
+        <points>1</points>
+      </part>
+    </parts>
+  </question>
+
+</unit>
