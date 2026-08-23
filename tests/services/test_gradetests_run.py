@@ -880,3 +880,153 @@ def test_a_band_starting_at_zero_has_no_lower_edge(tmp_path: Path, monkeypatch) 
 
     assert report.verdicts == {"PASS": 1}
     assert report.attempts[0].margin == 4.0
+
+
+# ---------------------------------------------------------------------------
+# --repeat: a verdict that depends on the run is a broken case
+# ---------------------------------------------------------------------------
+
+
+class FakeOpenAISequence:
+    """A fake that returns a different canned reply on each successive call."""
+
+    def __init__(self, payloads: list[dict]) -> None:
+        self.payloads = payloads
+        self.index = 0
+
+    def __call__(self, *args, **kwargs):
+        factory = self
+
+        class _FakeResponses:
+            def create(self, **request):
+                payload = factory.payloads[min(factory.index, len(factory.payloads) - 1)]
+                factory.index += 1
+                return _FakeResponse(json.dumps(payload))
+
+        class _FakeClient:
+            def __init__(self) -> None:
+                self.responses = _FakeResponses()
+
+        return _FakeClient()
+
+
+def test_repeat_grades_each_case_n_times(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.delenv("LLMGRADER_STORAGE_PATH", raising=False)
+    monkeypatch.chdir(tmp_path)
+    _install_fake(monkeypatch, FakeOpenAIFactory({"Take logs": BINARY_PASS}))
+
+    path = _single_case_file(tmp_path, LOG_METHOD_CASE)
+    report = run_test_files([str(path)], _options(repeat=3))
+
+    assert report.calls == 3
+    assert report.verdicts == {"PASS": 1}
+    (case,) = report.cases
+    assert [attempt.repeat_index for attempt in case.attempts] == [1, 2, 3]
+    assert [attempt.session_id for attempt in case.attempts] == [
+        "gradetest:log_method_correct#1",
+        "gradetest:log_method_correct#2",
+        "gradetest:log_method_correct#3",
+    ]
+
+
+def test_a_case_that_passes_sometimes_is_flaky_and_fails_the_run(tmp_path: Path, monkeypatch) -> None:
+    """FLAKY is a failure: a case whose verdict depends on the run is broken."""
+    monkeypatch.delenv("LLMGRADER_STORAGE_PATH", raising=False)
+    monkeypatch.chdir(tmp_path)
+
+    wrong = json.loads(json.dumps(BINARY_PASS))
+    wrong["rubric_eval"]["taking_logarithm"]["result"] = "n/a"
+    monkeypatch.setattr(
+        "llmgrader.services.grader.OpenAI",
+        FakeOpenAISequence([BINARY_PASS, wrong, BINARY_PASS]),
+    )
+
+    path = _single_case_file(tmp_path, LOG_METHOD_CASE)
+    report = run_test_files([str(path)], _options(repeat=3, jobs=1))
+
+    (case,) = report.cases
+    assert case.verdict == "FLAKY"
+    assert case.pass_count == 2
+    assert report.failed == 1
+
+
+def test_cli_repeat_shows_the_distribution(tmp_path: Path, monkeypatch, capsys) -> None:
+    from llmgrader.scripts.llmgrader_test import main as llmgrader_test_main
+
+    monkeypatch.delenv("LLMGRADER_STORAGE_PATH", raising=False)
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.chdir(tmp_path)
+
+    monkeypatch.setattr(
+        "llmgrader.services.grader.OpenAI",
+        FakeOpenAISequence(
+            [
+                _partial_reply(6.0, {"correct_u_dv": 3.0, "correct_du_v": 3.0,
+                                     "correct_integration_by_parts": 0.0, "apply_limits": 0.0}),
+                _partial_reply(8.0, {"correct_u_dv": 3.0, "correct_du_v": 3.0,
+                                     "correct_integration_by_parts": 2.0, "apply_limits": 0.0}),
+                _partial_reply(6.0, {"correct_u_dv": 3.0, "correct_du_v": 3.0,
+                                     "correct_integration_by_parts": 0.0, "apply_limits": 0.0}),
+            ]
+        ),
+    )
+    path = _single_case_file(tmp_path, PARTIAL_CASE)
+
+    exit_code = llmgrader_test_main(["run", str(path), "--repeat", "3", "--jobs", "1"])
+
+    assert exit_code == 0
+    out = capsys.readouterr().out
+    assert "6 8 6" in out  # the observed spread, not just the last score
+
+
+# ---------------------------------------------------------------------------
+# The HTML report
+# ---------------------------------------------------------------------------
+
+
+def test_html_report_is_self_contained_and_readable(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.delenv("LLMGRADER_STORAGE_PATH", raising=False)
+    monkeypatch.chdir(tmp_path)
+
+    reply = json.loads(json.dumps(BINARY_PASS))
+    reply["rubric_eval"]["taking_logarithm"] = {
+        "evidence": "The student never takes a logarithm.",
+        "result": "n/a",
+    }
+    _install_fake(monkeypatch, FakeOpenAIFactory({"Take logs": reply}))
+
+    path = _single_case_file(tmp_path, LOG_METHOD_CASE)
+    html_path = tmp_path / "report.html"
+    report = run_test_files([str(path)], _options(html=str(html_path)))
+
+    assert report.html_path == str(html_path)
+    page = html_path.read_text(encoding="utf-8")
+
+    # No external assets: nothing to fetch when it opens from a file:// URL.
+    assert "http://" not in page and "https://" not in page
+    assert "<script" not in page
+
+    assert "log_method_correct" in page
+    assert "Compute the derivative" in page  # the question text
+    assert "Take logs" in page  # the submitted solution
+    assert "Correct: taking logs of both sides is a valid route." in page  # the feedback
+    assert "The student never takes a logarithm." in page  # the evidence
+    assert 'class="badge FAIL"' in page
+    assert 'class="bad"' in page  # the failing expectation is highlighted
+    # The markdown table the grader appends renders as a table.
+    assert "<th>Part</th>" in page
+
+
+def test_html_report_shows_every_repeat(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.delenv("LLMGRADER_STORAGE_PATH", raising=False)
+    monkeypatch.chdir(tmp_path)
+    _install_fake(monkeypatch, FakeOpenAIFactory({"Take logs": BINARY_PASS}))
+
+    path = _single_case_file(tmp_path, LOG_METHOD_CASE)
+    html_path = tmp_path / "report.html"
+    run_test_files([str(path)], _options(repeat=2, jobs=1, html=str(html_path)))
+
+    page = html_path.read_text(encoding="utf-8")
+    assert "Attempt 1" in page
+    assert "Attempt 2" in page
+    assert "2/2 attempts passed" in page

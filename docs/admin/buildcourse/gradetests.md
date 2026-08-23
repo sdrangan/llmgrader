@@ -308,6 +308,30 @@ llmgrader_test run unit1/tests/calculus_tests.xml --html report.html
 passes once but only 2 times in 3 is a case whose band is too tight, and it is
 better to find that out now than during grading week.
 
+Such a case is reported as **`FLAKY`**, and `FLAKY` **fails the run**. A case
+whose verdict depends on which run you happened to make is not a working test,
+whichever way the majority fell — widen the band, or assert on the rubric item
+you actually care about instead of the total.
+
+`run` exits `0` when every case passed, `1` when any case failed or came out
+flaky, and `2` when it could not start — no API key, a qtag that does not
+exist, or a run that would exceed `--max-calls`. A `WARN` on the band edge does
+not fail the run.
+
+Two options are worth knowing before you spend anything:
+
+```bash
+# Refuse to start if this would cost more than you meant
+llmgrader_test run unit1/tests/calculus_tests.xml --repeat 5 --max-calls 20
+
+# Add a dollar estimate to the summary (token counts are always reported)
+llmgrader_test run unit1/tests/calculus_tests.xml --cost
+```
+
+The dollar figure is derived from the model registry's own rates. Any call
+billed at a long-context rate is priced as a lower bound, and the command says
+so — treat it as an estimate, not an invoice.
+
 ## Reading the report
 
 The terminal output is a summary — enough to see what passed and to locate a
@@ -340,6 +364,11 @@ The HTML report is the one to open when a case fails for a reason you do not
 immediately understand. Reading the grader's own evidence usually shows whether
 the rubric condition was ambiguous, the reference solution was incomplete, or
 the test case itself was wrong.
+
+It is a single self-contained file with no external assets, so it opens
+straight from disk. One consequence: LaTeX in a question appears as source
+rather than as typeset maths, because typesetting it would mean loading
+MathJax from the network.
 
 Note the `margin` column: it shows how close a passing score landed to the
 edge of its band. A case passing with margin 0 is one run away from failing,

@@ -1489,6 +1489,7 @@ class AttemptResult:
     latency_ms: int | None = None
     timed_out: bool = False
     reference_image_count: int = 0
+    question_text: str = ""
     error: str | None = None
 
     @property
@@ -1504,6 +1505,21 @@ class AttemptResult:
         if self.margin is not None and self.margin <= _TOLERANCE:
             return VERDICT_WARN
         return VERDICT_PASS
+
+    def failed_rubric_ids(self) -> set[str]:
+        """Rubric items an expectation failed on, for highlighting."""
+        return {
+            match.group(1)
+            for match in (re.match(r"rubric `([^`]+)`", failure) for failure in self.failures)
+            if match
+        }
+
+    def failed_part_labels(self) -> set[str]:
+        return {
+            match.group(1)
+            for match in (re.match(r"part '([^']+)'", failure) for failure in self.failures)
+            if match
+        }
 
     def failure_lines(self) -> list[tuple[str, str]]:
         """Each failure paired with the evidence behind it, where there is one.
@@ -1916,6 +1932,7 @@ def _grade_attempt(item: _PlannedCase, repeat_index: int, options: RunOptions, e
         solution=item.case.solution,
         expectations=_expectations(item.case),
         reference_image_count=len(item.question_dict.get("solution_images") or []),
+        question_text=str(item.question_dict.get("question_text") or ""),
     )
 
     try:
@@ -2041,6 +2058,8 @@ def run_test_files(paths, options: RunOptions | None = None, *, progress=None) -
 
         if options.out and not options.dry_run:
             report.report_path = write_json_report(report, options.out)
+        if options.html and not options.dry_run:
+            report.html_path = write_html_report(report, options.html)
 
         return report
     finally:
@@ -2060,4 +2079,328 @@ def write_json_report(report: RunReport, path: str) -> str:
         os.makedirs(directory, exist_ok=True)
     with open(path, "w", encoding="utf-8") as handle:
         json.dump(report.to_dict(), handle, indent=2)
+    return path
+
+
+# ---------------------------------------------------------------------------
+# The HTML report
+# ---------------------------------------------------------------------------
+
+
+_HTML_STYLE = """
+:root { color-scheme: light dark; }
+body { font-family: -apple-system, Segoe UI, Roboto, Helvetica, sans-serif;
+       margin: 0 auto; max-width: 60rem; padding: 2rem 1rem 6rem;
+       line-height: 1.5; color: #1b1b1b; background: #fbfbfa; }
+h1 { font-size: 1.5rem; margin-bottom: 0.25rem; }
+h2 { font-size: 1.15rem; margin: 0; }
+h3 { font-size: 0.95rem; margin: 1.25rem 0 0.35rem; text-transform: uppercase;
+     letter-spacing: 0.04em; color: #666; font-weight: 600; }
+.sub { color: #666; margin-top: 0; }
+.case { border: 1px solid #ddd; border-radius: 6px; margin: 1.5rem 0;
+        padding: 1rem 1.25rem 1.25rem; background: #fff; }
+.case.failed { border-color: #c0392b; }
+.case.warned { border-color: #b8860b; }
+.badge { display: inline-block; padding: 0.1rem 0.5rem; border-radius: 4px;
+         font-size: 0.75rem; font-weight: 700; letter-spacing: 0.05em;
+         vertical-align: 0.15em; margin-right: 0.6rem; color: #fff; }
+.badge.PASS  { background: #2e7d32; }
+.badge.WARN  { background: #b8860b; }
+.badge.FAIL  { background: #c0392b; }
+.badge.FLAKY { background: #8e44ad; }
+.badge.ERROR { background: #444; }
+.meta { color: #666; font-size: 0.85rem; margin: 0.35rem 0 0; }
+.description { font-style: italic; color: #444; margin: 0.75rem 0; }
+table { border-collapse: collapse; width: 100%; font-size: 0.9rem; margin: 0.5rem 0; }
+th, td { border: 1px solid #ddd; padding: 0.35rem 0.5rem; text-align: left;
+         vertical-align: top; }
+th { background: #f2f2f0; font-weight: 600; }
+tr.bad td { background: #fdecea; }
+pre, .solution { white-space: pre-wrap; word-wrap: break-word; background: #f7f7f5;
+                 border: 1px solid #e4e4e0; border-radius: 4px; padding: 0.75rem;
+                 font-size: 0.88rem; margin: 0.5rem 0; }
+.failure { color: #a02622; font-size: 0.9rem; margin: 0.2rem 0; }
+.evidence { color: #555; font-size: 0.85rem; margin: 0 0 0.5rem 1.2rem; }
+.attempt { border-top: 1px dashed #ddd; margin-top: 1rem; padding-top: 0.75rem; }
+.question { background: #f7f9fb; border: 1px solid #e0e6ec; border-radius: 4px;
+            padding: 0.75rem; font-size: 0.9rem; }
+@media (prefers-color-scheme: dark) {
+  body { color: #e8e8e6; background: #17181a; }
+  .case { background: #1f2023; border-color: #35363a; }
+  .question { background: #1b2026; border-color: #2c333b; }
+  th { background: #26272b; }
+  th, td { border-color: #35363a; }
+  tr.bad td { background: #3a1f1e; }
+  pre, .solution { background: #212226; border-color: #35363a; }
+  .sub, .meta, h3 { color: #9a9a97; }
+  .description { color: #bdbdba; }
+  .evidence { color: #a8a8a5; }
+}
+"""
+
+
+def _escape(text) -> str:
+    return (
+        str(text if text is not None else "")
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+    )
+
+
+def _render_markdownish(text: str) -> str:
+    """Render the grader's feedback: pipe tables become tables, the rest is text.
+
+    ``append_rubric_feedback`` puts markdown tables in the feedback a student
+    sees, so a report that showed the raw pipes would be harder to read than
+    the app is.  This is deliberately not a markdown implementation -- it
+    handles the one construct the grader actually emits.
+    """
+    if not text:
+        return ""
+
+    html: list[str] = []
+    rows: list[list[str]] = []
+
+    def flush_table() -> None:
+        if not rows:
+            return
+        header, body = rows[0], rows[1:]
+        # A markdown table's second row is the |---|---| separator.
+        if body and all(set(cell) <= set("-: ") for cell in body[0]):
+            body = body[1:]
+        html.append("<table><thead><tr>")
+        html.extend(f"<th>{_escape(cell)}</th>" for cell in header)
+        html.append("</tr></thead><tbody>")
+        for row in body:
+            html.append("<tr>" + "".join(f"<td>{_escape(cell)}</td>" for cell in row) + "</tr>")
+        html.append("</tbody></table>")
+        rows.clear()
+
+    paragraph: list[str] = []
+
+    def flush_paragraph() -> None:
+        if paragraph:
+            html.append("<p>" + _escape("\n".join(paragraph)).replace("\n", "<br>") + "</p>")
+            paragraph.clear()
+
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("|") and stripped.endswith("|"):
+            flush_paragraph()
+            rows.append([cell.strip() for cell in stripped.strip("|").split("|")])
+            continue
+        flush_table()
+        if not stripped:
+            flush_paragraph()
+        else:
+            paragraph.append(line)
+
+    flush_table()
+    flush_paragraph()
+    return "".join(html)
+
+
+def _expectation_rows(attempt: AttemptResult) -> str:
+    failed_parts = attempt.failed_part_labels()
+    failed_rubrics = attempt.failed_rubric_ids()
+    rows: list[str] = []
+
+    if attempt.expectations.get("result") is not None:
+        bad = any(failure.startswith("result:") for failure in attempt.failures)
+        rows.append(
+            f'<tr class="{"bad" if bad else ""}"><td>overall result</td>'
+            f'<td>{_escape(attempt.expectations["result"])}</td>'
+            f"<td>{_escape(attempt.result)}</td></tr>"
+        )
+
+    for band in attempt.expectations.get("points") or []:
+        label = band["label"]
+        scored = attempt.part_scores.get(label)
+        rows.append(
+            f'<tr class="{"bad" if label in failed_parts else ""}">'
+            f"<td>part <code>{_escape(label)}</code></td>"
+            f'<td>{_escape(_band_text(band["min"], band["max"]))}</td>'
+            f'<td>{"-" if scored is None else _escape(_num(float(scored)))}</td></tr>'
+        )
+
+    for expectation in attempt.expectations.get("rubrics") or []:
+        item_id = expectation["id"]
+        entry = attempt.rubric_eval.get(item_id) or {}
+        if expectation["expect"] is not None:
+            expected = expectation["expect"]
+            actual = entry.get("result")
+        else:
+            expected = _band_text(expectation["min"], expectation["max"])
+            actual = entry.get("point_awarded")
+            actual = None if actual is None else _num(float(actual))
+        rows.append(
+            f'<tr class="{"bad" if item_id in failed_rubrics else ""}">'
+            f"<td>rubric <code>{_escape(item_id)}</code></td>"
+            f"<td>{_escape(expected)}</td>"
+            f'<td>{"-" if actual is None else _escape(actual)}</td></tr>'
+        )
+
+    if not rows:
+        return ""
+    return (
+        "<h3>Expectations</h3><table><thead><tr><th>Claim</th><th>Expected</th>"
+        "<th>Actual</th></tr></thead><tbody>" + "".join(rows) + "</tbody></table>"
+    )
+
+
+def _rubric_rows(attempt: AttemptResult) -> str:
+    if not attempt.rubric_eval:
+        return ""
+
+    failed_rubrics = attempt.failed_rubric_ids()
+    rows = []
+    for item_id, entry in attempt.rubric_eval.items():
+        if hasattr(entry, "model_dump"):
+            entry = entry.model_dump()
+        entry = entry if isinstance(entry, dict) else {}
+        outcome = entry.get("result")
+        if outcome is None and entry.get("point_awarded") is not None:
+            outcome = _num(float(entry["point_awarded"]))
+        rows.append(
+            f'<tr class="{"bad" if item_id in failed_rubrics else ""}">'
+            f"<td><code>{_escape(item_id)}</code></td>"
+            f"<td>{_escape(outcome)}</td>"
+            f'<td>{_escape(entry.get("evidence"))}</td></tr>'
+        )
+
+    return (
+        "<h3>Rubric evidence</h3><table><thead><tr><th>Item</th><th>Outcome</th>"
+        "<th>Evidence the grader cited</th></tr></thead><tbody>"
+        + "".join(rows)
+        + "</tbody></table>"
+    )
+
+
+def _attempt_html(attempt: AttemptResult, *, show_index: bool) -> str:
+    parts: list[str] = ['<div class="attempt">']
+    heading = f"Attempt {attempt.repeat_index}" if show_index else "Result"
+    score = ""
+    if attempt.points is not None:
+        score = f" &mdash; {_num(float(attempt.points))}"
+        if attempt.max_points is not None:
+            score += f" / {_num(float(attempt.max_points))}"
+    elif attempt.result:
+        score = f" &mdash; {_escape(attempt.result)}"
+    parts.append(f"<h3>{heading}{score}</h3>")
+
+    if attempt.error is not None:
+        parts.append(f'<p class="failure">{_escape(attempt.error)}</p>')
+        parts.append("</div>")
+        return "".join(parts)
+
+    for failure, evidence in attempt.failure_lines():
+        parts.append(f'<p class="failure">{_escape(failure)}</p>')
+        if evidence:
+            parts.append(f'<p class="evidence">evidence: {_escape(evidence)}</p>')
+
+    parts.append(_expectation_rows(attempt))
+    parts.append("<h3>Feedback the student would see</h3>")
+    parts.append(_render_markdownish(attempt.feedback) or "<p>(none)</p>")
+    if attempt.full_explanation:
+        parts.append("<h3>Full explanation</h3>")
+        parts.append(_render_markdownish(attempt.full_explanation))
+    parts.append(_rubric_rows(attempt))
+    parts.append(
+        f'<p class="meta">{attempt.model} &middot; '
+        f"{attempt.tokens_in or 0:,} in / {attempt.tokens_out or 0:,} out &middot; "
+        f'{(attempt.latency_ms or 0) / 1000:.1f} s{" &middot; timed out" if attempt.timed_out else ""}</p>'
+    )
+    parts.append("</div>")
+    return "".join(parts)
+
+
+def _case_html(case: CaseRun, question_text: str) -> str:
+    css_class = "case"
+    if case.verdict in FAILING_VERDICTS:
+        css_class += " failed"
+    elif case.verdict == VERDICT_WARN:
+        css_class += " warned"
+
+    parts = [f'<div class="{css_class}" id="case-{_escape(case.case_id)}">']
+    parts.append(
+        f'<h2><span class="badge {case.verdict}">{case.verdict}</span>'
+        f"<code>{_escape(case.case_id)}</code></h2>"
+    )
+    parts.append(
+        f'<p class="meta">{_escape(case.qtag)} &middot; '
+        f'{"partial credit" if case.partial_credit else "binary"} &middot; {_escape(case.model)}'
+        + (f" &middot; {case.pass_count}/{len(case.attempts)} attempts passed"
+           if len(case.attempts) > 1 else "")
+        + "</p>"
+    )
+    if case.description.strip():
+        parts.append(f'<p class="description">{_escape(" ".join(case.description.split()))}</p>')
+
+    if question_text:
+        parts.append("<h3>Question</h3>")
+        # The question is the instructor's own authored HTML.
+        parts.append(f'<div class="question">{question_text}</div>')
+
+    if case.attempts:
+        parts.append("<h3>Submitted solution</h3>")
+        parts.append(f'<div class="solution">{_escape(case.attempts[0].solution)}</div>')
+
+    for attempt in case.attempts:
+        parts.append(_attempt_html(attempt, show_index=len(case.attempts) > 1))
+
+    parts.append("</div>")
+    return "".join(parts)
+
+
+def write_html_report(report: RunReport, path: str) -> str:
+    """Write the readable report: the artifact for "why did it grade that way".
+
+    Self-contained, no external assets, so it opens from a file:// URL with no
+    network.  LaTeX in a question renders as source rather than as maths --
+    typesetting it would need MathJax, and pulling that in would break the
+    self-contained property for the sake of the least important part of the
+    page.
+    """
+    verdicts = report.verdicts
+    summary = (
+        f'{verdicts.get(VERDICT_PASS, 0)} passed, {verdicts.get(VERDICT_FAIL, 0)} failed'
+        + (f", {verdicts[VERDICT_FLAKY]} flaky" if verdicts.get(VERDICT_FLAKY) else "")
+        + (f", {verdicts[VERDICT_ERROR]} errored" if verdicts.get(VERDICT_ERROR) else "")
+        + (f", {verdicts[VERDICT_WARN]} warning" if verdicts.get(VERDICT_WARN) else "")
+    )
+
+    body: list[str] = [
+        "<h1>Grading test report</h1>",
+        f'<p class="sub">{_escape(summary)} &middot; {report.calls} calls &middot; '
+        f"{report.tokens_in:,} tokens in / {report.tokens_out:,} out &middot; "
+        f"{report.elapsed_seconds:.1f} s &middot; "
+        f'{_escape(datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"))}</p>',
+    ]
+
+    for file_run in report.files:
+        body.append(
+            f'<h2 style="margin-top:2rem">{_escape(file_run.path)}</h2>'
+            f'<p class="meta">unit: {_escape(file_run.unit_file)} '
+            f"({_escape(file_run.unit_label)}) &middot; {len(file_run.cases)} cases</p>"
+        )
+        for case in file_run.cases:
+            question_text = case.attempts[0].question_text if case.attempts else ""
+            body.append(_case_html(case, question_text))
+
+    document = (
+        "<!doctype html>\n<html lang=\"en\"><head><meta charset=\"utf-8\">"
+        '<meta name="viewport" content="width=device-width, initial-scale=1">'
+        "<title>Grading test report</title><style>"
+        + _HTML_STYLE
+        + "</style></head><body>"
+        + "".join(body)
+        + "</body></html>\n"
+    )
+
+    directory = os.path.dirname(os.path.abspath(path))
+    if directory:
+        os.makedirs(directory, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as handle:
+        handle.write(document)
     return path
