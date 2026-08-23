@@ -31,7 +31,7 @@ from datetime import datetime, timezone
 from llmgrader.services.prompt import PromptBuilder
 from llmgrader.services.unit_parser import UnitParser
 from llmgrader.services.models import (
-    DEFAULT_MODEL,
+    DEFAULT_MODEL_SIMPLE,
     get_spec,
     migrate_allowed_models,
     resolve_preferred_model,
@@ -71,7 +71,7 @@ def preferred_model_for(question_dict, qtag: str | None = None) -> str | None:
     """Resolve a question's authored ``preferred_model`` to a live model id.
 
     Returns None when the question has no preference or names something that
-    cannot be resolved, so the caller falls back to DEFAULT_MODEL. This never
+    cannot be resolved, so the caller falls back to DEFAULT_MODEL_SIMPLE. This never
     raises into a student's grading request -- a typo in course XML degrades
     to the default and shows up in the logs.
     """
@@ -1392,7 +1392,7 @@ class Grader:
             The model provider to use for grading (currently only "openai").
         model: str | None
             The model to use for grading.  When None, the question's
-            preferred_model is used, falling back to DEFAULT_MODEL.
+            preferred_model is used, falling back to DEFAULT_MODEL_SIMPLE.
         api_key: str | None
             The API key (either OpenAI API key or Hugging Face token) to use for authentication.
         timeout: float
@@ -1410,8 +1410,9 @@ class Grader:
             Note the pydantic GradeResult model is converted to a dict before returning.
         """
         # An explicitly requested model always wins; otherwise the question's
-        # preferred_model sets the default, and DEFAULT_MODEL backstops both.
-        model = model or preferred_model_for(question_dict, qtag) or DEFAULT_MODEL
+        # preferred_model sets the default, and DEFAULT_MODEL_SIMPLE backstops
+        # both.
+        model = model or preferred_model_for(question_dict, qtag) or DEFAULT_MODEL_SIMPLE
 
         question_text = str(question_dict.get("question_text", ""))
         solution = str(question_dict.get("solution", ""))

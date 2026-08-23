@@ -5,8 +5,8 @@ import logging
 import pytest
 
 from llmgrader.services.models import (
-    DEFAULT_MODEL,
-    DEFAULT_PROJECT_MODEL,
+    DEFAULT_MODEL_COMPLEX,
+    DEFAULT_MODEL_SIMPLE,
     DEPRECATED_MODEL_ALIASES,
     DEPRECATED_MODEL_REGISTRY,
     MODEL_REGISTRY,
@@ -52,10 +52,10 @@ def test_all_tiers_are_covered() -> None:
 
 
 def test_defaults_are_registered_with_expected_tiers() -> None:
-    assert DEFAULT_MODEL in MODEL_REGISTRY
-    assert DEFAULT_PROJECT_MODEL in MODEL_REGISTRY
-    assert MODEL_REGISTRY[DEFAULT_MODEL].tier == "cheap"
-    assert MODEL_REGISTRY[DEFAULT_PROJECT_MODEL].tier == "strong"
+    assert DEFAULT_MODEL_SIMPLE in MODEL_REGISTRY
+    assert DEFAULT_MODEL_COMPLEX in MODEL_REGISTRY
+    assert MODEL_REGISTRY[DEFAULT_MODEL_SIMPLE].tier == "simple"
+    assert MODEL_REGISTRY[DEFAULT_MODEL_COMPLEX].tier == "complex"
 
 
 @pytest.mark.parametrize("model_id", sorted(MODEL_REGISTRY))
@@ -73,8 +73,8 @@ def test_long_context_rates_are_consistent(model_id: str) -> None:
         assert spec.usd_per_mtok_out_long >= spec.usd_per_mtok_out
 
 
-def test_sorted_specs_ramps_cheap_to_strong() -> None:
-    assert [spec.tier for spec in sorted_specs()] == ["cheap", "mid", "strong"]
+def test_sorted_specs_ramps_simple_to_complex() -> None:
+    assert [spec.tier for spec in sorted_specs()] == ["simple", "standard", "complex"]
     assert {spec.id for spec in sorted_specs()} == set(MODEL_REGISTRY)
 
 
@@ -83,7 +83,7 @@ def test_sorted_specs_ramps_cheap_to_strong() -> None:
 # ---------------------------------------------------------------------------
 
 def test_get_spec_returns_the_live_entry() -> None:
-    assert get_spec(DEFAULT_MODEL) is MODEL_REGISTRY[DEFAULT_MODEL]
+    assert get_spec(DEFAULT_MODEL_SIMPLE) is MODEL_REGISTRY[DEFAULT_MODEL_SIMPLE]
 
 
 @pytest.mark.parametrize("model_id", [None, "", "gpt-does-not-exist"])
@@ -154,5 +154,5 @@ def test_using_a_retired_id_logs_a_deprecation_warning(caplog) -> None:
 
 def test_live_models_do_not_log_a_deprecation_warning(caplog) -> None:
     with caplog.at_level(logging.WARNING, logger="llmgrader.services.models"):
-        get_spec(DEFAULT_MODEL)
+        get_spec(DEFAULT_MODEL_SIMPLE)
     assert not caplog.records

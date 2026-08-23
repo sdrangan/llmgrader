@@ -6,8 +6,8 @@ import pytest
 
 from llmgrader.services import models
 from llmgrader.services.models import (
-    DEFAULT_MODEL,
-    DEFAULT_PROJECT_MODEL,
+    DEFAULT_MODEL_COMPLEX,
+    DEFAULT_MODEL_SIMPLE,
     DEPRECATED_MODEL_REGISTRY,
     MODEL_REGISTRY,
     TIERS,
@@ -31,22 +31,22 @@ def test_every_tier_is_populated() -> None:
 
 
 def test_defaults_are_derived_from_the_flags() -> None:
-    assert DEFAULT_MODEL == default_for_tier("cheap").id
-    assert DEFAULT_PROJECT_MODEL == default_for_tier("strong").id
-    assert MODEL_REGISTRY[DEFAULT_MODEL].tier_default
-    assert MODEL_REGISTRY[DEFAULT_PROJECT_MODEL].tier_default
+    assert DEFAULT_MODEL_SIMPLE == default_for_tier("simple").id
+    assert DEFAULT_MODEL_COMPLEX == default_for_tier("complex").id
+    assert MODEL_REGISTRY[DEFAULT_MODEL_SIMPLE].tier_default
+    assert MODEL_REGISTRY[DEFAULT_MODEL_COMPLEX].tier_default
 
 
 def test_default_for_tier_ignores_registry_order(monkeypatch) -> None:
     """The declaration wins, not whichever entry is listed first."""
-    mid = default_for_tier("mid")
-    decoy = dataclasses.replace(mid, id="decoy-mid", tier_default=False)
+    standard = default_for_tier("standard")
+    decoy = dataclasses.replace(standard, id="decoy-standard", tier_default=False)
 
     monkeypatch.setattr(
-        models, "MODEL_REGISTRY", {"decoy-mid": decoy, **MODEL_REGISTRY}
+        models, "MODEL_REGISTRY", {"decoy-standard": decoy, **MODEL_REGISTRY}
     )
 
-    assert models.default_for_tier("mid").id == mid.id
+    assert models.default_for_tier("standard").id == standard.id
 
 
 def test_a_tier_with_no_declared_default_raises(monkeypatch) -> None:
@@ -57,39 +57,39 @@ def test_a_tier_with_no_declared_default_raises(monkeypatch) -> None:
     monkeypatch.setattr(models, "MODEL_REGISTRY", stripped)
 
     with pytest.raises(ValueError, match="exactly one"):
-        models.default_for_tier("cheap")
+        models.default_for_tier("simple")
 
 
 def test_a_tier_with_two_declared_defaults_raises(monkeypatch) -> None:
-    cheap = default_for_tier("cheap")
-    twin = dataclasses.replace(cheap, id="twin-cheap")
-    monkeypatch.setattr(models, "MODEL_REGISTRY", {**MODEL_REGISTRY, "twin-cheap": twin})
+    simple = default_for_tier("simple")
+    twin = dataclasses.replace(simple, id="twin-simple")
+    monkeypatch.setattr(models, "MODEL_REGISTRY", {**MODEL_REGISTRY, "twin-simple": twin})
 
     with pytest.raises(ValueError, match="exactly one"):
-        models.default_for_tier("cheap")
+        models.default_for_tier("simple")
 
 
 def test_an_empty_tier_raises(monkeypatch) -> None:
     monkeypatch.setattr(
         models,
         "MODEL_REGISTRY",
-        {k: v for k, v in MODEL_REGISTRY.items() if v.tier != "strong"},
+        {k: v for k, v in MODEL_REGISTRY.items() if v.tier != "complex"},
     )
 
     with pytest.raises(ValueError, match="No model registered for tier"):
-        models.default_for_tier("strong")
+        models.default_for_tier("complex")
 
 
 # ---------------------------------------------------------------------------
 #  offer_free
 # ---------------------------------------------------------------------------
 
-def test_only_the_cheap_default_is_offered_free() -> None:
+def test_only_the_simple_default_is_offered_free() -> None:
     """A $4/$20 model must not land on the shared key by default."""
     offered = [spec.id for spec in MODEL_REGISTRY.values() if spec.offer_free]
 
-    assert offered == [DEFAULT_MODEL]
-    assert MODEL_REGISTRY[offered[0]].tier == "cheap"
+    assert offered == [DEFAULT_MODEL_SIMPLE]
+    assert MODEL_REGISTRY[offered[0]].tier == "simple"
 
 
 def test_no_retired_model_is_a_default_or_offered_free() -> None:

@@ -28,8 +28,8 @@ function maybeShowValidationAlert(message) {
 // the source of truth. MODEL_PROVIDER stays a global (window.MODEL_PROVIDER)
 // because admin.js reads it to render the allow-list.
 var MODEL_PROVIDER = {};
-let MODEL_CATALOG = [];        // full specs, already ordered cheap -> mid -> strong
-let DEFAULT_MODEL = "";
+let MODEL_CATALOG = [];        // full specs, already ordered simple -> standard -> complex
+let DEFAULT_MODEL_SIMPLE = "";
 let modelCatalogPromise = null;
 
 const GRADE_POLL_INTERVAL_MS = 1000;
@@ -44,7 +44,10 @@ function loadModelCatalog() {
             })
             .then(data => {
                 MODEL_CATALOG = Array.isArray(data.models) ? data.models : [];
-                DEFAULT_MODEL = data.default_model || (MODEL_CATALOG[0] || {}).id || "";
+                // The simple tier is the app-wide default selection; the
+                // catalog is ordered simple-first, so index 0 is the same
+                // model if an older cached payload lacks the key.
+                DEFAULT_MODEL_SIMPLE = data.default_model_simple || (MODEL_CATALOG[0] || {}).id || "";
                 const providers = {};
                 MODEL_CATALOG.forEach(spec => { providers[spec.id] = spec.provider; });
                 MODEL_PROVIDER = providers;
@@ -92,8 +95,8 @@ async function populateModelSelect() {
 
     if (previousValue && MODEL_PROVIDER[previousValue]) {
         modelSelect.value = previousValue;
-    } else if (MODEL_PROVIDER[DEFAULT_MODEL]) {
-        modelSelect.value = DEFAULT_MODEL;
+    } else if (MODEL_PROVIDER[DEFAULT_MODEL_SIMPLE]) {
+        modelSelect.value = DEFAULT_MODEL_SIMPLE;
     }
     updateModelHelp(modelSelect.value);
 }
@@ -140,8 +143,8 @@ function initializeModelSelection() {
     const savedModel = sessionStorage.getItem("selectedModel");
     if (savedModel && MODEL_PROVIDER[savedModel]) {
         modelSelect.value = savedModel;
-    } else if (MODEL_PROVIDER[DEFAULT_MODEL]) {
-        modelSelect.value = DEFAULT_MODEL;
+    } else if (MODEL_PROVIDER[DEFAULT_MODEL_SIMPLE]) {
+        modelSelect.value = DEFAULT_MODEL_SIMPLE;
     }
 
     const handleModelSelection = () => {

@@ -14,7 +14,7 @@ import pytest
 
 from llmgrader.services.grader import Grader
 from llmgrader.services.models import (
-    DEFAULT_MODEL,
+    DEFAULT_MODEL_SIMPLE,
     MODEL_REGISTRY,
     default_free_models,
     migrate_allowed_models,
@@ -73,7 +73,7 @@ def test_an_empty_allow_list_stays_empty(grader: Grader) -> None:
 
     assert grader.load_admin_preferences()["allowedModels"] == []
 
-    admin_key, reason = grader.get_admin_key(DEFAULT_MODEL)
+    admin_key, reason = grader.get_admin_key(DEFAULT_MODEL_SIMPLE)
     assert admin_key is None
     assert reason
 
@@ -100,7 +100,7 @@ def test_missing_key_is_seeded_from_the_registry(grader: Grader) -> None:
     )
 
     assert grader.load_admin_preferences()["allowedModels"] == default_free_models()
-    assert grader.get_admin_key(DEFAULT_MODEL)[0] == ADMIN_KEY
+    assert grader.get_admin_key(DEFAULT_MODEL_SIMPLE)[0] == ADMIN_KEY
 
 
 def test_a_missing_config_file_is_seeded_too(grader: Grader) -> None:
@@ -113,7 +113,7 @@ def test_seeding_offers_only_the_free_tier(grader: Grader) -> None:
     """Seeding must not put an expensive model on the shared key."""
     seeded = migrate_allowed_models(None)
 
-    assert seeded == [DEFAULT_MODEL]
+    assert seeded == [DEFAULT_MODEL_SIMPLE]
     for model_id in seeded:
         assert MODEL_REGISTRY[model_id].offer_free
 
@@ -123,7 +123,7 @@ def test_a_stored_list_is_never_widened_by_the_registry(grader: Grader) -> None:
     _write_prefs(grader, ["gpt-5.6-terra"])
 
     assert grader.load_admin_preferences()["allowedModels"] == ["gpt-5.6-terra"]
-    assert DEFAULT_MODEL not in grader.load_admin_preferences()["allowedModels"]
+    assert DEFAULT_MODEL_SIMPLE not in grader.load_admin_preferences()["allowedModels"]
 
 
 # ---------------------------------------------------------------------------
@@ -148,11 +148,11 @@ def test_unresolvable_entries_are_dropped() -> None:
 
 def test_nothing_is_migrated_up_to_the_expensive_tier() -> None:
     """A retired model must never become a $4/$20 one on the shared key."""
-    strong = [spec.id for spec in MODEL_REGISTRY.values() if spec.tier == "strong"]
+    complex_tier = [spec.id for spec in MODEL_REGISTRY.values() if spec.tier == "complex"]
 
     for retired in ("gpt-4.1-mini", "gpt-5-mini", "gpt-5.1", "gpt-5.2",
                     "gpt-5.4", "gpt-5.4-mini", "gpt-5.4-nano"):
-        assert migrate_allowed_models([retired])[0] not in strong
+        assert migrate_allowed_models([retired])[0] not in complex_tier
 
 
 def test_the_three_allow_list_inputs_mean_three_different_things() -> None:

@@ -30,9 +30,10 @@ from llmgrader.mcp.unit_xml_tools import (
 from llmgrader.services.models import default_for_tier
 
 # This drives a tool-calling authoring loop, not routine grading, so it
-# takes the mid tier -- the closest replacement for the gpt-4.1 it used
-# to hard-code. Grading defaults live in DEFAULT_MODEL.
-DEFAULT_MODEL = default_for_tier("mid").id
+# takes the standard tier -- the closest replacement for the gpt-4.1 it
+# used to hard-code. Grading defaults live in models.DEFAULT_MODEL_SIMPLE;
+# the name below is this harness's own default, not the grader's.
+DEFAULT_MODEL = default_for_tier("standard").id
 
 
 def build_tool_schemas() -> list[dict[str, Any]]:

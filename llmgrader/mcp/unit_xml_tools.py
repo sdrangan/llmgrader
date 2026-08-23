@@ -10,7 +10,7 @@ from llmgrader.mcp.description_utils import (
     make_related_tool_description,
     make_text_content_description,
 )
-from llmgrader.services.models import DEFAULT_MODEL
+from llmgrader.services.models import DEFAULT_MODEL_SIMPLE
 from llmgrader.services.unit_parser import UnitParser
 
 
@@ -490,10 +490,15 @@ def _question_structure() -> dict:
                 example="q1",
             ),
             "preferred_model": make_attribute_description(
-                "Optional model hint for grading this question.",
+                "Optional model hint for grading this question. Prefer a "
+                "difficulty tier — 'simple' for a single derivation or "
+                "short answer, 'standard' for a multi-part derivation or "
+                "proof, 'complex' for a project or report. A tier survives "
+                "a model refresh; a concrete model id such as "
+                f"'{DEFAULT_MODEL_SIMPLE}' also works but goes stale.",
                 required=False,
                 type="string",
-                example=DEFAULT_MODEL,
+                example="simple",
             ),
         },
         children={

@@ -19,8 +19,9 @@ import requests
 
 from llmgrader.services.grader import preferred_model_for
 from llmgrader.services.models import (
-    DEFAULT_MODEL,
-    DEFAULT_PROJECT_MODEL,
+    DEFAULT_MODEL_COMPLEX,
+    DEFAULT_MODEL_SIMPLE,
+    DEFAULT_MODEL_STANDARD,
     is_supported,
     migrate_allowed_models,
     sorted_specs,
@@ -563,7 +564,7 @@ class APIController:
 
         def _for_student(qtag: str, question: dict) -> dict:
             payload = _strip_solution_fields(question)
-            # The raw attribute may be symbolic ("strong"), so resolve it here
+            # The raw attribute may be symbolic ("complex"), so resolve it here
             # rather than teaching the front end about tiers and aliases.
             payload["preferred_model_resolved"] = preferred_model_for(question, qtag)
             return payload
@@ -604,7 +605,7 @@ class APIController:
 
         @bp.get("/api/models")
         def list_models():
-            """The supported model slate, ordered cheap -> mid -> strong.
+            """The supported model slate, ordered simple -> standard -> complex.
 
             Public and free of secrets: this is the front end's only source of
             model ids, so `static/js/app.js` no longer duplicates the list.
@@ -621,8 +622,11 @@ class APIController:
                     }
                     for spec in sorted_specs()
                 ],
-                "default_model": DEFAULT_MODEL,
-                "default_project_model": DEFAULT_PROJECT_MODEL,
+                # Keys mirror the registry constants: one vocabulary for
+                # the tiers, server side and client side.
+                "default_model_simple": DEFAULT_MODEL_SIMPLE,
+                "default_model_standard": DEFAULT_MODEL_STANDARD,
+                "default_model_complex": DEFAULT_MODEL_COMPLEX,
             })
 
         @bp.post("/grade")
@@ -663,7 +667,7 @@ class APIController:
 
             # An explicitly chosen model always wins; preferred_model only sets
             # the default for a client that sent none.
-            model = requested_model or preferred_model_for(qdata, qtag) or DEFAULT_MODEL
+            model = requested_model or preferred_model_for(qdata, qtag) or DEFAULT_MODEL_SIMPLE
             with self.grade_job_lock:
                 self.expire_active_job_if_stale_locked()
                 self.prune_old_grade_jobs_locked()

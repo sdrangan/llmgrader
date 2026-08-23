@@ -19,7 +19,22 @@ from dataclasses import dataclass
 logger = logging.getLogger(__name__)
 
 
-TIERS: tuple[str, ...] = ("cheap", "mid", "strong")
+# Tiers name the *difficulty of the problem being graded*, not the price of the
+# model.  A course author choosing a tier is answering "how hard is this
+# question?", which they know, rather than "how capable a model does this
+# need?", which they should not have to.  The price ramp follows from the
+# difficulty ramp, so one vocabulary serves both.
+TIERS: tuple[str, ...] = ("simple", "standard", "complex")
+
+#: The pre-2026-08-22 vocabulary, kept resolvable the way retired model ids
+#: are.  It shipped to `main`, so course XML in instructors' own repositories
+#: may already name a tier this way -- and unlike everything else the app
+#: stores, those files are not ours to migrate.
+LEGACY_TIER_ALIASES: dict[str, str] = {
+    "cheap": "simple",
+    "mid": "standard",
+    "strong": "complex",
+}
 
 
 @dataclass(frozen=True)
@@ -35,7 +50,9 @@ class ModelSpec:
     label: str
         UI display name.
     tier: str
-        One of :data:`TIERS` -- "cheap", "mid" or "strong".
+        One of :data:`TIERS` -- "simple", "standard" or "complex".
+        Names the difficulty of the work the model is meant for, not its
+        price.
     context_tokens: int
         Size of the context window.
     long_context_threshold: int | None
@@ -100,7 +117,7 @@ MODEL_REGISTRY: dict[str, ModelSpec] = {
         id="gpt-5.6-luna",
         provider="openai",
         label="GPT-5.6 Luna",
-        tier="cheap",
+        tier="simple",
         context_tokens=_GPT56_CONTEXT_TOKENS,
         long_context_threshold=_LONG_CONTEXT_THRESHOLD,
         usd_per_mtok_in=0.20,
@@ -124,7 +141,7 @@ MODEL_REGISTRY: dict[str, ModelSpec] = {
         id="gpt-5.6-terra",
         provider="openai",
         label="GPT-5.6 Terra",
-        tier="mid",
+        tier="standard",
         context_tokens=_GPT56_CONTEXT_TOKENS,
         long_context_threshold=_LONG_CONTEXT_THRESHOLD,
         usd_per_mtok_in=2.00,
@@ -144,7 +161,7 @@ MODEL_REGISTRY: dict[str, ModelSpec] = {
         id="gpt-5.6-sol",
         provider="openai",
         label="GPT-5.6 Sol",
-        tier="strong",
+        tier="complex",
         context_tokens=_GPT56_CONTEXT_TOKENS,
         long_context_threshold=_LONG_CONTEXT_THRESHOLD,
         usd_per_mtok_in=4.00,
@@ -194,11 +211,17 @@ def _validate_tier_defaults() -> None:
 
 _validate_tier_defaults()
 
-#: The cheap-tier default, used when no model is requested.
-DEFAULT_MODEL = _tier_default("cheap").id
+#: The simple-tier default, and the app-wide fallback when no model is
+#: requested and no question pins one.
+DEFAULT_MODEL_SIMPLE = _tier_default("simple").id
 
-#: The strong-tier default, used for project and report grading.
-DEFAULT_PROJECT_MODEL = _tier_default("strong").id
+#: The standard-tier default: multi-part derivations, proofs, short code.
+DEFAULT_MODEL_STANDARD = _tier_default("standard").id
+
+#: The complex-tier default.  Named for the difficulty of the work, not for
+#: projects specifically -- a hard single question needs this model as much as
+#: a report does.
+DEFAULT_MODEL_COMPLEX = _tier_default("complex").id
 
 
 # ---------------------------------------------------------------------------
@@ -360,7 +383,7 @@ def is_supported(model_id: str | None) -> bool:
 
 
 def sorted_specs() -> list[ModelSpec]:
-    """Live registry entries ordered cheap -> mid -> strong, for the UI."""
+    """Live registry entries ordered simple -> standard -> complex, for the UI."""
     return sorted(MODEL_REGISTRY.values(), key=lambda spec: TIERS.index(spec.tier))
 
 
@@ -369,11 +392,15 @@ def resolve_preferred_model(value, *, qtag: str | None = None) -> ModelSpec | No
 
     Accepted, in order:
 
-    * a tier name from :data:`TIERS` -- ``"cheap"``, ``"mid"``, ``"strong"``
-      -- resolving to that tier's declared default.  This is the symbolic
-      form course authors should use: it survives a model refresh, so a slate
-      change does not mean rewriting every course package, including ones in
-      instructors' own repositories.
+    * a tier name from :data:`TIERS` -- ``"simple"``, ``"standard"``,
+      ``"complex"`` -- resolving to that tier's declared default.  This is the
+      symbolic form course authors should use: it survives a model refresh, so
+      a slate change does not mean rewriting every course package, including
+      ones in instructors' own repositories.
+    * a legacy tier name from :data:`LEGACY_TIER_ALIASES` -- ``"cheap"``,
+      ``"mid"``, ``"strong"`` -- resolving to the tier that replaced it and
+      logging a deprecation, exactly as a retired model id does.  That
+      vocabulary shipped, so course XML we do not control may name it.
     * a concrete live model id.
     * a retired id, resolving to its replacement and logging the deprecation.
       A preference names the model to *select*, so it resolves forward to
@@ -396,6 +423,16 @@ def resolve_preferred_model(value, *, qtag: str | None = None) -> ModelSpec | No
 
         if candidate in TIERS:
             return _tier_default(candidate)
+
+        legacy_tier = LEGACY_TIER_ALIASES.get(candidate)
+        if legacy_tier is not None:
+            logger.warning(
+                "preferred_model %r%s names a retired tier; using %r instead.",
+                candidate,
+                where,
+                legacy_tier,
+            )
+            return _tier_default(legacy_tier)
 
         spec = MODEL_REGISTRY.get(candidate)
         if spec is not None:

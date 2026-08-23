@@ -123,11 +123,54 @@ class ModelSpec:
                             # (§4) — not an internal comment. Required, non-empty.
 
 MODEL_REGISTRY: dict[str, ModelSpec]   # keyed by id
-DEFAULT_MODEL: str                     # the cheap tier default
-DEFAULT_PROJECT_MODEL: str             # the strong tier default
+DEFAULT_MODEL_SIMPLE: str              # the simple tier default
+DEFAULT_MODEL_STANDARD: str            # the standard tier default
+DEFAULT_MODEL_COMPLEX: str             # the complex tier default
 ```
 
 Helpers: `get_spec(model_id)`, `default_for_tier(tier)`, `is_supported(model_id)`.
+
+### Tier vocabulary: difficulty, not price (decided 2026-08-22)
+
+The tiers were originally `cheap` / `mid` / `strong` and the constants were
+`DEFAULT_MODEL` / `DEFAULT_PROJECT_MODEL`. Both are now one vocabulary named
+for **the difficulty of the problem being graded**:
+
+| Was | Is |
+|---|---|
+| `TIERS = ("cheap", "mid", "strong")` | `("simple", "standard", "complex")` |
+| `DEFAULT_MODEL` | `DEFAULT_MODEL_SIMPLE` |
+| — | `DEFAULT_MODEL_STANDARD` *(new)* |
+| `DEFAULT_PROJECT_MODEL` | `DEFAULT_MODEL_COMPLEX` |
+
+Rationale:
+
+- **The tier is chosen by course authors, and difficulty is what they know.**
+  `preferred_model="complex"` answers "how hard is this question?"; `"strong"`
+  asks them to answer "how capable a model does this need?", which is a
+  question about the slate rather than about their course. The price ramp
+  follows the difficulty ramp, so one vocabulary serves both readings.
+- **`DEFAULT_PROJECT_MODEL` was too narrow.** A hard single question needs the
+  capable model as much as a report does; naming the constant after one use
+  case invited exactly the mis-selection §4 worries about.
+- **`cheap` was actively misleading as guidance.** A student reading a
+  dropdown does not want the cheap model, they want the right one — and luna
+  is the right one for most questions, not a budget compromise.
+- **`mid` had no meaning at all** outside the price ordering it implied.
+
+No compatibility shim for the constants: they are internal to this repo, and
+all 70 references were renamed in one commit. The *tier strings* are different
+— they shipped to `main` in step C and can appear in `preferred_model`
+attributes in course repositories nobody here controls, so
+`LEGACY_TIER_ALIASES` keeps `cheap`/`mid`/`strong` resolving forward with a
+deprecation warning, exactly as a retired model id does.
+
+`GET /api/models` payload keys were renamed to match
+(`default_model` / `default_project_model` → `default_model_simple` /
+`default_model_standard` / `default_model_complex`). The front end is the only
+consumer and ships with the server; a stale cached `app.js` reading the old key
+falls through to `MODEL_CATALOG[0]`, which is the simple tier — the same model
+it would have selected anyway.
 
 **Why server-side:** it lets the grader make capability decisions (temperature, tools, images) from data rather than `startswith` checks, lets the API reject unknown models, and removes the JS duplication.
 
@@ -306,7 +349,7 @@ Delete, in this order:
 
 - every registry entry has a non-empty `id` and a `tier` in `{cheap, mid, strong}`
 - **every registry entry has non-empty `notes`** — it is user-facing guidance (§4), and a blank one ships a bare model ID to a student
-- `DEFAULT_MODEL` and `DEFAULT_PROJECT_MODEL` are both in the registry, with the expected tiers
+- `DEFAULT_MODEL_SIMPLE` and `DEFAULT_MODEL_COMPLEX` are both in the registry, with the expected tiers
 - all three tiers are covered
 - ids are unique and each map key equals `spec.id`
 - deprecated-id aliases all resolve to live registry entries

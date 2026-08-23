@@ -1127,7 +1127,7 @@ class UnitParser:
                             preferred_model, qtag=qtag
                         ) is None:
                             # Warn, never fail: the unit still loads and the
-                            # grader falls back to DEFAULT_MODEL. Deliberately
+                            # grader falls back to DEFAULT_MODEL_SIMPLE. Deliberately
                             # not a validation_error -- that raises a banner
                             # saying the file failed validation and was not
                             # loaded, which would not be true.

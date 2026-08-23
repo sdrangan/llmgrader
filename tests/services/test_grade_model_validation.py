@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from llmgrader.app import create_app
-from llmgrader.services.models import DEFAULT_MODEL
+from llmgrader.services.models import DEFAULT_MODEL_SIMPLE
 
 
 @pytest.fixture()
@@ -48,12 +48,12 @@ def test_unknown_model_is_rejected_with_400(flask_test_client) -> None:
     error = resp.get_json()["error"]
     assert "gpt-9000-imaginary" in error
     # The message has to name what the student can pick instead.
-    assert DEFAULT_MODEL in error
+    assert DEFAULT_MODEL_SIMPLE in error
 
 
 def test_a_registered_model_gets_past_the_model_check(flask_test_client) -> None:
     """It fails later on the fixture's missing unit, not on the model."""
-    resp = _post(flask_test_client, model=DEFAULT_MODEL)
+    resp = _post(flask_test_client, model=DEFAULT_MODEL_SIMPLE)
 
     assert resp.status_code == 400
     assert "Unknown unit" in resp.get_json()["error"]

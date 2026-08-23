@@ -6,8 +6,9 @@ import pytest
 
 from llmgrader.app import create_app
 from llmgrader.services.models import (
-    DEFAULT_MODEL,
-    DEFAULT_PROJECT_MODEL,
+    DEFAULT_MODEL_COMPLEX,
+    DEFAULT_MODEL_SIMPLE,
+    DEFAULT_MODEL_STANDARD,
     DEPRECATED_MODEL_ALIASES,
     MODEL_REGISTRY,
 )
@@ -56,14 +57,15 @@ def test_returns_every_registry_entry(flask_test_client) -> None:
 def test_reports_the_defaults(flask_test_client) -> None:
     payload = flask_test_client.get("/api/models").get_json()
 
-    assert payload["default_model"] == DEFAULT_MODEL
-    assert payload["default_project_model"] == DEFAULT_PROJECT_MODEL
+    assert payload["default_model_simple"] == DEFAULT_MODEL_SIMPLE
+    assert payload["default_model_standard"] == DEFAULT_MODEL_STANDARD
+    assert payload["default_model_complex"] == DEFAULT_MODEL_COMPLEX
 
 
-def test_options_are_ordered_cheap_to_strong(flask_test_client) -> None:
+def test_options_are_ordered_simple_to_complex(flask_test_client) -> None:
     payload = flask_test_client.get("/api/models").get_json()
 
-    assert [m["tier"] for m in payload["models"]] == ["cheap", "mid", "strong"]
+    assert [m["tier"] for m in payload["models"]] == ["simple", "standard", "complex"]
 
 
 def test_every_entry_carries_guidance(flask_test_client) -> None:
@@ -88,7 +90,12 @@ def test_leaks_no_key_material(flask_test_client) -> None:
 
     assert resp.status_code == 200
     # Whitelist the shape: nothing beyond these keys can ride along.
-    assert set(payload) == {"models", "default_model", "default_project_model"}
+    assert set(payload) == {
+        "models",
+        "default_model_simple",
+        "default_model_standard",
+        "default_model_complex",
+    }
     for entry in payload["models"]:
         assert set(entry) == {
             "id", "label", "provider", "tier", "context_tokens", "notes",
