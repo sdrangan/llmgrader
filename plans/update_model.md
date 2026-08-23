@@ -17,7 +17,7 @@ Scope: OpenAI only. Gemini support is deferred — see Appendix A.
 | 6. Remove Hugging Face | done |
 | 7. Defaults + unknown-model 400 + allow-list migration | done, live-verified |
 | 8. `tests/live/` + marker | done — suite run live, §4 |
-| 9. Run live suite, flip default | outstanding — live suite is green (§4); the default flip still needs real submissions |
+| 9. Run live suite, flip default | done — flip shipped in step 2; validated against 67 real submissions, §4 |
 | 10. Docs + example XML | outstanding, **and now larger** — see below |
 | A. `tier_default` / `offer_free` on the entries | done |
 | B. `offer_free` seeds an unset allow-list | done |
@@ -297,6 +297,59 @@ in / ~700 out across the six calls.
   reachable, returns parseable JSON, and can tell right from wrong on
   unambiguous input. **It does not establish rubric adherence on real student
   work**, which is what step 9 still needs.
+
+### Validated against real submissions (step 9, 2026-08-22)
+
+`tools/replay_submissions.py` replayed the **67 stored submissions previously
+graded by `gpt-4.1-mini`** — the model luna replaced — through the real
+`Grader.grade()` path on `gpt-5.6-luna`, then escalated every disagreement to
+terra and sol. Detail is in `local_data/replay/` (gitignored; real student
+work). Rows are identified here by id only.
+
+| | n |
+|---|---|
+| replayed | 67 |
+| stored grade was an error (not comparable) | 6 |
+| agree | 44 |
+| luna stricter | 14 |
+| luna more lenient | 3 |
+
+**Agreement 72% (44/61 comparable).** On the 17 disagreements, terra and sol
+were replayed under identical conditions:
+
+| directional outcome | n |
+|---|---|
+| both stronger models move the same way luna did | 13 |
+| split | 3 |
+| neither backs luna | 1 (id 52) |
+
+**Agreement is not accuracy.** The stored grade is the output of the model
+being replaced. The decisive row is **id 116: the student submission is empty
+(zero characters) and `gpt-4.1-mini` awarded it 10/10 "pass".** All three
+GPT-5.6 models award zero. Of the six empty submissions in the sample,
+4.1-mini failed five and passed one; luna failed all six. So the bulk of the
+"luna is stricter" column is luna declining to give credit that should never
+have been given, not luna being harsh.
+
+Two caveats on the method, both real:
+
+- **Rubrics are not stored.** The submissions table keeps the rendered
+  `raw_prompt` but no structured rubric, so the 15 rows originally graded with
+  a rubric replay through the *no-rubric* template. Agreement is 83% (38/46)
+  on rows without a rubric and 40% (6/15) on rows with one — most of that gap
+  is the missing rubric, not the model. Comparisons *among* the replayed
+  models are unaffected: all three ran without it.
+- **The sample is one course's data, n=67, and single-graded.** No human
+  adjudication was done; the shortlist below is what a human should look at.
+
+**id 52 is the one row where luna looks wrong**: luna awarded 7/10 where the
+old grade, terra and sol all awarded 10/10, docking an imprecision the other
+three accepted. One row in 61 is not a case against the default, but it is the
+row to read first.
+
+**No registry value was changed by this exercise.** The default flip already
+shipped in step 2; this validates a decision already in production, and the
+evidence supports keeping it.
 
 ### Proposed slate (3 entries — the full GPT-5.6 family)
 
