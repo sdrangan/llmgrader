@@ -22,6 +22,7 @@ from pathlib import Path
 import pytest
 
 from llmgrader.services.grader import Grader
+from llmgrader.services.gradetests import LONG_CONTEXT_CAVEAT, price_call
 from llmgrader.services.models import get_spec
 
 
@@ -35,12 +36,10 @@ LIVE_TIMEOUT = 90.0
 
 #: `long_context_threshold` is a guess (see plan section 9 -- OpenAI publishes
 #: the two rate pairs but not the token count where the second begins), so any
-#: cost priced at the long rate is a floor, not a figure to quote.
-LONG_CONTEXT_CAVEAT = (
-    "Costs are priced from ModelSpec rates. long_context_threshold is an "
-    "unverified estimate, so any call billed at the long-context rate is a "
-    "LOWER BOUND on true cost."
-)
+#: cost priced at the long rate is a floor, not a figure to quote.  The text and
+#: the pricing arithmetic now live in `services/gradetests.py`, so this suite
+#: and `llmgrader_test run --cost` cannot drift apart; they are re-exported here
+#: because this is where they were first written down.
 
 
 @pytest.fixture(scope="session")
@@ -96,31 +95,6 @@ def _last_submission(grader: Grader) -> dict:
     finally:
         conn.close()
     return dict(row) if row is not None else {}
-
-
-def price_call(spec, tokens_in: int, tokens_out: int) -> tuple[float, bool]:
-    """Return ``(usd, used_long_rate)`` for one call, per the ModelSpec rates.
-
-    The long-context pair is selected when the request's input exceeds
-    ``long_context_threshold`` -- otherwise a project-grading estimate comes
-    out roughly 2x optimistic, which is the one number this report exists to
-    get right.
-    """
-    if spec is None:
-        return 0.0, False
-
-    long_rate = (
-        spec.long_context_threshold is not None
-        and tokens_in > spec.long_context_threshold
-        and spec.usd_per_mtok_in_long is not None
-        and spec.usd_per_mtok_out_long is not None
-    )
-    if long_rate:
-        rate_in, rate_out = spec.usd_per_mtok_in_long, spec.usd_per_mtok_out_long
-    else:
-        rate_in, rate_out = spec.usd_per_mtok_in, spec.usd_per_mtok_out
-
-    return (tokens_in * rate_in + tokens_out * rate_out) / 1_000_000, bool(long_rate)
 
 
 class CostRecorder:

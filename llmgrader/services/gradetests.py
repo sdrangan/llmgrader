@@ -22,14 +22,22 @@ cannot see across files, so ``unit_test.xsd`` type-checks attributes and
 
 from __future__ import annotations
 
+import base64
 import glob as _glob
+import json
+import mimetypes
 import os
+import re
 import shutil
+import sqlite3
 import tempfile
+import time
 import xml.etree.ElementTree as ET
 import zipfile
 
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from io import StringIO
 from pathlib import PurePosixPath
 
@@ -1001,3 +1009,1055 @@ class PackageContext:
         """Load the package unit a test file targets."""
         entry = self.entry_for(test_file, unit_override)
         return load_unit(self.unit_xml_path(entry))
+
+
+# ---------------------------------------------------------------------------
+# Running: options, environment, pricing
+# ---------------------------------------------------------------------------
+
+
+#: Generous next to the app's 20 s default, matching tests/live: these are
+#: reasoning models, and a timeout here would read as a broken case.
+DEFAULT_TIMEOUT = 90.0
+
+#: `local_data/` is already gitignored, so a report lands somewhere harmless.
+DEFAULT_REPORT_PATH = os.path.join("local_data", "gradetests", "report.json")
+
+#: `long_context_threshold` in the registry is an unverified estimate, so any
+#: call billed at the long-context rate is priced as a floor, not a figure to
+#: quote.  This is why token counts are the default report and dollars are
+#: opt-in behind --cost.
+LONG_CONTEXT_CAVEAT = (
+    "Costs are priced from ModelSpec rates. long_context_threshold is an "
+    "unverified estimate, so any call billed at the long-context rate is a "
+    "LOWER BOUND on true cost."
+)
+
+VERDICT_PASS = "PASS"
+VERDICT_WARN = "WARN"
+VERDICT_FAIL = "FAIL"
+VERDICT_FLAKY = "FLAKY"
+VERDICT_ERROR = "ERROR"
+
+#: Verdicts that make the run exit non-zero.  FLAKY is one of them: a case
+#: whose verdict depends on the run is not a working test, whichever way the
+#: majority fell.
+FAILING_VERDICTS = frozenset({VERDICT_FAIL, VERDICT_FLAKY, VERDICT_ERROR})
+
+#: Float comparisons against authored bands; scores are small decimals.
+_TOLERANCE = 1e-9
+
+
+def price_call(spec, tokens_in: int, tokens_out: int) -> tuple[float, bool]:
+    """Return ``(usd, used_long_rate)`` for one call, per the ModelSpec rates.
+
+    The long-context pair is selected when the request's input exceeds
+    ``long_context_threshold`` -- otherwise an estimate comes out roughly 2x
+    optimistic on exactly the calls where the number matters most.
+    """
+    if spec is None:
+        return 0.0, False
+
+    long_rate = (
+        spec.long_context_threshold is not None
+        and tokens_in > spec.long_context_threshold
+        and spec.usd_per_mtok_in_long is not None
+        and spec.usd_per_mtok_out_long is not None
+    )
+    if long_rate:
+        rate_in, rate_out = spec.usd_per_mtok_in_long, spec.usd_per_mtok_out_long
+    else:
+        rate_in, rate_out = spec.usd_per_mtok_in, spec.usd_per_mtok_out
+
+    return (tokens_in * rate_in + tokens_out * rate_out) / 1_000_000, bool(long_rate)
+
+
+@dataclass
+class RunOptions:
+    """Everything a run needs that is not the test files themselves."""
+
+    unit: str | None = None
+    pkg: str | None = None
+    model: str | None = None
+    timeout: float = DEFAULT_TIMEOUT
+    api_key: str | None = None
+    repeat: int = 1
+    jobs: int = 4
+    keep_db: bool = False
+    fail_fast: bool = False
+    dry_run: bool = False
+    qtags: list[str] | None = None
+    case_ids: list[str] | None = None
+    max_calls: int | None = None
+    out: str | None = DEFAULT_REPORT_PATH
+    html: str | None = None
+    cost: bool = False
+
+
+class RunEnvironment:
+    """Throwaway storage and scratch trees for one run.
+
+    ``Grader.__init__`` deletes and recreates its scratch directory, opens a
+    SQLite database at ``get_storage_path()``, and writes a submission row for
+    every grade.  Left alone, a grading test run would fill the instructor's
+    ``local_data/`` with fake submissions that then show up in the dashboard
+    and in any later replay.  Redirecting ``LLMGRADER_STORAGE_PATH`` is the
+    same fix ``tests/live/conftest.py`` uses.
+
+    The variable is process-global, so it is restored on close, and the
+    temporary tree is removed unless ``keep_db`` asks to keep it.
+    """
+
+    _ENV_VAR = "LLMGRADER_STORAGE_PATH"
+
+    def __init__(self, *, keep_db: bool = False):
+        self.keep_db = keep_db
+        self.root = tempfile.mkdtemp(prefix="llmgrader_gradetests_")
+        self.storage = os.path.join(self.root, "storage")
+        self.scratch = os.path.join(self.root, "scratch")
+        self.packages = os.path.join(self.root, "packages")
+        for path in (self.storage, self.scratch, self.packages):
+            os.makedirs(path, exist_ok=True)
+
+        self._previous = os.environ.get(self._ENV_VAR)
+        os.environ[self._ENV_VAR] = self.storage
+
+    @property
+    def db_path(self) -> str:
+        return os.path.join(self.storage, "db", "llmgrader.db")
+
+    def scratch_for(self, index: int) -> str:
+        path = os.path.join(self.scratch, f"grader{index}")
+        os.makedirs(path, exist_ok=True)
+        return path
+
+    def package_dir(self, index: int) -> str:
+        return os.path.join(self.packages, f"unit{index}")
+
+    def close(self) -> None:
+        if self._previous is None:
+            os.environ.pop(self._ENV_VAR, None)
+        else:
+            os.environ[self._ENV_VAR] = self._previous
+        if not self.keep_db:
+            shutil.rmtree(self.root, ignore_errors=True)
+
+    def __enter__(self) -> "RunEnvironment":
+        return self
+
+    def __exit__(self, *exc_info) -> None:
+        self.close()
+
+
+# ---------------------------------------------------------------------------
+# Package synthesis for --unit (caveat 3)
+# ---------------------------------------------------------------------------
+
+
+_IMG_SRC_RE = re.compile(r'<img\b[^>]*\bsrc=["\']([^"\']+)["\']', re.IGNORECASE)
+
+#: How far up from a unit file to look for the course config, so a
+#: synthesized package can replicate its /pkg_assets/ mappings.
+_CONFIG_SEARCH_DEPTH = 4
+
+
+def find_course_config(unit_path: str) -> str | None:
+    """The nearest ``llmgrader_config.xml`` above a loose unit file, if any."""
+    directory = os.path.dirname(os.path.abspath(unit_path))
+    for _ in range(_CONFIG_SEARCH_DEPTH):
+        candidate = os.path.join(directory, "llmgrader_config.xml")
+        if os.path.isfile(candidate):
+            return candidate
+        parent = os.path.dirname(directory)
+        if parent == directory:
+            break
+        directory = parent
+    return None
+
+
+def _xml_escape(text: str) -> str:
+    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def _replay_assets(config_path: str, dest_dir: str) -> None:
+    """Copy a course config's <assets> mappings into a synthesized package."""
+    try:
+        root = ET.parse(config_path).getroot()
+    except Exception:
+        return
+
+    config_dir = os.path.dirname(os.path.abspath(config_path))
+    package_root = os.path.abspath(dest_dir)
+    assets_elem = root.find("assets")
+    for asset in [] if assets_elem is None else assets_elem.findall("asset"):
+        source = (asset.findtext("source") or "").strip()
+        destination = (asset.findtext("destination") or "").strip()
+        if not source or not destination:
+            continue
+
+        source_path = os.path.normpath(os.path.join(config_dir, source))
+        dest_path = os.path.abspath(os.path.normpath(os.path.join(dest_dir, destination)))
+        if os.path.commonpath([dest_path, package_root]) != package_root:
+            continue  # a destination escaping the package is a packaging bug
+
+        if os.path.isdir(source_path):
+            shutil.copytree(source_path, dest_path, dirs_exist_ok=True)
+        elif os.path.isfile(source_path):
+            os.makedirs(os.path.dirname(dest_path) or package_root, exist_ok=True)
+            shutil.copy2(source_path, dest_path)
+
+
+def synthesize_package(unit_path: str, dest_dir: str) -> tuple[str, str]:
+    """Build a one-unit solution package around a loose unit file.
+
+    ``Grader`` loads a package, not a unit file, so ``--unit`` has to make one.
+    The subtlety is images: ``_extract_solution_images`` resolves a relative
+    ``src`` against the unit's own directory and a ``/pkg_assets/<path>`` src
+    against the *package root*, and the mapping from a source directory to its
+    ``pkg_assets`` name lives in the course config rather than in the unit.  So
+    sibling directories are carried across for the first case, and the course
+    config's ``<assets>`` entries are replayed for the second.
+
+    Returns ``(package_dir, unit_name)``.
+    """
+    unit_path = os.path.abspath(unit_path)
+    if not os.path.isfile(unit_path):
+        raise GradeTestError(f"{unit_path}: unit file does not exist.")
+
+    os.makedirs(dest_dir, exist_ok=True)
+    unit_dir = os.path.dirname(unit_path)
+    unit_file = os.path.basename(unit_path)
+    shutil.copy2(unit_path, os.path.join(dest_dir, unit_file))
+
+    # Relative <img src="images/..."> resolves against the unit's directory.
+    for entry in sorted(os.listdir(unit_dir)):
+        source = os.path.join(unit_dir, entry)
+        if not os.path.isdir(source) or entry.startswith(".") or entry == "tests":
+            continue
+        shutil.copytree(source, os.path.join(dest_dir, entry), dirs_exist_ok=True)
+
+    # /pkg_assets/<name> resolves against the package root.
+    config_path = find_course_config(unit_path)
+    if config_path is not None:
+        _replay_assets(config_path, dest_dir)
+
+    try:
+        title = ET.parse(unit_path).getroot().get("title") or ""
+    except Exception:
+        title = ""
+    unit_name = " ".join(title.split()) or os.path.splitext(unit_file)[0]
+
+    config = (
+        "<llmgrader>\n"
+        "  <course>\n"
+        "    <name>Grading tests</name>\n"
+        "    <semester>n/a</semester>\n"
+        "  </course>\n"
+        "  <units>\n"
+        "    <unit>\n"
+        f"      <name>{_xml_escape(unit_name)}</name>\n"
+        f"      <source>{_xml_escape(unit_file)}</source>\n"
+        f"      <destination>{_xml_escape(unit_file)}</destination>\n"
+        "    </unit>\n"
+        "  </units>\n"
+        "</llmgrader>\n"
+    )
+    with open(os.path.join(dest_dir, "llmgrader_config.xml"), "w", encoding="utf-8") as handle:
+        handle.write(config)
+
+    return dest_dir, unit_name
+
+
+def missing_reference_images(question_dict: dict) -> int:
+    """How many ``<img>`` sources in a question's solution failed to resolve.
+
+    A silently dropped reference image changes what the grader sees, so a
+    synthesized package that loses one must say so rather than grade against
+    less than the real thing.
+    """
+    solution = str(question_dict.get("solution") or "")
+    declared = sum(1 for src in _IMG_SRC_RE.findall(solution) if not src.startswith("data:"))
+    resolved = len(question_dict.get("solution_images") or [])
+    return max(0, declared - resolved)
+
+
+def load_case_images(case: TestCase, test_file_path: str) -> list[str]:
+    """Turn a case's ``<images>`` entries into the data URIs the grader wants.
+
+    Paths resolve relative to the test file, so a case and the image it
+    attaches move together.
+    """
+    if not case.images:
+        return []
+
+    base = os.path.dirname(os.path.abspath(test_file_path))
+    data_uris: list[str] = []
+    for entry in case.images:
+        if entry.startswith("data:"):
+            data_uris.append(entry)
+            continue
+
+        path = os.path.normpath(os.path.join(base, entry))
+        if not os.path.isfile(path):
+            raise GradeTestError(
+                f"{test_file_path}: case `{case.case_id}` attaches image '{entry}', "
+                f"which does not exist at {path}."
+            )
+        mime = mimetypes.guess_type(path)[0] or "application/octet-stream"
+        with open(path, "rb") as handle:
+            encoded = base64.b64encode(handle.read()).decode("ascii")
+        data_uris.append(f"data:{mime};base64,{encoded}")
+
+    return data_uris
+
+
+# ---------------------------------------------------------------------------
+# Evaluation: GradeResult against a case's expectations
+# ---------------------------------------------------------------------------
+
+
+def part_scores(question_dict: dict, grade: dict) -> dict[str, float]:
+    """Awarded points per part label, from whichever shape ``grade`` used.
+
+    ``point_parts`` is a list aligned with the question's parts when the whole
+    question was graded, and a bare number for a single-part question.
+    """
+    labels = [part.get("part_label") for part in question_dict.get("parts") or []]
+    point_parts = grade.get("point_parts")
+
+    if isinstance(point_parts, list):
+        return {
+            label: float(value)
+            for label, value in zip(labels, point_parts)
+            if label is not None and value is not None
+        }
+    if point_parts is None or len(labels) != 1:
+        return {}
+    return {labels[0]: float(point_parts)}
+
+
+def _band_margin(band: PartExpectation, actual: float, part_total: float | None) -> float | None:
+    """How close a passing score sits to an edge the score could actually cross.
+
+    An edge at 0 or at the part's own total is not a real edge: no score can
+    fall below zero or rise above the maximum, so landing on it is not the
+    flakiness signal a margin is meant to report.  A full-credit control
+    banded ``[9, 10]`` on a 10-point part scoring 10 is exactly right, not one
+    run from failing.  Only genuine ranges get a margin -- an exact band is a
+    deliberate pin, not a range with no room in it.
+    """
+    if band.min is None or band.max is None or band.max <= band.min:
+        return None
+
+    distances = []
+    if band.min > 0:
+        distances.append(actual - band.min)
+    if part_total is None or band.max < part_total:
+        distances.append(band.max - actual)
+    return min(distances) if distances else None
+
+
+def evaluate_attempt(case: TestCase, question_dict: dict, grade: dict) -> tuple[list[str], float | None]:
+    """Compare one graded result to a case's expectations.
+
+    Returns ``(failures, margin)``.  Each failure is a line the terminal and
+    both reports print verbatim, so it names the part or the rubric item and
+    quotes both numbers.  ``margin`` is how close a passing score landed to the
+    nearest edge of a *range* band -- an exact band has no margin to speak of,
+    and a case sitting at margin 0 is the one that flakes next month.
+    """
+    failures: list[str] = []
+    margins: list[float] = []
+    rubric_eval = grade.get("rubric_eval") or {}
+
+    def rubric_entry(item_id: str) -> dict | None:
+        entry = rubric_eval.get(item_id)
+        if entry is None:
+            failures.append(f"rubric `{item_id}`: not evaluated by the grader")
+            return None
+        if hasattr(entry, "model_dump"):
+            entry = entry.model_dump()
+        return entry
+
+    if question_dict.get("partial_credit"):
+        scores = part_scores(question_dict, grade)
+        totals = {
+            part.get("part_label"): float(part.get("points") or 0.0)
+            for part in question_dict.get("parts") or []
+        }
+        for band in case.expected_points:
+            actual = scores.get(band.label)
+            if actual is None:
+                failures.append(f"part '{band.label}': not scored by the grader")
+                continue
+
+            expected = _band_text(band.min, band.max)
+            if band.min is not None and actual < band.min - _TOLERANCE:
+                failures.append(
+                    f"part '{band.label}': scored {_num(actual)}, expected {expected}, "
+                    f"under by {_num(round(band.min - actual, 6))}"
+                )
+            elif band.max is not None and actual > band.max + _TOLERANCE:
+                failures.append(
+                    f"part '{band.label}': scored {_num(actual)}, expected {expected}, "
+                    f"over by {_num(round(actual - band.max, 6))}"
+                )
+            else:
+                margin = _band_margin(band, actual, totals.get(band.label))
+                if margin is not None:
+                    margins.append(margin)
+
+        for expectation in case.expected_rubrics:
+            entry = rubric_entry(expectation.item_id)
+            if entry is None:
+                continue
+            awarded = entry.get("point_awarded")
+            if awarded is None:
+                failures.append(
+                    f"rubric `{expectation.item_id}`: the grader returned no point_awarded "
+                    "for this item"
+                )
+                continue
+            awarded = float(awarded)
+            below = expectation.min is not None and awarded < expectation.min - _TOLERANCE
+            above = expectation.max is not None and awarded > expectation.max + _TOLERANCE
+            if below or above:
+                failures.append(
+                    f"rubric `{expectation.item_id}`: expected point_awarded in "
+                    f"{_band_text(expectation.min, expectation.max)}, got {_num(awarded)}"
+                )
+    else:
+        if case.expected_result is not None:
+            actual = grade.get("result")
+            if actual != case.expected_result:
+                failures.append(f"result: expected '{case.expected_result}', got '{actual}'")
+
+        for expectation in case.expected_rubrics:
+            entry = rubric_entry(expectation.item_id)
+            if entry is None or expectation.expect is None:
+                continue
+            actual = entry.get("result")
+            if actual != expectation.expect:
+                failures.append(
+                    f"rubric `{expectation.item_id}`: expected result '{expectation.expect}', "
+                    f"got '{actual}'"
+                )
+
+    return failures, (min(margins) if margins else None)
+
+
+def rubric_evidence(grade: dict, item_id: str) -> str:
+    """The evidence string the grader cited for one rubric item, if any."""
+    entry = (grade.get("rubric_eval") or {}).get(item_id)
+    if hasattr(entry, "model_dump"):
+        entry = entry.model_dump()
+    if not isinstance(entry, dict):
+        return ""
+    return str(entry.get("evidence") or "")
+
+
+# ---------------------------------------------------------------------------
+# Results
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class AttemptResult:
+    """One grading call: what came back, and which expectations it broke."""
+
+    case_id: str
+    qtag: str
+    unit_name: str
+    file: str
+    repeat_index: int
+    session_id: str
+    model: str
+    description: str = ""
+    solution: str = ""
+    points: float | None = None
+    max_points: float | None = None
+    part_scores: dict = field(default_factory=dict)
+    result: str | None = None
+    feedback: str = ""
+    full_explanation: str = ""
+    rubric_eval: dict = field(default_factory=dict)
+    expectations: dict = field(default_factory=dict)
+    failures: list[str] = field(default_factory=list)
+    margin: float | None = None
+    tokens_in: int | None = None
+    tokens_out: int | None = None
+    latency_ms: int | None = None
+    timed_out: bool = False
+    reference_image_count: int = 0
+    error: str | None = None
+
+    @property
+    def passed(self) -> bool:
+        return self.error is None and not self.failures
+
+    @property
+    def verdict(self) -> str:
+        if self.error is not None:
+            return VERDICT_ERROR
+        if self.failures:
+            return VERDICT_FAIL
+        if self.margin is not None and self.margin <= _TOLERANCE:
+            return VERDICT_WARN
+        return VERDICT_PASS
+
+    def failure_lines(self) -> list[tuple[str, str]]:
+        """Each failure paired with the evidence behind it, where there is one.
+
+        A failing rubric assertion is only actionable next to the evidence the
+        grader cited for that item, so the pairing happens here rather than in
+        the terminal code.
+        """
+        lines: list[tuple[str, str]] = []
+        for failure in self.failures:
+            match = re.match(r"rubric `([^`]+)`", failure)
+            evidence = ""
+            if match:
+                entry = self.rubric_eval.get(match.group(1))
+                if hasattr(entry, "model_dump"):
+                    entry = entry.model_dump()
+                if isinstance(entry, dict):
+                    evidence = str(entry.get("evidence") or "")
+            lines.append((failure, evidence))
+        return lines
+
+    def to_dict(self) -> dict:
+        return {
+            "file": self.file,
+            "case_id": self.case_id,
+            "qtag": self.qtag,
+            "unit_name": self.unit_name,
+            "repeat": self.repeat_index,
+            "session_id": self.session_id,
+            "model": self.model,
+            "description": self.description,
+            "solution": self.solution,
+            "points": self.points,
+            "max_points": self.max_points,
+            "part_scores": self.part_scores,
+            "result": self.result,
+            "feedback": self.feedback,
+            "full_explanation": self.full_explanation,
+            "rubric_eval": self.rubric_eval,
+            "expectations": self.expectations,
+            "failures": self.failures,
+            "margin": self.margin,
+            "verdict": self.verdict,
+            "tokens_in": self.tokens_in,
+            "tokens_out": self.tokens_out,
+            "latency_ms": self.latency_ms,
+            "timed_out": self.timed_out,
+            "error": self.error,
+        }
+
+
+@dataclass
+class CaseRun:
+    """Every attempt at one case, and the verdict across them."""
+
+    case_id: str
+    qtag: str
+    file: str
+    description: str
+    partial_credit: bool
+    model: str
+    attempts: list[AttemptResult] = field(default_factory=list)
+
+    @property
+    def verdict(self) -> str:
+        if not self.attempts:
+            return VERDICT_ERROR
+        if any(attempt.error is not None for attempt in self.attempts):
+            return VERDICT_ERROR
+
+        passed = [attempt.passed for attempt in self.attempts]
+        if all(passed):
+            margins = [
+                attempt.margin for attempt in self.attempts if attempt.margin is not None
+            ]
+            if margins and min(margins) <= _TOLERANCE:
+                return VERDICT_WARN
+            return VERDICT_PASS
+        if not any(passed):
+            return VERDICT_FAIL
+        return VERDICT_FLAKY
+
+    @property
+    def failures(self) -> list[str]:
+        seen: list[str] = []
+        for attempt in self.attempts:
+            for failure in attempt.failures:
+                if failure not in seen:
+                    seen.append(failure)
+        return seen
+
+    @property
+    def scores(self) -> list[float | None]:
+        return [attempt.points for attempt in self.attempts]
+
+    @property
+    def pass_count(self) -> int:
+        return sum(1 for attempt in self.attempts if attempt.passed)
+
+
+@dataclass
+class FileRun:
+    """One test file's worth of cases."""
+
+    path: str
+    unit_label: str
+    unit_file: str = ""
+    cases: list[CaseRun] = field(default_factory=list)
+
+
+@dataclass
+class RunReport:
+    """Everything one `run` invocation produced."""
+
+    files: list[FileRun] = field(default_factory=list)
+    storage_path: str = ""
+    planned_calls: int = 0
+    planned_by_model: dict = field(default_factory=dict)
+    dry_run: bool = False
+    elapsed_seconds: float = 0.0
+    report_path: str | None = None
+    html_path: str | None = None
+    kept_db: bool = False
+
+    @property
+    def cases(self) -> list[CaseRun]:
+        return [case for file_run in self.files for case in file_run.cases]
+
+    @property
+    def attempts(self) -> list[AttemptResult]:
+        return [attempt for case in self.cases for attempt in case.attempts]
+
+    @property
+    def calls(self) -> int:
+        return len(self.attempts)
+
+    @property
+    def verdicts(self) -> dict[str, int]:
+        counts: dict[str, int] = {}
+        for case in self.cases:
+            counts[case.verdict] = counts.get(case.verdict, 0) + 1
+        return counts
+
+    @property
+    def failed(self) -> int:
+        return sum(
+            count for verdict, count in self.verdicts.items() if verdict in FAILING_VERDICTS
+        )
+
+    @property
+    def warned(self) -> int:
+        return self.verdicts.get(VERDICT_WARN, 0)
+
+    @property
+    def tokens_in(self) -> int:
+        return sum(attempt.tokens_in or 0 for attempt in self.attempts)
+
+    @property
+    def tokens_out(self) -> int:
+        return sum(attempt.tokens_out or 0 for attempt in self.attempts)
+
+    def estimated_cost(self) -> tuple[float, bool]:
+        """``(usd, any_long_context)`` from the registry rates. See --cost."""
+        from llmgrader.services.models import get_spec
+
+        total = 0.0
+        long_rate_seen = False
+        for attempt in self.attempts:
+            usd, long_rate = price_call(
+                get_spec(attempt.model), attempt.tokens_in or 0, attempt.tokens_out or 0
+            )
+            total += usd
+            long_rate_seen = long_rate_seen or long_rate
+        return total, long_rate_seen
+
+    def to_dict(self) -> dict:
+        usd, long_rate = self.estimated_cost()
+        return {
+            "generated": datetime.now(timezone.utc).isoformat(),
+            "summary": {
+                "files": len(self.files),
+                "cases": len(self.cases),
+                "calls": self.calls,
+                "verdicts": self.verdicts,
+                "failed": self.failed,
+                "tokens_in": self.tokens_in,
+                "tokens_out": self.tokens_out,
+                "elapsed_seconds": round(self.elapsed_seconds, 3),
+                "planned_calls": self.planned_calls,
+                "planned_by_model": self.planned_by_model,
+                "estimated_usd": usd,
+                "estimated_usd_is_lower_bound": long_rate,
+                "cost_note": LONG_CONTEXT_CAVEAT,
+            },
+            "cases": [
+                {
+                    "file": case.file,
+                    "case_id": case.case_id,
+                    "qtag": case.qtag,
+                    "description": case.description,
+                    "partial_credit": case.partial_credit,
+                    "model": case.model,
+                    "verdict": case.verdict,
+                    "passed": case.pass_count,
+                    "attempts": len(case.attempts),
+                    "scores": case.scores,
+                    "failures": case.failures,
+                }
+                for case in self.cases
+            ],
+            "results": [attempt.to_dict() for attempt in self.attempts],
+        }
+
+
+# ---------------------------------------------------------------------------
+# The runner
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class _PlannedCase:
+    """One case, bound to the grader and model that will run it."""
+
+    case: TestCase
+    case_run: CaseRun
+    grader: object
+    question_dict: dict
+    unit_name: str
+    model: str
+    file_path: str
+
+
+def submission_usage(db_path: str, session_id: str) -> dict:
+    """Token counts and latency for one grading call, keyed by session id.
+
+    ``Grader.grade`` returns only the GradeResult and records usage as a side
+    effect, in the submission row it writes.  ``tests/live/conftest.py`` reads
+    that row back with ``ORDER BY rowid DESC LIMIT 1``, which is correct for a
+    serial suite and wrong under ``--jobs``: with concurrent calls the newest
+    row is not necessarily the one that just finished.  ``session_id`` is
+    stored as the row's ``client_id``, so the runner passes a synthetic one per
+    attempt and looks the row up by that key instead.
+    """
+    if not os.path.exists(db_path):
+        return {}
+
+    connection = sqlite3.connect(db_path)
+    try:
+        connection.row_factory = sqlite3.Row
+        row = connection.execute(
+            "SELECT model, tokens_in, tokens_out, latency_ms, timed_out "
+            "FROM submissions WHERE client_id = ? ORDER BY rowid DESC LIMIT 1",
+            (session_id,),
+        ).fetchone()
+    finally:
+        connection.close()
+    return dict(row) if row is not None else {}
+
+
+def _plain_rubric_eval(grade: dict) -> dict:
+    plain: dict = {}
+    for item_id, entry in (grade.get("rubric_eval") or {}).items():
+        if hasattr(entry, "model_dump"):
+            entry = entry.model_dump()
+        plain[item_id] = entry
+    return plain
+
+
+def _expectations(case: TestCase) -> dict:
+    return {
+        "result": case.expected_result,
+        "points": [
+            {"label": band.label, "min": band.min, "max": band.max}
+            for band in case.expected_points
+        ],
+        "rubrics": [
+            {
+                "id": expectation.item_id,
+                "expect": expectation.expect,
+                "min": expectation.min,
+                "max": expectation.max,
+            }
+            for expectation in case.expected_rubrics
+        ],
+    }
+
+
+def _select_cases(cases: list[TestCase], qtags, case_ids) -> list[TestCase]:
+    if qtags:
+        wanted = set(qtags)
+        cases = [case for case in cases if case.qtag in wanted]
+    if case_ids:
+        wanted = set(case_ids)
+        cases = [case for case in cases if case.case_id in wanted]
+    return cases
+
+
+def _plan_run(paths, options: RunOptions, env: RunEnvironment, pkg_context, model_override):
+    """Resolve every case to a grader, a question and a model. No API calls."""
+    from llmgrader.services.grader import Grader, preferred_model_for
+    from llmgrader.services.models import DEFAULT_MODEL_SIMPLE
+
+    graders: dict = {}
+    files: list[FileRun] = []
+    planned: list[_PlannedCase] = []
+
+    for path in paths:
+        if validate_test_file(path):
+            raise GradeTestError(
+                f"{path}: does not validate against unit_test.xsd. "
+                "Run `llmgrader_test check` on it for the details."
+            )
+
+        test_file = load_test_file(path)
+        cases = _select_cases(test_file.cases, options.qtags, options.case_ids)
+
+        if pkg_context is not None:
+            entry = pkg_context.entry_for(test_file, options.unit)
+            key = ("pkg", entry["destination"])
+            unit_name = entry["name"]
+            package_dir = pkg_context.path
+        else:
+            unit_path = resolve_unit_path(test_file, options.unit)
+            key = ("unit", os.path.normcase(os.path.abspath(unit_path)))
+            unit_name = None
+            package_dir = None
+
+        if key not in graders:
+            index = len(graders)
+            if package_dir is None:
+                package_dir, unit_name = synthesize_package(unit_path, env.package_dir(index))
+            grader = Grader(scratch_dir=env.scratch_for(index), soln_pkg=package_dir)
+            if grader.unit_validation_errors:
+                raise GradeTestError(
+                    "the unit under test failed validation:\n  "
+                    + "\n  ".join(grader.unit_validation_errors)
+                )
+            graders[key] = (grader, unit_name)
+
+        grader, unit_name = graders[key]
+        questions = grader.units.get(unit_name)
+        if not questions:
+            known = ", ".join(sorted(grader.units)) or "(none)"
+            raise GradeTestError(
+                f"{path}: unit '{unit_name}' loaded no questions. Units available: {known}."
+            )
+
+        unit_file = (
+            os.path.basename(entry["destination"])
+            if pkg_context is not None
+            else os.path.basename(unit_path)
+        )
+        file_run = FileRun(path=path, unit_label=unit_name, unit_file=unit_file)
+        for case in cases:
+            question_dict = questions.get(case.qtag)
+            if question_dict is None:
+                raise GradeTestError(
+                    f"{path}: case `{case.case_id}` targets qtag '{case.qtag}', which is not in "
+                    f"'{unit_name}'. Run `llmgrader_test check` first -- it finds this for free."
+                )
+
+            missing = missing_reference_images(question_dict)
+            if missing and pkg_context is None:
+                raise GradeTestError(
+                    f"{path}: {missing} reference image(s) for qtag '{case.qtag}' did not resolve "
+                    f"in the package synthesized from {unit_path}. Grading without them would "
+                    "test something other than what students hit. Build a solution package and "
+                    "pass --pkg instead."
+                )
+
+            model = model_override or preferred_model_for(question_dict, case.qtag) or DEFAULT_MODEL_SIMPLE
+            case_run = CaseRun(
+                case_id=case.case_id,
+                qtag=case.qtag,
+                file=path,
+                description=case.description,
+                partial_credit=bool(question_dict.get("partial_credit")),
+                model=model,
+            )
+            file_run.cases.append(case_run)
+            planned.append(
+                _PlannedCase(
+                    case=case,
+                    case_run=case_run,
+                    grader=grader,
+                    question_dict=question_dict,
+                    unit_name=unit_name,
+                    model=model,
+                    file_path=path,
+                )
+            )
+
+        files.append(file_run)
+
+    return planned, files
+
+
+def _grade_attempt(item: _PlannedCase, repeat_index: int, options: RunOptions, env: RunEnvironment) -> AttemptResult:
+    """Grade one case once and evaluate the result against its expectations."""
+    session_id = f"gradetest:{item.case.case_id}#{repeat_index}"
+    attempt = AttemptResult(
+        case_id=item.case.case_id,
+        qtag=item.case.qtag,
+        unit_name=item.unit_name,
+        file=item.file_path,
+        repeat_index=repeat_index,
+        session_id=session_id,
+        model=item.model,
+        description=item.case.description,
+        solution=item.case.solution,
+        expectations=_expectations(item.case),
+        reference_image_count=len(item.question_dict.get("solution_images") or []),
+    )
+
+    try:
+        images = load_case_images(item.case, item.file_path)
+        grade = item.grader.grade(
+            item.question_dict,
+            item.case.solution,
+            part_label="all",
+            unit_name=item.unit_name,
+            qtag=item.case.qtag,
+            model=item.model,
+            api_key=options.api_key,
+            timeout=options.timeout,
+            solution_images=images or None,
+            session_id=session_id,
+        )
+    except Exception as exc:  # a failed call is a result to report, not a crash
+        attempt.error = f"{type(exc).__name__}: {exc}"
+        return attempt
+
+    attempt.points = grade.get("points")
+    attempt.max_points = grade.get("max_points")
+    attempt.result = grade.get("result")
+    attempt.feedback = str(grade.get("feedback") or "")
+    attempt.full_explanation = str(grade.get("full_explanation") or "")
+    attempt.rubric_eval = _plain_rubric_eval(grade)
+    attempt.part_scores = part_scores(item.question_dict, grade)
+    attempt.failures, attempt.margin = evaluate_attempt(item.case, item.question_dict, grade)
+
+    usage = submission_usage(env.db_path, session_id)
+    attempt.tokens_in = usage.get("tokens_in")
+    attempt.tokens_out = usage.get("tokens_out")
+    attempt.latency_ms = usage.get("latency_ms")
+    attempt.timed_out = bool(usage.get("timed_out"))
+    if usage.get("model"):
+        attempt.model = usage["model"]
+
+    return attempt
+
+
+def _execute_run(planned, options: RunOptions, env: RunEnvironment, progress) -> None:
+    tasks = [
+        (item, repeat_index)
+        for item in planned
+        for repeat_index in range(1, max(1, options.repeat) + 1)
+    ]
+
+    def announce(case_run: CaseRun) -> None:
+        if progress is not None and len(case_run.attempts) == max(1, options.repeat):
+            progress(case_run)
+
+    if options.jobs <= 1 or options.fail_fast:
+        for item, repeat_index in tasks:
+            attempt = _grade_attempt(item, repeat_index, options, env)
+            item.case_run.attempts.append(attempt)
+            announce(item.case_run)
+            if options.fail_fast and not attempt.passed:
+                return
+        return
+
+    with ThreadPoolExecutor(max_workers=options.jobs) as pool:
+        futures = [pool.submit(_grade_attempt, item, repeat_index, options, env) for item, repeat_index in tasks]
+        for (item, _), future in zip(tasks, futures):
+            item.case_run.attempts.append(future.result())
+            announce(item.case_run)
+
+
+def run_test_files(paths, options: RunOptions | None = None, *, progress=None) -> RunReport:
+    """Grade every case in `paths` and compare the results to its expectations.
+
+    Everything expensive happens here, so everything cheap happens first: the
+    files are validated, every case is resolved to a question and a model, and
+    the call budget is checked before a single request goes out.
+    """
+    options = options or RunOptions()
+    resolved_paths = expand_paths(list(paths))
+
+    model_override = None
+    if options.model:
+        from llmgrader.services.models import resolve_preferred_model
+
+        spec = resolve_preferred_model(options.model)
+        if spec is None:
+            raise GradeTestError(
+                f"--model '{options.model}' is not a tier name or a known model id. "
+                "Use simple, standard, complex, or an id from the registry."
+            )
+        model_override = spec.id
+
+    started = time.time()
+    env = RunEnvironment(keep_db=options.keep_db)
+    pkg_context = None
+    try:
+        if options.pkg:
+            pkg_context = PackageContext(options.pkg, workdir=os.path.join(env.root, "pkg_zip"))
+
+        planned, files = _plan_run(resolved_paths, options, env, pkg_context, model_override)
+
+        report = RunReport(
+            files=files,
+            storage_path=env.storage,
+            dry_run=options.dry_run,
+            kept_db=options.keep_db,
+        )
+        repeat = max(1, options.repeat)
+        report.planned_calls = len(planned) * repeat
+        breakdown: dict[str, int] = {}
+        for item in planned:
+            breakdown[item.model] = breakdown.get(item.model, 0) + repeat
+        report.planned_by_model = breakdown
+
+        if options.max_calls is not None and report.planned_calls > options.max_calls:
+            raise GradeTestError(
+                f"this run would make {report.planned_calls} calls, above the --max-calls "
+                f"limit of {options.max_calls}. Narrow it with --case/--qtag, lower --repeat, "
+                "or raise the limit."
+            )
+
+        if not options.dry_run:
+            _execute_run(planned, options, env, progress)
+
+        report.elapsed_seconds = time.time() - started
+
+        if options.out and not options.dry_run:
+            report.report_path = write_json_report(report, options.out)
+
+        return report
+    finally:
+        env.close()
+
+
+def write_json_report(report: RunReport, path: str) -> str:
+    """Write the full report: nothing summarized away.
+
+    Every field of every attempt, including the complete feedback, the full
+    explanation, and the entire ``rubric_eval`` object with its evidence, so
+    the instructor can read what the model actually said rather than what the
+    terminal had room for.
+    """
+    directory = os.path.dirname(os.path.abspath(path))
+    if directory:
+        os.makedirs(directory, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as handle:
+        json.dump(report.to_dict(), handle, indent=2)
+    return path

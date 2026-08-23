@@ -25,10 +25,8 @@ This is ordinary software unit testing applied to course content. The point is
 not that any single run is authoritative, but that a change in behavior becomes
 *visible* instead of being discovered by a student in week 10.
 
-The test file format and the `llmgrader_test check` command described below
-are implemented. `llmgrader_test run`, which makes real grading calls, is
-being built; see `plans/grading_tests.md` in the repository for the current
-status of each piece.
+Everything on this page is implemented. See `plans/grading_tests.md` in the
+repository for the design and the implementation notes.
 
 ## What a test case asserts
 
@@ -343,8 +341,15 @@ immediately understand. Reading the grader's own evidence usually shows whether
 the rubric condition was ambiguous, the reference solution was incomplete, or
 the test case itself was wrong.
 
-Note the `margin` column: it shows how close a passing score landed to the edge
-of its band. A case passing with margin 0 is one run away from failing.
+Note the `margin` column: it shows how close a passing score landed to the
+edge of its band. A case passing with margin 0 is one run away from failing,
+and is reported as `WARN`.
+
+Only edges a score could actually cross count. A full-credit control banded
+`[9, 10]` on a 10-point part scores 10 every run and cannot go higher, so it
+is not on an edge in any useful sense. A band of `[4, 8]` on the same part
+that scores 8 *is*, and says so. An exact band such as `[3, 3]` is a
+deliberate pin rather than a range, and has no margin to report.
 
 ## A suggested workflow
 

@@ -1,6 +1,6 @@
 # Plan: Instructor-authored grading tests
 
-Status: **phase 1 implemented** — see "Implementation status" at the end of
+Status: **phases 1-2 implemented** — see "Implementation status" at the end of
 this file for what landed and what did not.
 Date: 2026-08-23
 Origin: instructor request for a way to unit-test a course's grading the way
@@ -613,7 +613,7 @@ a later reader does not reopen them by accident.
 | Phase | What | Status |
 |---|---|---|
 | 1 | `unit_test.xsd`, `services/gradetests.py`, `scripts/llmgrader_test.py` (`check`), the worked example, the static pytest suite, caveats 1 and 4 | **done** |
-| 2 | `run` subcommand, storage isolation, package synthesis, `session_id` keying, JSON report | not started |
+| 2 | `run` subcommand, storage isolation, package synthesis, `session_id` keying, JSON report | **done** |
 | 3 | HTML report, `--repeat`, `--jobs` | not started |
 | 4 | live pytest suite | not started |
 
@@ -637,3 +637,20 @@ a later reader does not reopen them by accident.
 * `check` reports schema errors as findings (exit 1) and reserves exit 2 for
   "could not check at all": a missing file, XML that does not parse, an
   unresolvable unit, a selector that matched nothing.
+* **The margin rule in design decision 3 needed a correction.** "How close the
+  score landed to the nearest band edge" over-reports: a full-credit control
+  banded `[9, 10]` on a 10-point part that scores 10 sits on its upper edge
+  every single run, and nothing can push it over, because 10 is the maximum.
+  The first live run of the worked example produced three such warnings out of
+  eight cases, which is exactly the noise that teaches people to ignore
+  warnings. The margin now counts only edges a score could actually cross: the
+  lower edge when `min > 0`, the upper edge when `max < part total`, and
+  neither for an exact band, which is a deliberate pin rather than a range
+  with no room in it.
+* **`--unit` works for image-bearing units**, contrary to the fallback the
+  prompt allowed for. `synthesize_package` copies the unit's sibling
+  directories (for a relative `<img src>`) and replays the nearest course
+  config's `<assets>` mappings (for `/pkg_assets/...`, whose destination names
+  live only in that config). If an image still fails to resolve, the runner
+  refuses to grade rather than quietly grading against a question the student
+  would not see, and points at `--pkg`.

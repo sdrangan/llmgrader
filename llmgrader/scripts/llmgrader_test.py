@@ -24,15 +24,26 @@ import os
 import sys
 
 from llmgrader.services.gradetests import (
+    DEFAULT_REPORT_PATH,
+    DEFAULT_TIMEOUT,
+    FAILING_VERDICTS,
     LEVEL_ERROR,
+    LONG_CONTEXT_CAVEAT,
+    VERDICT_FAIL,
+    VERDICT_FLAKY,
+    VERDICT_ERROR,
+    VERDICT_PASS,
+    VERDICT_WARN,
     CheckResult,
     GradeTestError,
     PackageContext,
+    RunOptions,
     check_file,
     expand_paths,
     load_test_file,
     load_unit,
     resolve_unit_path,
+    run_test_files,
     validate_test_file,
 )
 
@@ -113,6 +124,66 @@ def build_parser() -> argparse.ArgumentParser:
         "--strict",
         action="store_true",
         help="Treat warnings as failures.",
+    )
+
+    run_parser = subparsers.add_parser(
+        "run",
+        help="Grade every case and compare the result to its expectations. Costs money.",
+        description=(
+            "Grade each case through the same path a student submission takes and compare "
+            "the result to the case's expectations. Uses your API key and makes real "
+            "grading calls; run `check` first, and `run --dry-run` to see the call count."
+        ),
+    )
+    _add_common_options(run_parser)
+    run_parser.add_argument(
+        "--model",
+        metavar="ID|TIER",
+        default=None,
+        help="Override the model for every case. A tier name (simple/standard/complex) or a model id.",
+    )
+    run_parser.add_argument(
+        "--repeat", type=int, default=1, metavar="N",
+        help="Grade each case N times and report the spread (default: 1).",
+    )
+    run_parser.add_argument(
+        "--jobs", type=int, default=4, metavar="N",
+        help="Concurrent grading calls (default: 4).",
+    )
+    run_parser.add_argument(
+        "--timeout", type=float, default=DEFAULT_TIMEOUT, metavar="SEC",
+        help=f"Per-call timeout in seconds (default: {DEFAULT_TIMEOUT:g}).",
+    )
+    run_parser.add_argument(
+        "--dry-run", action="store_true",
+        help="Resolve every case and print the call count and per-model breakdown. No API calls.",
+    )
+    run_parser.add_argument(
+        "--max-calls", type=int, default=None, metavar="N",
+        help="Refuse to start if the run would exceed N calls.",
+    )
+    run_parser.add_argument(
+        "--cost", action="store_true",
+        help="Also report a dollar estimate from the registry rates, with its caveat.",
+    )
+    run_parser.add_argument(
+        "--out", default=DEFAULT_REPORT_PATH, metavar="PATH",
+        help=f"JSON report destination (default: {DEFAULT_REPORT_PATH}).",
+    )
+    run_parser.add_argument(
+        "--html", default=None, metavar="PATH",
+        help="Also write the readable HTML report.",
+    )
+    run_parser.add_argument(
+        "--fail-fast", action="store_true", help="Stop at the first failing case.",
+    )
+    run_parser.add_argument(
+        "--api-key", default=None, metavar="KEY",
+        help="API key to grade with (default: the OPENAI_API_KEY environment variable).",
+    )
+    run_parser.add_argument(
+        "--keep-db", action="store_true",
+        help="Keep the temporary SQLite storage the run writes to, for inspection.",
     )
 
     return parser
@@ -263,6 +334,188 @@ def _print_check_result(result: CheckResult, *, verbose: bool) -> None:
 
 
 # ---------------------------------------------------------------------------
+# run
+# ---------------------------------------------------------------------------
+
+
+def _run_options(args) -> RunOptions:
+    return RunOptions(
+        unit=args.unit,
+        pkg=args.pkg,
+        model=args.model,
+        timeout=args.timeout,
+        api_key=args.api_key or os.environ.get("OPENAI_API_KEY"),
+        repeat=args.repeat,
+        jobs=args.jobs,
+        keep_db=args.keep_db,
+        fail_fast=args.fail_fast,
+        dry_run=args.dry_run,
+        qtags=args.qtag,
+        case_ids=args.case,
+        max_calls=args.max_calls,
+        out=args.out,
+        html=args.html,
+        cost=args.cost,
+    )
+
+
+def command_run(args) -> int:
+    options = _run_options(args)
+
+    if not options.dry_run and not options.api_key:
+        print(
+            "error: no API key. Pass --api-key or set OPENAI_API_KEY. "
+            "Use --dry-run to see what a run would cost first.",
+            file=sys.stderr,
+        )
+        return EXIT_USAGE
+
+    if options.repeat < 1:
+        print("error: --repeat must be at least 1.", file=sys.stderr)
+        return EXIT_USAGE
+
+    progress = _stream_case if (args.verbose and not args.quiet) else None
+
+    try:
+        report = run_test_files(args.test_files, options, progress=progress)
+    except GradeTestError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return EXIT_USAGE
+
+    if options.dry_run:
+        _print_dry_run(report, options)
+        return EXIT_OK
+
+    if not args.quiet:
+        _print_run_report(report, options, streamed=progress is not None)
+
+    _print_run_summary(report, options)
+    return EXIT_FAILED if report.failed else EXIT_OK
+
+
+def _print_dry_run(report, options: RunOptions) -> None:
+    plural = "s" if report.planned_calls != 1 else ""
+    print()
+    print(
+        f"dry run: {report.planned_calls} call{plural} across {len(report.cases)} cases"
+        + (f", {options.repeat} repeats each" if options.repeat > 1 else "")
+    )
+    for model_id, count in sorted(report.planned_by_model.items()):
+        print(f"  {model_id:<24}{count:>6}")
+    print("no API calls were made")
+
+
+def _score_column(case) -> str:
+    """The middle column: a score and its band, or a pass/fail verdict."""
+    attempt = case.attempts[0] if case.attempts else None
+    if attempt is None:
+        return ""
+    if attempt.error is not None:
+        return "error"
+
+    if not case.partial_credit:
+        results = [str(one.result) for one in case.attempts]
+        return " ".join(dict.fromkeys(results))
+
+    bands = attempt.expectations.get("points") or []
+    if not bands:
+        scores = [f"{one.points:g}" if one.points is not None else "-" for one in case.attempts]
+        return " ".join(scores)
+
+    # One segment per asserted part, so a multi-part question does not show
+    # the question total against a single part's band.
+    segments = []
+    for band in bands:
+        label = band["label"]
+        scored = " ".join(
+            f"{one.part_scores.get(label):g}" if one.part_scores.get(label) is not None else "-"
+            for one in case.attempts
+        )
+        low = "" if band["min"] is None else f"{band['min']:g}"
+        high = "" if band["max"] is None else f"{band['max']:g}"
+        prefix = "" if len(bands) == 1 and label == "all" else f"{label}="
+        segments.append(f"{prefix}{scored} [{low}-{high}]")
+    return "  ".join(segments)
+
+
+def _margin_column(case) -> str:
+    if case.verdict == VERDICT_FLAKY:
+        return f"{case.pass_count}/{len(case.attempts)} passed"
+    margins = [one.margin for one in case.attempts if one.margin is not None]
+    if not margins:
+        return ""
+    return f"margin {min(margins):g}"
+
+
+def _print_case_line(case) -> None:
+    print(
+        f"  {case.verdict:<6}{case.case_id:<28}{case.qtag:<26}"
+        f"{_score_column(case):<22}{_margin_column(case):<16}{case.model}"
+    )
+    if case.verdict == VERDICT_WARN:
+        print("        on the band edge; widen the band or accept flakiness")
+    if case.verdict in FAILING_VERDICTS:
+        if case.description.strip():
+            print(f"        {' '.join(case.description.split())}")
+        for attempt in case.attempts:
+            if attempt.error is not None:
+                print(f"        {attempt.error}")
+            for failure, evidence in attempt.failure_lines():
+                print(f"        {failure}")
+                if evidence:
+                    print(f'        evidence: "{" ".join(evidence.split())}"')
+            break  # the first attempt's failures are enough to locate the problem
+
+
+def _stream_case(case) -> None:
+    _print_case_line(case)
+
+
+def _print_run_report(report, options: RunOptions, *, streamed: bool) -> None:
+    if streamed:
+        return
+    for file_run in report.files:
+        print()
+        print(f"{file_run.path}  (unit: {file_run.unit_file}, {len(file_run.cases)} cases)")
+        print()
+        for case in file_run.cases:
+            _print_case_line(case)
+
+
+def _print_run_summary(report, options: RunOptions) -> None:
+    verdicts = report.verdicts
+    parts = [
+        f"{verdicts.get(VERDICT_PASS, 0)} passed",
+        f"{verdicts.get(VERDICT_FAIL, 0)} failed",
+    ]
+    if verdicts.get(VERDICT_FLAKY):
+        parts.append(f"{verdicts[VERDICT_FLAKY]} flaky")
+    if verdicts.get(VERDICT_ERROR):
+        parts.append(f"{verdicts[VERDICT_ERROR]} errored")
+    if verdicts.get(VERDICT_WARN):
+        parts.append(f"{verdicts[VERDICT_WARN]} warning")
+
+    print()
+    print(", ".join(parts))
+    print(
+        f"{report.calls} calls, {report.elapsed_seconds:.1f} s, "
+        f"{report.tokens_in:,} in / {report.tokens_out:,} out"
+    )
+
+    if options.cost:
+        usd, long_rate = report.estimated_cost()
+        suffix = " (includes long-context calls: LOWER BOUND)" if long_rate else ""
+        print(f"estimated cost ${usd:.4f}{suffix}")
+        print(LONG_CONTEXT_CAVEAT)
+
+    if report.report_path:
+        print(f"report: {report.report_path}")
+    if report.html_path:
+        print(f"html:   {report.html_path}")
+    if report.kept_db:
+        print(f"kept storage: {report.storage_path}")
+
+# ---------------------------------------------------------------------------
 # entry point
 # ---------------------------------------------------------------------------
 
@@ -273,6 +526,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "check":
         return command_check(args)
+    if args.command == "run":
+        return command_run(args)
 
     parser.error(f"unknown command {args.command!r}")
     return EXIT_USAGE
