@@ -8,9 +8,22 @@ url: "https://sdrangan.github.io"
 nav_sort: case_insensitive
 search_enabled: true
 exclude:
+  # Site-specific exclusions
+  - plans
   - tests/fixtures
   - llmgrader/mcp
   - CLAUDE.md
+  # Jekyll's defaults, restored -- setting `exclude` replaces them
+  - .sass-cache/
+  - .jekyll-cache/
+  - gemfiles/
+  - Gemfile
+  - Gemfile.lock
+  - node_modules/
+  - vendor/bundle/
+  - vendor/cache/
+  - vendor/gems/
+  - vendor/ruby/
 
 # Markdown options
 markdown: kramdown
