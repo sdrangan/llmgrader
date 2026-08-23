@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Schema for instructor-authored grading test files (<unit_test>).
+
+  This schema is deliberately permissive about which assertion elements a case
+  may carry.  Whether a case may use <expected_points> or <expected_result>,
+  and whether a rubric expectation may use min/max or expect, depends on the
+  *question's* <partial_credit> mode, which lives in a different file.  An
+  XSD cannot see across files, so it type-checks the attributes and leaves the
+  pairing to the `llmgrader_test check` command, which loads both files and
+  cross-references them.
+-->
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" elementFormDefault="qualified">
+
+  <!-- Mirrors the per-rubric-item "result" vocabulary of the binary grading
+       template (services/prompt.py). -->
+  <xs:simpleType name="rubricExpectEnum">
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="pass"/>
+      <xs:enumeration value="fail"/>
+      <xs:enumeration value="feedback"/>
+      <xs:enumeration value="n/a"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <!-- Mirrors GradeResult.result.  "partial" is reachable only on a
+       multi-part binary question; "error" asserts the grader itself failed. -->
+  <xs:simpleType name="expectedResultEnum">
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="pass"/>
+      <xs:enumeration value="fail"/>
+      <xs:enumeration value="partial"/>
+      <xs:enumeration value="error"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:complexType name="richTextType" mixed="true">
+    <xs:sequence>
+      <xs:any minOccurs="0" maxOccurs="unbounded" processContents="skip"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <!-- A band on one rubric item.  min/max are used in partial-credit mode and
+       bound "point_awarded"; expect is used in binary mode and pins "result".
+       All three are optional here; `check` rejects the wrong pairing. -->
+  <xs:complexType name="rubricExpectationType">
+    <xs:attribute name="id" type="xs:string" use="required"/>
+    <xs:attribute name="expect" type="rubricExpectEnum" use="optional"/>
+    <xs:attribute name="min" type="xs:decimal" use="optional"/>
+    <xs:attribute name="max" type="xs:decimal" use="optional"/>
+  </xs:complexType>
+
+  <!-- A band on one part's score.  min and max are independent: omitting one
+       leaves that side unbounded. -->
+  <xs:complexType name="partExpectationType">
+    <xs:attribute name="label" type="xs:string" use="required"/>
+    <xs:attribute name="min" type="xs:decimal" use="optional"/>
+    <xs:attribute name="max" type="xs:decimal" use="optional"/>
+  </xs:complexType>
+
+  <xs:complexType name="caseType">
+    <xs:all>
+      <xs:element name="description" type="richTextType" minOccurs="1"/>
+      <xs:element name="solution" type="richTextType" minOccurs="1"/>
+      <xs:element name="images" minOccurs="0">
+        <xs:complexType>
+          <xs:sequence>
+            <xs:element name="image" type="xs:string" minOccurs="1" maxOccurs="unbounded"/>
+          </xs:sequence>
+        </xs:complexType>
+      </xs:element>
+      <xs:element name="expected_points" minOccurs="0">
+        <xs:complexType>
+          <xs:sequence>
+            <xs:element name="part" type="partExpectationType" minOccurs="1" maxOccurs="unbounded"/>
+          </xs:sequence>
+        </xs:complexType>
+      </xs:element>
+      <xs:element name="expected_result" type="expectedResultEnum" minOccurs="0"/>
+      <xs:element name="expected_rubrics" minOccurs="0">
+        <xs:complexType>
+          <xs:sequence>
+            <xs:element name="item" type="rubricExpectationType" minOccurs="1" maxOccurs="unbounded"/>
+          </xs:sequence>
+        </xs:complexType>
+      </xs:element>
+    </xs:all>
+    <xs:attribute name="id" type="xs:string" use="required"/>
+    <xs:attribute name="qtag" type="xs:string" use="required"/>
+  </xs:complexType>
+
+  <xs:element name="unit_test">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element name="case" type="caseType" minOccurs="0" maxOccurs="unbounded"/>
+      </xs:sequence>
+      <!-- Path to the unit under test, relative to this file.  Optional
+           because the CLI options for a unit or a package override it. -->
+      <xs:attribute name="unit" type="xs:string" use="optional"/>
+    </xs:complexType>
+  </xs:element>
+</xs:schema>

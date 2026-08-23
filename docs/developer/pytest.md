@@ -21,6 +21,11 @@ More tests will be added in the future.
 
 There is also a separate UI test suite (`tests/ui/`) that drives a real browser using Playwright. These tests are slower and require additional setup, so they are excluded from the standard test run.
 
+And there are two suites for **grading tests** — the instructor-authored cases described in [Testing your grading](../admin/buildcourse/gradetests.md). They are split by what they cost, and both sit on the same module (`llmgrader/services/gradetests.py`), so a case that passes in one passes in the other for the same reason:
+
+- `tests/services/test_gradetests_static.py` runs in the standard test run. It makes **no API calls and needs no key**: it checks each course test file against the unit it targets — qtags that no longer exist, stale part labels and rubric ids, bands that can never be satisfied, assertions in the wrong form for the question's grading mode, rubric items no case covers. This is the CI gate for course content.
+- `tests/live/test_course_cases.py` grades every case for real, one named test per case. It is gated like the rest of `tests/live` (see below) and costs money.
+
 **CI/CD** (Continuous Integration / Continuous Deployment) means every time you push a commit or open a pull request, GitHub automatically runs your tests on a clean machine and reports whether they pass. "Continuous Integration" refers specifically to this automatic checking step. The "CD" (Continuous Deployment) part — automatically publishing a passing build — is not currently configured.
 
 ---
@@ -95,6 +100,29 @@ Then run the suite:
 ```bash
 pytest tests/ui/ -v
 ```
+
+---
+
+## Live model tests
+
+`tests/live/` puts real requests on the OpenAI API and costs real money, so it is gated twice over and deselected from a bare `pytest` run by `-m 'not live'` in `pyproject.toml`. Running it is explicit:
+
+```bash
+LLMGRADER_RUN_LIVE_TESTS=1 OPENAI_API_KEY=... pytest tests/live -m live
+```
+
+Both conditions are required, and a missing one **skips** rather than fails, so a developer with no key can run the whole suite and see it skip cleanly.
+
+Two things live there:
+
+- `test_models_live.py` grades a fixture unit on every model in the registry. This is what catches a retired or renamed model id, and it produces the cost/latency table the next slate refresh is argued from.
+- `test_course_cases.py` runs the course's own grading tests, one named test per `<case>`. By default each question is graded with its own `preferred_model`, so the run tests exactly what students hit. To run it cheaply, force a tier:
+
+```bash
+LLMGRADER_RUN_LIVE_TESTS=1 LLMGRADER_GRADETEST_MODEL=simple pytest tests/live/test_course_cases.py -m live
+```
+
+Both write into a throwaway SQLite database rather than your `local_data/`, so a run leaves no fake submissions behind to show up in the dashboard.
 
 ---
 

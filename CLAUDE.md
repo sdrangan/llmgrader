@@ -22,6 +22,12 @@ pytest tests/ui/ --browser chromium
 
 # Run the live model tests -- real OpenAI calls, ~$0.08 a run
 LLMGRADER_RUN_LIVE_TESTS=1 OPENAI_API_KEY=... pytest tests/live -m live
+
+# Check a course's grading tests against its units (free, no API key)
+llmgrader_test check example_repo/unit1/tests/calculus_tests.xml
+
+# Grade those cases for real (costs money; --dry-run prints the call count)
+llmgrader_test run example_repo/unit1/tests/calculus_tests.xml --repeat 3 --html report.html
 ```
 
 ## Architecture
@@ -48,6 +54,12 @@ HTTP POST /grade  (APIController, routes/api.py)
 Tiers (`simple`, `standard`, `complex`) name the **difficulty of the graded problem**, not the price of the model. `DEFAULT_MODEL_SIMPLE` / `_STANDARD` / `_COMPLEX` are derived from the `tier_default` flags; never hard-code a model id elsewhere. Course XML selects a model with `preferred_model`, which accepts a tier name (preferred, survives a slate refresh) or a concrete id.
 
 `GradeResult` is the canonical output: `points`, `max_points`, `feedback`, `full_explanation`, and per-rubric-item `rubric_eval` (evidence, point_awarded, result).
+
+### Grading tests
+
+`llmgrader/services/gradetests.py` is the single place the grading-test logic lives: parsing `<unit_test>` files, checking them against a unit, and running them through the real `Grader`. The `llmgrader_test` console script and both pytest suites (`tests/services/test_gradetests_static.py`, `tests/live/test_course_cases.py`) sit on it and add nothing of their own.
+
+Which assertion elements a case may carry depends on the question's `<partial_credit>` mode, which lives in a different file, so `unit_test.xsd` is deliberately permissive and `check` carries roughly half the validation. The runner redirects `LLMGRADER_STORAGE_PATH` to a temp tree -- `Grader.__init__` rmtrees its scratch dir and writes a submission row per grade -- and looks token counts up by the synthetic `session_id` it passes, never by newest row. See `docs/admin/buildcourse/gradetests.md` for the instructor-facing contract.
 
 ### Course content format
 

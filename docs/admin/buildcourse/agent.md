@@ -1,7 +1,7 @@
 ---
 title:  Using the LLM Course Builder Agent
 parent: Building a Course Package
-nav_order: 6
+nav_order: 7
 has_children: false
 ---
 
