@@ -1,6 +1,6 @@
 # Plan: Instructor-authored grading tests
 
-Status: **phases 1-3 implemented** — see "Implementation status" at the end of
+Status: **implemented** (all four phases) — see "Implementation status" at the end of
 this file for what landed and what did not.
 Date: 2026-08-23
 Origin: instructor request for a way to unit-test a course's grading the way
@@ -615,7 +615,7 @@ a later reader does not reopen them by accident.
 | 1 | `unit_test.xsd`, `services/gradetests.py`, `scripts/llmgrader_test.py` (`check`), the worked example, the static pytest suite, caveats 1 and 4 | **done** |
 | 2 | `run` subcommand, storage isolation, package synthesis, `session_id` keying, JSON report | **done** |
 | 3 | HTML report, `--repeat`, `--jobs` | **done** |
-| 4 | live pytest suite | not started |
+| 4 | live pytest suite | **done** |
 
 ### Notes from implementation
 
@@ -647,6 +647,11 @@ a later reader does not reopen them by accident.
   lower edge when `min > 0`, the upper edge when `max < part total`, and
   neither for an exact band, which is a deliberate pin rather than a range
   with no room in it.
+* The live suite honours `LLMGRADER_GRADETEST_MODEL` (a tier name or a model
+  id) so it can be run on the cheap tier. Without it each question grades with
+  its own `preferred_model`, which is the point: a default run tests exactly
+  what students hit. This is not a second opt-in gate -- `live_enabled` is
+  still the only gate.
 * **`--unit` works for image-bearing units**, contrary to the fallback the
   prompt allowed for. `synthesize_package` copies the unit's sibling
   directories (for a relative `<img src>`) and replays the nearest course
