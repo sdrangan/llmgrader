@@ -1,6 +1,6 @@
 # Plan: Refresh the supported model slate
 
-Status: **steps 0-7 merged to `main` and deployed**; steps A-C and 8 done on `feature/registry-flags` (4 commits, unpushed). Steps 9-10 outstanding.
+Status: **steps 0-8 merged to `main` and deployed**; the tier rename, step 9 (validation) and step 10 (docs) are done on `feature/docs-and-validation` (3 commits, unpushed). Plan complete apart from Appendix A.
 Date: 2026-08-22
 Scope: OpenAI only. Gemini support is deferred — see Appendix A.
 
@@ -18,14 +18,18 @@ Scope: OpenAI only. Gemini support is deferred — see Appendix A.
 | 7. Defaults + unknown-model 400 + allow-list migration | done, live-verified |
 | 8. `tests/live/` + marker | done — suite run live, §4 |
 | 9. Run live suite, flip default | done — flip shipped in step 2; validated against 67 real submissions, §4 |
-| 10. Docs + example XML | outstanding, **and now larger** — see below |
+| 10. Docs + example XML | done — §7, plus the course-author section and `docs/developer/models.md` |
 | A. `tier_default` / `offer_free` on the entries | done |
 | B. `offer_free` seeds an unset allow-list | done |
 | C. Symbolic `preferred_model`, wired up | done |
+| D. Tier vocabulary renamed to difficulty | done — §3 |
+| E. `.gitignore` no longer ignores project XML/JSON | done |
 
-Test suite: 94 → 138 → 163 → 201, all passing under `pytest --ignore=tests/ui/`,
-plus 49 under `pytest tests/ui/ --browser chromium`. Step 8 adds 24 live tests,
-deselected by default and reported as `201 passed, 24 deselected`.
+Test suite: 94 → 138 → 163 → 201 → 204, all passing under
+`pytest --ignore=tests/ui/`, plus 49 under `pytest tests/ui/ --browser chromium`.
+Step 8 adds 24 live tests, deselected by default and reported as
+`204 passed, 24 deselected`. The three tests above 201 cover the legacy tier
+aliases added with the rename (§3).
 
 **`preferred_model` was inert until step C.** `unit_parser.py` read it and put
 it in the question dict, `parselatex.py` did the same for LaTeX sources, and
@@ -496,6 +500,32 @@ web-search call's input. Still negligible.
 - `docs/overview/dataprivacy.md:27` — the sample log line names `gpt-4.1-mini`.
 - `CLAUDE.md` — mention `services/models.py` as the model registry.
 - Add a short "How to add or retire a model" section: edit `models.py`, run the live suite, update docs. One file, one test command.
+
+**As built (step 10, 2026-08-22).** Everything in the list above, plus:
+
+- `docs/developer/models.md` — the "how to add or retire a model" page, linked
+  from the developer index. Covers the `ModelSpec` fields, the two test
+  commands, why a retired model keeps its own spec rather than borrowing its
+  replacement's, and how to validate a default change with
+  `tools/replay_submissions.py`.
+- The course-author section landed in `docs/admin/buildcourse/unitxml.md`
+  rather than as a new page, next to the `preferred_model` reference it is
+  about. It documents the tier names as the recommended form and gives the
+  rule of thumb for each, including "do not upgrade to be safe" — `complex` is
+  ~18x `simple` per graded question and grades routine work no better.
+- `example_repo/` and `llmgrader/mcp/examples/` now pin tiers, not model ids:
+  the two single-derivation calculus questions are `simple`, the four
+  multi-part ones and the Python/code question are `standard`. No example is
+  project-scale, so `complex` appears in the docs but in no example XML.
+- The `notes` string is rendered under the select and on hover, but no longer
+  appended to the option label — the full sentence overflowed the Preferences
+  modal (`app.js:88`).
+- `.gitignore` was a Vivado/FPGA template ignoring `*.xml` and `*.json`, which
+  in this project are source. It now re-includes them by path under
+  `llmgrader/`, `tests/`, `docs/`, `example_repo/` and `soln_repos/`, with
+  explicit re-ignores for the generated ones (`tests/live/_report.json`,
+  `example_repo/soln_package/`, rendered HTML/PDF, `_site/`). Test fixtures no
+  longer need `git add -f`.
 
 ## 8. Order of work
 

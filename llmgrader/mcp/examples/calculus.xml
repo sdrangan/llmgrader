@@ -1,7 +1,7 @@
 <unit id="calculus" title="Unit 1:  Calculus Review" version="1.0">
     
 
-    <question qtag="Exponential derivative" preferred_model="gpt-4.1-mini">
+    <question qtag="Exponential derivative" preferred_model="simple">
         <question_text><![CDATA[
         <p>Compute the derivative of \(y = a^x\) with respect to \(x\). Show your work.</p>
         ]]></question_text>
@@ -67,7 +67,7 @@
         
     </question>
 
-    <question qtag="Integration by parts" preferred_model="gpt-4.1-mini">
+    <question qtag="Integration by parts" preferred_model="simple">
         <question_text><![CDATA[
         <p>Use integration by parts to compute the integral of
         \[
@@ -150,7 +150,7 @@
         ]]></grading_notes>
     </question>
 
-    <question qtag="Exponential graphing" preferred_model="gpt-4.1-mini">
+    <question qtag="Exponential graphing" preferred_model="standard">
         <question_text><![CDATA[
         <p>Consider the function \(f(x) = x e^{-x}\).</p>
 

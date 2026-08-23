@@ -88,7 +88,10 @@ async function populateModelSelect() {
     MODEL_CATALOG.forEach(spec => {
         const opt = document.createElement("option");
         opt.value = spec.id;
-        opt.textContent = spec.notes ? `${spec.label} — ${spec.notes}` : spec.label;
+        // Label only: the full notes sentence overflows the Preferences modal,
+        // and it is already shown by updateModelHelp() under the select and on
+        // hover below.
+        opt.textContent = spec.label;
         opt.title = spec.notes || "";
         modelSelect.appendChild(opt);
     });

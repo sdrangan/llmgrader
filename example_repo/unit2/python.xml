@@ -1,7 +1,7 @@
 <unit id="python_unit" title="Unit 2:  Python and ML" version="1.0">
     
 
-    <question qtag="ODE Solver" preferred_model="gpt-5.4-mini">
+    <question qtag="ODE Solver" preferred_model="standard">
         <question_text><![CDATA[
         <p>Write a Python function that implements a first-order Euler solution to the ODE:
         \[
@@ -69,7 +69,7 @@
         ]]></grading_notes>
     </question>
     
-    <question qtag="Logistic regression" preferred_model="gpt-4.1-mini">
+    <question qtag="Logistic regression" preferred_model="standard">
         <question_text><![CDATA[
         <p>Consider a logistic regression model for binary classification with a scalar feature \(x\) and parameters \(w\) and \(b\):
         \[
@@ -133,7 +133,7 @@
         ]]></grading_notes>
     </question>
 
-    <question qtag="Gradient Descent" preferred_model="gpt-4.1-mini">
+    <question qtag="Gradient Descent" preferred_model="standard">
         <question_text><![CDATA[
         <p>Consider the function \(f(x)\) shown in the figure below.  Gradient descent is
         run with a learning rate of \(\alpha\) starting from the initial point \(x_0\).</p>

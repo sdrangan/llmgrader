@@ -166,26 +166,46 @@ scratch/
 soln_repo/
 local_test/
 
-# MCP files
-!**/mcp/resources/*.json
-!llmgrader/mcp/examples/*.xml
-
-# Allow test fixtures even though *.json and *.xml are ignored
-!tests/fixtures/**/*.json
-!tests/fixtures/**/*.xml
-
-# Allow soln_repos XML files (demo/test course content)
+# ---------------------------------------------------------------------------
+# Project XML and JSON are SOURCE, not build output
+#
+# The Vivado/Vitis template above ignores *.xml and *.json wholesale. In this
+# project course content *is* XML, and fixtures, MCP resources and package
+# config are JSON, so that blanket rule made every new course package and test
+# fixture need `git add -f` to commit. Re-include them by path: a stray Vivado
+# report elsewhere in the tree stays ignored, while anything under the source
+# trees is tracked normally.
+# ---------------------------------------------------------------------------
+!llmgrader/**/*.xml
+!llmgrader/**/*.json
+!tests/**/*.xml
+!tests/**/*.json
+!docs/**/*.xml
+!docs/**/*.json
+!example_repo/**/*.xml
+!example_repo/**/*.json
 !soln_repos/*.xml
 
-# Remove the HTML and PDF files generated from the example files
+# ...with these exceptions, which are generated rather than authored. They
+# have to come after the re-includes above: last matching rule wins.
+
+# Live-model cost/latency report, rewritten on every `pytest tests/live` run.
+tests/live/_report.json
+
+# Rendered from the example XML by the course-build scripts.
 example_repo/**/*.html
 example_repo/**/*.pdf
-# BUT allow XML files inside example_repo
-!example_repo/**/*.xml
 
+# Built by `create_soln_pkg`. A directory exclude, so nothing inside it can be
+# re-included by the rules above -- which is the intent.
 example_repo_temp/
 example_repo/soln_package/
 example_repo/*.zip
+
+# Jekyll builds the docs site; GitHub Pages does it for real, but a local
+# `jekyll serve` would otherwise drop its JSON output into `git status`.
+_site/
+.jekyll-cache/
 **/example_repo/autograder
 **/example_repo/autograder/
 docs/key.txt

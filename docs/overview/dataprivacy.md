@@ -24,7 +24,7 @@ Every grading submission is logged to a server-side SQLite database. The followi
 | Student answer text | The student's typed or uploaded response |
 | Reference solution and rubric | Instructor-authored content from the course package |
 | Grading result and feedback | `pass`, `partial`, or `fail` with explanation |
-| Model, latency, token counts | `gpt-4.1-mini`, 1420 ms, 312 tokens |
+| Model, latency, token counts | `gpt-5.6-luna`, 1420 ms, 312 tokens |
 
 **Not stored in grading records:** student name, email address, university ID, or any other personally identifying information. Each record is linked only to an 8-character random session UUID that is generated fresh per browser session and discarded when the session ends.
 

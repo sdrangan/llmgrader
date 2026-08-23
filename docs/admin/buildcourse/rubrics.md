@@ -50,7 +50,7 @@ alternative solutions are more likely to be rejected.
 ### Binary Example
 
 ```xml
-<question qtag="Exponential derivative" preferred_model="gpt-4.1-mini">
+<question qtag="Exponential derivative" preferred_model="simple">
         <question_text><![CDATA[
         <p>Compute the derivative of \(y = a^x\) with respect to \(x\). Show your work.</p>
         ]]></question_text>
@@ -161,7 +161,7 @@ adjust the score based on specific evidence.
 ### Partial-Credit Example
 
 ```xml
-<question qtag="ODE Solver" preferred_model="gpt-5.4-mini">
+<question qtag="ODE Solver" preferred_model="standard">
     <question_text><![CDATA[
     <p>Write a Python function that implements a first-order Euler solution to the ODE:
     \[

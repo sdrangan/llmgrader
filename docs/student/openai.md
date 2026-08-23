@@ -27,14 +27,41 @@ Each grading request uses only a small amount of model compute, so even frequent
 
 ## Which model to use?
 
-To the right of the **Grade** button, you will see a **gear box** that opens a preferences dialog.  Here you can select the model.  These are my findings so far:
+To the right of the **Grade** button, a **gear box** opens a preferences dialog
+where you can pick the model. Most of the time you should not have to: your
+instructor can pin the right model to each question, and the dialog is there
+for the exceptions.
 
-* `gpt-4.1.-mini`:  This is the fastest, about 10-20 seconds for a response.  On simple problems, this would be my choice.  But, on problems
-where the model has to reason over multiple clock cycles it makes mistakes.
-* `gpt-5-mini`:  This is slower, about 1-2 minutes for a response.  But, it can reason very well on more complex problems.
-* `gpt-5.4`:  This model is excellent and you will definitely notice the difference on complex grading such as
-project plans. 
+There are three models, one generation of the same family, named for how hard
+the problem is rather than for what they cost:
 
-Both `mini` models are very cheap.  Less than a dollar for a million tokens.  The `gpt-5.4` is about 2.5 times more expensive.
-Typical problems consume about 1000 tokens which is a fraction of a penny for the mini models.  Grading a simple project plan with a web retrieval takes about 10000 tokens (mostly input).  On `gpt-5.4` that will cost about 2 to 4 cents.
+| Model | Use it for | Cost per 1,000 graded questions | Typical response |
+|---|---|---|---|
+| **GPT-5.6 Luna** *(default)* | Routine short answers and single derivations | $0.30 | ~2 s |
+| **GPT-5.6 Terra** | Multi-part derivations, proofs, short code | $2.84 | ~2 s |
+| **GPT-5.6 Sol** | Projects, reports, anything needing long context or web search | $5.35 | ~3 s |
 
+Worked examples:
+
+* *"Differentiate \(y = a^x\)."* — **Luna.** One step, one right answer.
+* *"Derive the transfer function, then find the critical path delay."* —
+  **Terra.** Several dependent steps, where a model that loses the thread
+  halfway through will mark a correct answer wrong.
+* *"Here is my project outline; check it against the requirements."* —
+  **Sol.** Long input, several criteria at once, and often a web search.
+
+Luna is the default because it is the right answer for most questions, not
+because it is the budget option — it graded a held-out sample of real
+submissions as well as the more expensive models did. Reach for Terra or Sol
+when a problem has several dependent steps, not as a general upgrade.
+
+### What this costs you
+
+All three prices above are measured on real grading requests, not list prices.
+A single routine question on Luna costs about **three hundredths of a cent**;
+you would have to grade several thousand questions to spend a dollar. A project
+outline on Sol with a web search is the expensive case at roughly **2 cents per
+grading**, because the search results are billed as input.
+
+Your key is never stored on the server: it stays in your browser and is sent
+with the grading request only. Monitor spend on your OpenAI dashboard.

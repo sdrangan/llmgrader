@@ -11,11 +11,17 @@ pip install -e .
 # Run dev server (http://127.0.0.1:5000, debug mode)
 python run.py
 
-# Run all tests
+# Run all tests (live model tests are deselected by default)
 pytest
 
 # Run a single test
 pytest tests/services/test_unit_parser.py::test_validate_unit_file_accepts_demo_unit
+
+# Run the Playwright UI suite
+pytest tests/ui/ --browser chromium
+
+# Run the live model tests -- real OpenAI calls, ~$0.08 a run
+LLMGRADER_RUN_LIVE_TESTS=1 OPENAI_API_KEY=... pytest tests/live -m live
 ```
 
 ## Architecture
@@ -34,6 +40,12 @@ HTTP POST /grade  (APIController, routes/api.py)
       → parses GraderRawResult → GradeResult (Pydantic models)
   → client polls /grade/<job_id> until job state = completed
 ```
+
+### Model registry
+
+`llmgrader/services/models.py` is the single source of truth for the supported model slate. Every model id, price, capability flag and tier default lives there; the front end reads it through `GET /api/models`, and the grader, the CLI tools and the admin allow-list import from it. Add or retire a model by editing that file alone — see `docs/developer/models.md`.
+
+Tiers (`simple`, `standard`, `complex`) name the **difficulty of the graded problem**, not the price of the model. `DEFAULT_MODEL_SIMPLE` / `_STANDARD` / `_COMPLEX` are derived from the `tier_default` flags; never hard-code a model id elsewhere. Course XML selects a model with `preferred_model`, which accepts a tier name (preferred, survives a slate refresh) or a concrete id.
 
 `GradeResult` is the canonical output: `points`, `max_points`, `feedback`, `full_explanation`, and per-rubric-item `rubric_eval` (evidence, point_awarded, result).
 

@@ -252,17 +252,61 @@ If an unsupported tool value is provided, the grader ignores it and logs a warni
 
 ---
 
-## 🤖 `<preferred_model>` Element (Optional)
+## 🤖 `preferred_model` Attribute (Optional)
 
-Specifies which LLM model the grader should use for this question.
+Sets which model grades this question, as an attribute on `<question>`:
 
-Example values:
+```xml
+<question qtag="Exponential derivative" preferred_model="simple">
+```
 
-- `gpt-4o-mini`
-- `gpt-4o`
-- `claude-3.5-sonnet`
+**Use a difficulty tier, not a model id.** The tier says how hard the question
+is; the grader maps it to whichever model currently serves that tier, so your
+course package keeps working across a model refresh without being edited.
 
-If omitted, the grader uses the system default.
+| Tier | Use it for | Currently |
+|---|---|---|
+| `simple` | Short answers, single derivations, one-step problems | GPT-5.6 Luna |
+| `standard` | Multi-part derivations, proofs, short code | GPT-5.6 Terra |
+| `complex` | Projects, reports, long context, web search | GPT-5.6 Sol |
+
+A concrete model id (`gpt-5.6-terra`) is also accepted, and is the right
+choice only when you have a specific reason to pin one exact model — it will
+go stale when the slate changes.
+
+The live list of models, their tiers and the current defaults is served by
+`GET /api/models`.
+
+If the attribute is omitted, the grader uses the `simple` tier default. If it
+names something unrecognizable the unit still loads: the grader logs a warning
+and falls back to that same default, so a typo degrades rather than breaking
+your course. Retired model ids and the older tier names `cheap`/`mid`/`strong`
+still resolve, with a deprecation warning.
+
+`preferred_model` sets the *default selection*, it does not lock the question.
+A student using their own API key can still choose another model in
+**File → Preferences**.
+
+### Why you should set it
+
+If you pin the tier per question, students rarely touch the model selector at
+all — which is the point. You know which of your questions are one-liners and
+which are multi-step; a student picking from a dropdown does not, and a student
+who guesses wrong gets either a needlessly expensive grading or a model that
+loses the thread halfway through a derivation.
+
+Rules of thumb:
+
+- **Default to `simple`.** It handles most homework questions, and it was
+  validated against real submissions from this course before being made the
+  default.
+- **Move to `standard`** when the answer has several dependent steps and an
+  error in step 2 should not necessarily cost the student step 4 — proofs,
+  multi-part derivations, short code.
+- **Move to `complex`** for project plans, reports, anything with a long input,
+  and anything using `<tool>web_search</tool>`.
+- **Do not upgrade "to be safe."** `complex` costs roughly 18x `simple` per
+  graded question, and on routine work it does not grade better.
 
 ---
 
