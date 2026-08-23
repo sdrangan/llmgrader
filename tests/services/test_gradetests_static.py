@@ -13,6 +13,8 @@ Nothing here makes an API call or constructs a Grader.
 
 from __future__ import annotations
 
+import xml.etree.ElementTree as ET
+import zipfile
 from pathlib import Path
 from textwrap import dedent
 
@@ -750,3 +752,84 @@ def test_glob_expansion_finds_the_example() -> None:
 def test_glob_matching_nothing_raises(tmp_path: Path) -> None:
     with pytest.raises(GradeTestError, match="no files match"):
         expand_paths([str(tmp_path / "*.xml")])
+
+
+# ---------------------------------------------------------------------------
+# Checking against a built package rather than the loose unit file
+# ---------------------------------------------------------------------------
+
+
+PKG_CONFIG = """\
+<llmgrader>
+  <course><name>Demo</name><semester>Spring 2026</semester></course>
+  <units>
+    <unit>
+      <name>Unit 1</name>
+      <source>unit1/calculus.xml</source>
+      <destination>unit1_calculus.xml</destination>
+    </unit>
+  </units>
+</llmgrader>
+"""
+
+
+def _built_package(tmp_path: Path, unit_xml: str) -> Path:
+    """A package as create_soln_pkg builds one: renamed unit, source retained."""
+    pkg = tmp_path / "soln_package"
+    pkg.mkdir()
+    (pkg / "unit1_calculus.xml").write_text(unit_xml, encoding="utf-8")
+    (pkg / "llmgrader_config.xml").write_text(PKG_CONFIG, encoding="utf-8")
+    return pkg
+
+
+def test_check_against_a_package_matches_the_unit_by_its_source_path(tmp_path: Path, capsys) -> None:
+    """A package stores the unit under <destination> but keeps <source>.
+
+    So the test file's `unit` attribute, which names the authoring-time path,
+    still identifies which unit inside the package it is about.
+    """
+    pkg = _built_package(tmp_path, EXAMPLE_UNIT.read_text(encoding="utf-8"))
+
+    exit_code = llmgrader_test_main(["check", str(EXAMPLE_TESTS), "--pkg", str(pkg)])
+
+    assert exit_code == 0
+    out = capsys.readouterr().out
+    assert "unit: unit1_calculus.xml" in out
+    assert "0 errors, 0 warnings" in out
+
+
+def test_check_against_a_stale_package_reports_the_missing_question(tmp_path: Path, capsys) -> None:
+    """The reason to check against a package: it may not be what you authored.
+
+    A deployed package built before a question was added still grades students,
+    and nothing else in the system notices that its tests have outrun it.
+    """
+    unit = ET.fromstring(EXAMPLE_UNIT.read_text(encoding="utf-8"))
+    for question in list(unit.findall("question")):
+        if question.get("qtag") == "Exponential graphing":
+            unit.remove(question)
+    pkg = _built_package(tmp_path, ET.tostring(unit, encoding="unicode"))
+
+    exit_code = llmgrader_test_main(["check", str(EXAMPLE_TESTS), "--pkg", str(pkg)])
+
+    assert exit_code == 1
+    out = capsys.readouterr().out
+    assert "Exponential graphing" in out
+    assert "does not exist in unit1_calculus.xml" in out
+
+
+def test_check_against_a_zipped_package(tmp_path: Path) -> None:
+    pkg = _built_package(tmp_path, EXAMPLE_UNIT.read_text(encoding="utf-8"))
+    archive = tmp_path / "soln_package.zip"
+    with zipfile.ZipFile(archive, "w") as handle:
+        for path in pkg.iterdir():
+            handle.write(path, path.name)
+
+    assert llmgrader_test_main(["check", str(EXAMPLE_TESTS), "--pkg", str(archive)]) == 0
+
+
+def test_check_against_a_directory_that_is_not_a_package_exits_two(tmp_path: Path, capsys) -> None:
+    exit_code = llmgrader_test_main(["check", str(EXAMPLE_TESTS), "--pkg", str(tmp_path)])
+
+    assert exit_code == 2
+    assert "llmgrader_config.xml" in capsys.readouterr().err
