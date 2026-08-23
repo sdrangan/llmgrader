@@ -1,0 +1,217 @@
+<unit_test unit="../calculus.xml">
+
+  <!--
+    Grading tests for unit1/calculus.xml.
+
+    Run `llmgrader_test check example_repo/unit1/tests/calculus_tests.xml`
+    after any edit to the unit: it is free and catches a renamed qtag, a stale
+    rubric id, or a band that can never be satisfied.  `llmgrader_test run`
+    grades the cases for real and costs money.
+
+    The file covers both grading modes deliberately.  "Exponential derivative"
+    is binary, so its cases assert `expected_result` and per-item `expect`;
+    the other two questions allow partial credit, so their cases assert point
+    bands.
+  -->
+
+  <!-- ==================================================================
+       Exponential derivative: binary grading (partial_credit = false)
+       ================================================================== -->
+
+  <case id="log_method_correct" qtag="Exponential derivative">
+    <description>
+      Full-credit control, answered by the logarithm method. Every rubric set
+      needs at least one correct solution: it is easy to write a rubric that
+      catches every mistake and also fails correct work.
+    </description>
+    <solution><![CDATA[
+      Take logs of both sides: ln y = ln(a^x) = x ln a.
+      Differentiating implicitly, y'/y = ln a, so y' = y ln a = a^x ln(a).
+    ]]></solution>
+
+    <expected_result>pass</expected_result>
+
+    <expected_rubrics>
+      <item id="taking_logarithm" expect="pass"/>
+      <item id="final_answer" expect="pass"/>
+      <item id="polynomial_confusion" expect="n/a"/>
+    </expected_rubrics>
+  </case>
+
+  <case id="exp_form_correct" qtag="Exponential derivative">
+    <description>
+      Full-credit control for the other branch of the one_of group: the
+      student rewrites a^x in exponential form and applies the chain rule
+      instead of taking logarithms. Asserting `exponential_form` here is not
+      over-specifying, because this solution commits to that method.
+    </description>
+    <solution><![CDATA[
+      Write y = a^x = e^{x ln a}. By the chain rule,
+      y' = e^{x ln a} * ln a = a^x ln(a).
+    ]]></solution>
+
+    <expected_result>pass</expected_result>
+
+    <expected_rubrics>
+      <item id="exponential_form" expect="pass"/>
+      <item id="final_answer" expect="pass"/>
+    </expected_rubrics>
+  </case>
+
+  <case id="power_rule_confusion" qtag="Exponential derivative">
+    <description>
+      The misconception this question exists to catch: the student treats a^x
+      as a power of x and applies the power rule, giving y' = x a^(x-1).
+      `polynomial_confusion` must fire -- note that expect="fail" on a
+      negative item means the grader identified the mistake, which is the
+      behaviour being asserted as correct.
+    </description>
+    <solution><![CDATA[
+      Using the power rule, bring the exponent down: y' = x a^{x-1}.
+    ]]></solution>
+
+    <expected_result>fail</expected_result>
+
+    <expected_rubrics>
+      <item id="polynomial_confusion" expect="fail"/>
+      <item id="final_answer" expect="fail"/>
+    </expected_rubrics>
+  </case>
+
+  <!-- ==================================================================
+       Integration by parts: partial credit, one part worth 10
+       ================================================================== -->
+
+  <case id="by_parts_full_credit" qtag="Integration by parts">
+    <description>
+      Full-credit control: correct choice of u and dv, correct du and v,
+      correct application of the formula, limits evaluated. Every rubric item
+      should be awarded in full.
+    </description>
+    <solution><![CDATA[
+      Let u = x and dv = e^{2x} dx, so du = dx and v = (1/2) e^{2x}.
+      Then the integral of x e^{2x} dx is
+        x (1/2) e^{2x} - integral of (1/2) e^{2x} dx
+        = (1/2) x e^{2x} - (1/4) e^{2x} + C
+        = (1/4)(2x - 1) e^{2x} + C.
+      Evaluating from 0 to 1:
+        (1/4)(1) e^2 - (1/4)(-1) e^0 = (e^2 + 1)/4.
+    ]]></solution>
+
+    <expected_points>
+      <part label="all" min="9" max="10"/>
+    </expected_points>
+
+    <expected_rubrics>
+      <item id="correct_u_dv" min="3" max="3"/>
+      <item id="correct_du_v" min="3" max="3"/>
+      <item id="correct_integration_by_parts" min="2" max="2"/>
+      <item id="apply_limits" min="2" max="2"/>
+    </expected_rubrics>
+  </case>
+
+  <case id="missing_limits" qtag="Integration by parts">
+    <description>
+      Correct antiderivative, then the student stops without evaluating at the
+      limits of integration -- a definite integral answered as an indefinite
+      one. `apply_limits` must not be awarded; the earlier items must be.
+    </description>
+    <solution><![CDATA[
+      Let u = x, dv = e^{2x} dx. Then du = dx and v = (1/2) e^{2x}, so
+        integral of x e^{2x} dx = (1/2) x e^{2x} - (1/4) e^{2x} + C
+                                = (1/4)(2x - 1) e^{2x} + C.
+    ]]></solution>
+
+    <expected_points>
+      <part label="all" min="4" max="8"/>
+    </expected_points>
+
+    <expected_rubrics>
+      <item id="correct_u_dv" min="3" max="3"/>
+      <item id="apply_limits" min="0" max="0"/>
+    </expected_rubrics>
+  </case>
+
+  <case id="forgot_half_in_v" qtag="Integration by parts">
+    <description>
+      The algebra slip the rubric for `correct_du_v` calls out by name: the
+      student integrates e^{2x} to e^{2x} instead of (1/2) e^{2x}. The setup
+      is right, so `correct_u_dv` stays at full value while `correct_du_v`
+      loses part but not all of its credit. This case is the one that checks
+      the rubric grants partial recognition rather than zeroing the item.
+    </description>
+    <solution><![CDATA[
+      Let u = x and dv = e^{2x} dx, so du = dx and v = e^{2x}.
+      Then the integral is x e^{2x} - integral of e^{2x} dx
+        = x e^{2x} - (1/2) e^{2x}, evaluated from 0 to 1,
+        = e^2 - (1/2) e^2 + 1/2 = (e^2 + 1)/2.
+    ]]></solution>
+
+    <expected_points>
+      <part label="all" min="4" max="9"/>
+    </expected_points>
+
+    <expected_rubrics>
+      <item id="correct_u_dv" min="3" max="3"/>
+      <item id="correct_du_v" min="1" max="2"/>
+    </expected_rubrics>
+  </case>
+
+  <!-- ==================================================================
+       Exponential graphing: partial credit, two parts worth 5 each
+       ================================================================== -->
+
+  <case id="graphing_full_credit" qtag="Exponential graphing">
+    <description>
+      Full-credit control for the two-part question. The student submits the
+      sketch in words rather than as an image, which is what a typed
+      submission looks like; the rubric items for part (b) should still be
+      satisfied by an unambiguous description.
+    </description>
+    <solution><![CDATA[
+      (a) f'(x) = e^{-x} - x e^{-x} = e^{-x}(1 - x). Since e^{-x} > 0, the only
+      critical point with x >= 0 is x = 1, and f(1) = 1/e. So the critical
+      point is (1, 1/e).
+
+      (b) My sketch starts at the origin, since f(0) = 0. It rises to a single
+      maximum at (1, 1/e), which I label on the curve, and then decreases,
+      approaching 0 from above as x goes to infinity.
+    ]]></solution>
+
+    <expected_points>
+      <part label="a" min="4" max="5"/>
+      <part label="b" min="3" max="5"/>
+    </expected_points>
+
+    <expected_rubrics>
+      <item id="identify_critical_point" min="3" max="3"/>
+      <item id="evaluate_critical_value" min="2" max="2"/>
+      <item id="limit_at_infinity" min="1" max="1"/>
+      <item id="value_at_zero" min="1" max="1"/>
+      <item id="curve_shape" min="1" max="2"/>
+      <item id="label_critical_point_on_graph" min="1" max="1"/>
+    </expected_rubrics>
+  </case>
+
+  <case id="graphing_no_critical_value" qtag="Exponential graphing">
+    <description>
+      The student solves f'(x) = 0 correctly but never substitutes back to get
+      f(1) = 1/e, so part (a) is half-answered. Only part (a) is asserted on:
+      a part with no `part` element is not checked.
+    </description>
+    <solution><![CDATA[
+      (a) f'(x) = e^{-x}(1 - x), which is zero when x = 1. So the critical
+      point is at x = 1.
+    ]]></solution>
+
+    <expected_points>
+      <part label="a" min="2" max="4"/>
+    </expected_points>
+
+    <expected_rubrics>
+      <item id="identify_critical_point" min="3" max="3"/>
+      <item id="evaluate_critical_value" min="0" max="0"/>
+    </expected_rubrics>
+  </case>
+
+</unit_test>
