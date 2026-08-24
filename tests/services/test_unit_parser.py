@@ -187,3 +187,51 @@ def test_solution_images_skips_missing_file(tmp_path: Path) -> None:
 
     # Relative-src question: image file is gone → empty list.
     assert unit["q_with_image"]["solution_images"] == []
+
+def _unit_with_display_text(display_text: str, *, part: str = "a") -> str:
+    return f"""<unit id="u" title="U" version="1.0">
+  <question qtag="Q">
+    <question_text>Question.</question_text>
+    <solution>Solution.</solution>
+    <partial_credit>true</partial_credit>
+    <parts>
+      <part><part_label>a</part_label><points>2</points></part>
+    </parts>
+    <rubrics>
+      <item id="r1" part="{part}" point_adjustment="+2">
+        <display_text>{display_text}</display_text>
+        <condition>Condition.</condition>
+      </item>
+    </rubrics>
+    <rubric_total>sum_positive</rubric_total>
+  </question>
+</unit>"""
+
+
+def _display_text_warnings(display_text: str, *, part: str = "a") -> list[str]:
+    result = UnitParser.validate_unit_text(_unit_with_display_text(display_text, part=part))
+    assert result["errors"] == []
+    return [w for w in result["warnings"] if "display_text" in w]
+
+
+def test_display_text_repeating_its_part_label_warns() -> None:
+    # services/grader.py renders "Part {part}: {display_text}", so this doubles up.
+    warnings = _display_text_warnings("Part a: Packed vector type")
+    assert len(warnings) == 1
+    assert "Part a: Part a: ..." in warnings[0]
+
+
+def test_display_text_part_label_variants_warn() -> None:
+    for text in ("part a: Thing", "Part A: Thing", "Part (a): Thing", "Parts a: Thing", "Part a - Thing"):
+        assert _display_text_warnings(text), f"expected a warning for {text!r}"
+
+
+def test_display_text_without_its_part_label_does_not_warn() -> None:
+    for text in ("Packed vector type", "Partial fraction setup", "Particle count is correct", "Part b: Thing"):
+        assert _display_text_warnings(text) == [], f"unexpected warning for {text!r}"
+
+
+def test_display_text_part_label_not_warned_for_whole_question_items() -> None:
+    # part="all" gets no prefix from the grader, so there is nothing to double.
+    result = UnitParser.validate_unit_text(_unit_with_display_text("Part a: Thing", part="all"))
+    assert [w for w in result["warnings"] if "display_text" in w] == []

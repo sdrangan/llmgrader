@@ -438,6 +438,32 @@ def _achievable_band(point_adjustment: float) -> tuple[float, float]:
     return 0.0, 0.0
 
 
+def unit_authoring_findings(unit_data: UnitInfo) -> list[CheckFinding]:
+    """Authoring-convention warnings about the unit the test file targets.
+
+    `check` already has the unit open, and a rubric an instructor is about to
+    write tests against is exactly when a convention slip is cheapest to fix.
+    Only warnings are carried over: authoring *errors* belong to whatever
+    validates the unit itself, and repeating them here would blame the test
+    file for a problem it does not have.
+    """
+    try:
+        root = ET.parse(unit_data.path).getroot()
+    except (ET.ParseError, OSError):
+        # The unit already failed to load, and that is reported elsewhere.
+        return []
+
+    _, warnings = UnitParser._validate_unit_authoring_conventions(
+        root,
+        source_label=unit_data.label,
+        workspace_root=None,
+    )
+    return [
+        CheckFinding(level=LEVEL_WARNING, message=warning, file=unit_data.path)
+        for warning in warnings
+    ]
+
+
 def check_file(test_file: UnitTestFile, unit_data: UnitInfo, *, coverage: bool = True) -> list[CheckFinding]:
     """Cross-reference a parsed test file against the unit it targets.
 
@@ -451,6 +477,8 @@ def check_file(test_file: UnitTestFile, unit_data: UnitInfo, *, coverage: bool =
         findings.append(
             CheckFinding(level=level, message=message, file=path, line=line, case_id=case_id)
         )
+
+    findings.extend(unit_authoring_findings(unit_data))
 
     seen_ids: dict[str, int | None] = {}
     # qtag -> rubric ids some case asserts on, for the coverage report

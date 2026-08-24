@@ -457,6 +457,22 @@ class UnitParser:
                 if rubric_part != "all" and rubric_part not in part_labels:
                     errors.append(f"{source_label}: {rubric_path}: References unknown part '{rubric_part}'.")
 
+                # The grader renders the criteria table as "Part {part}: {display_text}",
+                # so a display_text that opens with its own part label comes out doubled.
+                if rubric_part != "all":
+                    display_text = (rubric_item.findtext("display_text") or "").strip()
+                    repeated = re.match(
+                        rf"parts?\s*\(?{re.escape(rubric_part)}\)?\s*[:.\-–]",
+                        display_text,
+                        re.IGNORECASE,
+                    )
+                    if repeated:
+                        warnings.append(
+                            f"{source_label}: {rubric_path}: <display_text> starts with "
+                            f"'{repeated.group(0)}'; the grader already prefixes the part, so this "
+                            f"renders as 'Part {rubric_part}: Part {rubric_part}: ...'. Drop the label."
+                        )
+
                 if partial_credit:
                     if rubric_item.get("point_adjustment") is None:
                         errors.append(
