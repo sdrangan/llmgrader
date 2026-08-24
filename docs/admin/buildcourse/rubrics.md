@@ -235,7 +235,7 @@ adjust the score based on specific evidence.
 - `id`: Unique internal identifier for the rubric item.
 - `part`: The question part to which the rubric applies. Use `all` when the rubric applies to the whole question.
 - `point_adjustment`: Numeric score adjustment, such as `"+3"` or `"-2"`.
-- `<display_text>`: Short human-readable label for the scoring item.
+- `<display_text>`: Short human-readable label for the scoring item. Do **not** begin it with the part label: the grader renders the criteria table as `Part a: {display_text}`, so `Part a: Correct slices` comes out as `Part a: Part a: Correct slices`. `llmgrader_test check` warns when it sees this.
 - `<condition>`: The exact evidence that justifies awarding or deducting the adjustment.
 - `<notes>`: Optional clarification about acceptable variants or cases where the item should not be applied.
 

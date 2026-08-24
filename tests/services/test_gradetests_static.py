@@ -833,3 +833,72 @@ def test_check_against_a_directory_that_is_not_a_package_exits_two(tmp_path: Pat
 
     assert exit_code == 2
     assert "llmgrader_config.xml" in capsys.readouterr().err
+
+
+# ---------------------------------------------------------------------------
+# Authoring warnings carried over from the unit
+# ---------------------------------------------------------------------------
+
+
+def _unit_with_display_text(tmp_path: Path, display_text: str) -> Path:
+    """A minimal one-question unit whose sole rubric item is on part a."""
+    path = tmp_path / "unit.xml"
+    path.write_text(
+        dedent(
+            f"""
+            <unit id="u" title="U" version="1.0">
+              <question qtag="Q">
+                <question_text>Question.</question_text>
+                <solution>Solution.</solution>
+                <partial_credit>true</partial_credit>
+                <parts>
+                  <part><part_label>a</part_label><points>2</points></part>
+                </parts>
+                <rubrics>
+                  <item id="r1" part="a" point_adjustment="+2">
+                    <display_text>{display_text}</display_text>
+                    <condition>Condition.</condition>
+                  </item>
+                </rubrics>
+                <rubric_total>sum_positive</rubric_total>
+              </question>
+            </unit>
+            """
+        ).strip(),
+        encoding="utf-8",
+    )
+    return path
+
+
+def _check_against(tmp_path: Path, unit_path: Path):
+    tests = _write_test_file(
+        tmp_path,
+        """
+        <case id="c1" qtag="Q">
+          <description>A case.</description>
+          <solution>An answer.</solution>
+          <expected_points>
+            <part label="a" min="1"/>
+          </expected_points>
+        </case>
+        """,
+        unit=unit_path.as_posix(),
+    )
+    return check_path(str(tests), coverage=False)
+
+
+def test_display_text_repeating_its_part_label_warns_through_check(tmp_path: Path) -> None:
+    # The unit is the one at fault, so the finding points at the unit file.
+    result = _check_against(tmp_path, _unit_with_display_text(tmp_path, "Part a: Thing"))
+
+    assert result.errors == []
+    finding = _one(result.findings, "display_text", level=LEVEL_WARNING)
+    assert "Part a: Part a: ..." in finding.message
+    assert finding.file.endswith("unit.xml")
+
+
+def test_clean_display_text_produces_no_authoring_warning(tmp_path: Path) -> None:
+    result = _check_against(tmp_path, _unit_with_display_text(tmp_path, "Thing"))
+
+    assert result.errors == []
+    assert _messages(result.findings, LEVEL_WARNING) == []
