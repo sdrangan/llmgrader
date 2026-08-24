@@ -49,6 +49,10 @@ LEVEL_ERROR = "error"
 #: Findings at this level fail only under ``--strict``.
 LEVEL_WARNING = "warning"
 
+#: GradeResult.result when the grader itself failed rather than judged the
+#: work.  A case may assert it; otherwise it means the attempt never happened.
+RESULT_ERROR = "error"
+
 
 class GradeTestError(Exception):
     """A test file or unit could not be read at all.
@@ -1988,7 +1992,29 @@ def _grade_attempt(item: _PlannedCase, repeat_index: int, options: RunOptions, e
     attempt.full_explanation = str(grade.get("full_explanation") or "")
     attempt.rubric_eval = _plain_rubric_eval(grade)
     attempt.part_scores = part_scores(item.question_dict, grade)
-    attempt.failures, attempt.margin = evaluate_attempt(item.case, item.question_dict, grade)
+
+    # The Grader catches a provider failure and *returns* result="error" rather
+    # than raising, so the except above never sees it.  Without this branch an
+    # attempt that was never graded would be band-checked anyway, and an expired
+    # API key would read as every part and rubric item failing its expectation.
+    #
+    # result="error" alone is too broad a test: the Grader also uses it when the
+    # model answered but its output would not parse into a score, and there the
+    # rubric_eval it did return is real evidence a case can still be judged on.
+    # An empty rubric_eval is what distinguishes "never graded" from "graded
+    # badly".  A case may also assert the error, in which case it is an ordinary
+    # expectation and belongs in evaluate_attempt like any other.
+    ungraded = attempt.result == RESULT_ERROR and not attempt.rubric_eval
+    if ungraded and item.case.expected_result != RESULT_ERROR:
+        attempt.error = (
+            attempt.full_explanation
+            or attempt.feedback
+            or "the grader returned result=error without explanation."
+        )
+    else:
+        attempt.failures, attempt.margin = evaluate_attempt(
+            item.case, item.question_dict, grade
+        )
 
     usage = submission_usage(env.db_path, session_id)
     attempt.tokens_in = usage.get("tokens_in")

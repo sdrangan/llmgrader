@@ -24,6 +24,8 @@ from pathlib import Path
 import pytest
 
 from llmgrader.services.gradetests import (
+    VERDICT_ERROR,
+    VERDICT_PASS,
     RunOptions,
     run_test_files,
 )
@@ -1030,3 +1032,158 @@ def test_html_report_shows_every_repeat(tmp_path: Path, monkeypatch) -> None:
     assert "Attempt 1" in page
     assert "Attempt 2" in page
     assert "2/2 attempts passed" in page
+
+
+# ---------------------------------------------------------------------------
+# Provider failures -- an ungraded attempt is an ERROR, not a rubric failure
+# ---------------------------------------------------------------------------
+
+
+class FailingOpenAIFactory:
+    """A client whose every call raises, the way an expired key behaves.
+
+    Grader catches the exception and *returns* result="error" rather than
+    propagating it, which is the whole reason the runner needs to notice.
+    """
+
+    def __init__(self, message: str = "Error code: 401 - invalid_api_key") -> None:
+        self.message = message
+        self.calls = 0
+
+    def __call__(self, *args, **kwargs):
+        factory = self
+
+        class _FakeResponses:
+            def create(self, **request):
+                factory.calls += 1
+                raise RuntimeError(factory.message)
+
+        class _FakeClient:
+            def __init__(self) -> None:
+                self.responses = _FakeResponses()
+
+        return _FakeClient()
+
+
+def test_provider_failure_is_an_error_verdict_not_a_rubric_failure(tmp_path: Path, monkeypatch) -> None:
+    """A 401 must not read as "every part failed its expectation"."""
+    monkeypatch.delenv("LLMGRADER_STORAGE_PATH", raising=False)
+    monkeypatch.chdir(tmp_path)
+    factory = FailingOpenAIFactory()
+    _install_fake(monkeypatch, factory)
+
+    path = _single_case_file(tmp_path, LOG_METHOD_CASE)
+    report = run_test_files([str(path)], _options())
+
+    assert factory.calls == 1
+    case = report.files[0].cases[0]
+    assert case.verdict == VERDICT_ERROR
+    # No band or rubric noise invented for an attempt that never happened.
+    assert case.failures == []
+    attempt = case.attempts[0]
+    assert attempt.error is not None
+    assert "401" in attempt.error
+
+
+def test_error_verdict_survives_repeats(tmp_path: Path, monkeypatch) -> None:
+    """Every attempt erroring is ERROR, not FLAKY."""
+    monkeypatch.delenv("LLMGRADER_STORAGE_PATH", raising=False)
+    monkeypatch.chdir(tmp_path)
+    _install_fake(monkeypatch, FailingOpenAIFactory())
+
+    path = _single_case_file(tmp_path, LOG_METHOD_CASE)
+    report = run_test_files([str(path)], _options(repeat=3))
+
+    case = report.files[0].cases[0]
+    assert len(case.attempts) == 3
+    assert case.verdict == VERDICT_ERROR
+    assert report.verdicts.get(VERDICT_ERROR) == 1
+
+
+def test_a_case_may_assert_the_grader_errors(tmp_path: Path, monkeypatch) -> None:
+    """<expected_result>error</expected_result> is an expectation, not a bug."""
+    monkeypatch.delenv("LLMGRADER_STORAGE_PATH", raising=False)
+    monkeypatch.chdir(tmp_path)
+    _install_fake(monkeypatch, FailingOpenAIFactory())
+
+    path = _single_case_file(
+        tmp_path,
+        """
+  <case id="expects_error" qtag="Exponential derivative">
+    <description>Asserts that grading itself fails.</description>
+    <solution><![CDATA[Take logs: ln y = x ln a.]]></solution>
+    <expected_result>error</expected_result>
+  </case>
+""",
+    )
+    report = run_test_files([str(path)], _options())
+
+    case = report.files[0].cases[0]
+    assert case.attempts[0].error is None, "an asserted error must not short-circuit evaluation"
+    assert case.verdict == VERDICT_PASS
+
+
+def test_unparseable_grade_with_rubric_evidence_is_still_evaluated(tmp_path: Path, monkeypatch) -> None:
+    """result="error" is not always "never graded".
+
+    The Grader also returns it when the model answered but its score would not
+    parse.  The rubric_eval it did return is real evidence, so the case must
+    still be judged on it rather than written off as an ERROR.  This is the
+    boundary the `ungraded` test in _grade_one turns on.
+    """
+    monkeypatch.delenv("LLMGRADER_STORAGE_PATH", raising=False)
+    monkeypatch.chdir(tmp_path)
+
+    unit = tmp_path / "unit.xml"
+    unit.write_text(
+        """\
+<unit id="u" title="U" version="1.0">
+  <question qtag="Q" preferred_model="simple">
+    <question_text><![CDATA[Integrate.]]></question_text>
+    <solution><![CDATA[The answer is 4.]]></solution>
+    <partial_credit>true</partial_credit>
+    <parts>
+      <part><part_label>all</part_label><points>10</points></part>
+    </parts>
+    <rubrics>
+      <item id="setup" point_adjustment="+10">
+        <display_text>Correct setup</display_text>
+        <condition>Student sets the integral up correctly.</condition>
+      </item>
+    </rubrics>
+    <rubric_total>flexible</rubric_total>
+  </question>
+</unit>
+""",
+        encoding="utf-8",
+    )
+    path = tmp_path / "cases.xml"
+    path.write_text(
+        f"""\
+<unit_test unit="{unit.as_posix()}">
+  <case id="c1" qtag="Q">
+    <description>Asserts the rubric item is awarded in full.</description>
+    <solution><![CDATA[Some working.]]></solution>
+    <expected_rubrics>
+      <item id="setup" min="10" max="10"/>
+    </expected_rubrics>
+  </case>
+</unit_test>
+""",
+        encoding="utf-8",
+    )
+
+    # point_parts omitted entirely -- the score will not parse, but the rubric did.
+    reply = {
+        "full_explanation": "Judged the rubric but produced no parsable score.",
+        "feedback": "See rubric.",
+        "rubric_eval": {"setup": {"evidence": "Sets it up correctly.", "point_awarded": 10.0}},
+    }
+    _install_fake(monkeypatch, FakeOpenAIFactory({"Some working": reply}))
+    report = run_test_files([str(path)], _options())
+
+    attempt = report.attempts[0]
+    assert attempt.result == "error", "precondition: the grader could not parse a score"
+    assert attempt.rubric_eval, "precondition: but it did return rubric evidence"
+    assert attempt.error is None, "so it must not be written off as ungraded"
+    assert report.files[0].cases[0].verdict != VERDICT_ERROR

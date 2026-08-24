@@ -502,6 +502,17 @@ def _print_run_summary(report, options: RunOptions) -> None:
         f"{report.tokens_in:,} in / {report.tokens_out:,} out"
     )
 
+    # When nothing was graded at all the fault is the run's, not the rubrics'.
+    # Say so once, with the first error, instead of leaving it to be inferred
+    # from a zero token count.
+    attempts = [attempt for file_run in report.files for case in file_run.cases for attempt in case.attempts]
+    errored = [attempt for attempt in attempts if attempt.error is not None]
+    if attempts and len(errored) == len(attempts):
+        first = errored[0].error or ""
+        print()
+        print(f"no case was graded: all {len(attempts)} attempts errored.")
+        print(f"first error: {first.strip().splitlines()[0] if first.strip() else 'unknown'}")
+
     if options.cost:
         usd, long_rate = report.estimated_cost()
         suffix = " (includes long-context calls: LOWER BOUND)" if long_rate else ""
