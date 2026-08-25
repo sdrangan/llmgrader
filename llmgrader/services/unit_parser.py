@@ -46,6 +46,7 @@ class UnitPackageData:
     validation_errors: list[str]
     validation_alert: str | None
     unit_metadata: dict = field(default_factory=dict)
+    course_info: dict = field(default_factory=dict)
 
 
 class UnitParser:
@@ -70,6 +71,29 @@ class UnitParser:
             validation_errors=[],
             validation_alert=None,
         )
+
+    @staticmethod
+    def _parse_course_info(config_root: ET.Element) -> dict:
+        """Read the <course> block used for the page banner.
+
+        <title> overrides the banner headline; without it the headline falls
+        back to <name>. <instructors> is optional and the banner omits the
+        subtitle line when it is missing.
+        """
+        course_elem = config_root.find("course")
+        if course_elem is None:
+            return {}
+
+        def text(tag: str) -> str:
+            return (course_elem.findtext(tag) or "").strip()
+
+        name = text("name")
+        return {
+            "name": name,
+            "semester": text("semester") or text("term"),
+            "title": text("title") or name,
+            "instructors": text("instructors"),
+        }
 
     @staticmethod
     def _schema_path(schema_name: str) -> str:
@@ -1058,10 +1082,14 @@ class UnitParser:
                     package.validation_alert = self._build_validation_alert(package.validation_errors)
                     return package
 
+                course_info = self._parse_course_info(config_root)
+                log.write(f"Course info: {course_info}\n")
+
                 units_elem = config_root.find("units")
                 if units_elem is None:
                     log.write("No <units> section found in llmgrader_config.xml\n")
                     package = self._empty_package(soln_pkg_path)
+                    package.course_info = course_info
                     package.validation_errors = [f"{llmgrader_config_path}: /llmgrader: Missing <units> section."]
                     package.validation_alert = self._build_validation_alert(package.validation_errors)
                     return package
@@ -1088,7 +1116,9 @@ class UnitParser:
 
                 if not units_list:
                     log.write("No <unit> elements found in llmgrader_config.xml\n")
-                    return self._empty_package(soln_pkg_path)
+                    package = self._empty_package(soln_pkg_path)
+                    package.course_info = course_info
+                    return package
 
                 units = {}
                 unit_metadata: dict[str, dict] = {}
@@ -1334,6 +1364,7 @@ class UnitParser:
                     validation_errors=validation_errors,
                     validation_alert=self._build_validation_alert(validation_errors),
                     unit_metadata=unit_metadata,
+                    course_info=course_info,
                 )
             except Exception as exc:
                 log.write(f"[ERROR] Exception during unit parsing: {exc}\n")

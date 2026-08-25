@@ -11,6 +11,11 @@
                 <xs:element name="semester" type="xs:token"/>
                 <xs:element name="term" type="xs:token"/>
               </xs:choice>
+              <!-- Optional banner text. <title> overrides the headline shown in
+                   the page banner; without it the banner falls back to <name>.
+                   <instructors> is the subtitle line and is omitted if absent. -->
+              <xs:element name="title" type="xs:token" minOccurs="0"/>
+              <xs:element name="instructors" type="xs:token" minOccurs="0"/>
             </xs:sequence>
           </xs:complexType>
         </xs:element>
