@@ -8,6 +8,10 @@ from llmgrader.mcp.config_xml_tools import (
     scan_repo_for_config_inputs,
     validate_config_xml,
 )
+from llmgrader.mcp.gradetest_tools import (
+    get_unit_test_structure,
+    validate_unit_test_xml,
+)
 from llmgrader.mcp.example_tools import (
     get_question_example,
     list_question_examples,
@@ -43,13 +47,21 @@ def llmgrader_create_config_skeleton(
     term: str,
     units: list[dict[str, str]],
     assets: list[dict[str, str]] | None = None,
+    title: str | None = None,
+    instructors: str | None = None,
 ) -> dict:
-    """Generate a llmgrader-config.xml skeleton from structured inputs."""
+    """Generate a llmgrader-config.xml skeleton from structured inputs.
+
+    title and instructors are optional and only affect the portal banner; both
+    are omitted from the output when not supplied.
+    """
     xml_text = create_config_skeleton(
         course_name=course_name,
         term=term,
         units=units,
         assets=assets,
+        title=title,
+        instructors=instructors,
     )
     return {"xml": xml_text}
 
@@ -146,6 +158,28 @@ def llmgrader_validate_unit_xml(unit_xml: str, workspace_root: str | None = None
 def llmgrader_scan_repo_for_unit_inputs(workspace_root: str) -> dict:
     """Scan a workspace root for likely unit XML files, rubric examples, assets, and adjacent authoring files."""
     return scan_repo_for_unit_inputs(workspace_root=workspace_root)
+
+
+@mcp.tool(name="llmgrader_get_unit_test_structure")
+def llmgrader_get_unit_test_structure() -> dict:
+    """Return a nested schema object for instructor-authored grading test files.
+
+    Grading tests pin the behaviour of a rubric: each case is a trial answer
+    plus the outcome it should receive, so a rubric edit or a model change can
+    be re-checked from the command line.
+    """
+    return get_unit_test_structure()
+
+
+@mcp.tool(name="llmgrader_validate_unit_test_xml")
+def llmgrader_validate_unit_test_xml(unit_test_xml: str, unit_path: str | None = None) -> dict:
+    """Validate a <unit_test> document and return errors/warnings.
+
+    Supply unit_path to also cross-check each case against the question it
+    targets, which is the only way to catch assertion elements that do not match
+    the question's partial_credit mode.
+    """
+    return validate_unit_test_xml(unit_test_xml=unit_test_xml, unit_path=unit_path)
 
 
 def main() -> None:

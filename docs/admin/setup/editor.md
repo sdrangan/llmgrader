@@ -79,17 +79,54 @@ is very helpful when you are tracking down:
 - an image reference
 - a unit source or destination path
 
-## Suggested VS Code Workflow
+## Suggested VS Code Workflow: Open Both Folders
 
-If you use VS Code, a simple setup is:
+Your course content and the `llmgrader` application live in
+[two separate repositories](../buildcourse/pkgconfig.md).  VS Code can show both
+at once in a single window, which is the setup we recommend:
 
-1. Open the repository root folder.
-2. Keep the Explorer visible so you can move between `docs/`, `example_repo/`,
-	 and `llmgrader/`.
-3. Use the integrated terminal to build the solution package and run the app.
-4. Use global search when editing qtags, rubric ids, or asset paths.
+1. Open your course folder (for example `hwdesign-soln`).
+2. Choose **File → Add Folder to Workspace...** and add the `llmgrader` folder.
+3. Optionally **File → Save Workspace As...** so the pair reopens together next
+	 time.
 
-This is usually enough to be productive.
+The Explorer then shows both trees side by side, global search covers both, and
+the integrated terminal can `cd` between them.
+
+### Why Add `llmgrader` Even If You Never Edit It
+
+It is tempting to open only your course repo, since that is the only folder you
+will change.  Having `llmgrader` in the workspace is worth it anyway, especially
+if you use an AI agent:
+
+- **The agent can read real examples.**  `example_repo/` contains complete,
+	working unit XML -- multi-part questions, rubric groups, images, binary and
+	partial-credit grading.  An agent that can see those writes far better XML than
+	one working from a description of the format.
+- **The schemas are the ground truth.**  `llmgrader/schemas/unit.xsd` and
+	`llmgrader_config.xsd` define exactly what is valid.  An agent that reads them
+	will not invent elements that fail validation.
+- **The docs are in the same tree.**  Everything under `docs/` is searchable
+	alongside your content.
+
+The [MCP authoring server](./mcp_setup.md) covers much of this ground directly,
+and the two work well together: MCP tells the agent what the format *is*, while
+the repository shows it what good course content actually looks like.
+
+> **Treat `llmgrader` as read-only.** With both folders open, an agent may offer
+> to edit application source when it was only asked to fix your course content.
+> Unless you are working on the grader itself, keep your changes inside the course
+> folder -- it keeps `git pull` on `llmgrader` painless.
+
+If you *are* modifying the grader, the same two-folder workspace is what you
+want; the only difference is that edits to `llmgrader` are then intentional.
+
+Beyond the folder setup:
+
+- Keep the Explorer visible so you can move between your units, `example_repo/`,
+	and `docs/`.
+- Use the integrated terminal to build the solution package and run the app.
+- Use global search when editing qtags, rubric ids, or asset paths.
 
 ## Optional VS Code Extensions
 

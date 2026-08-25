@@ -14,6 +14,10 @@ from llmgrader.mcp.config_xml_tools import (
     scan_repo_for_config_inputs,
     validate_config_xml,
 )
+from llmgrader.mcp.gradetest_tools import (
+    get_unit_test_structure,
+    validate_unit_test_xml,
+)
 from llmgrader.mcp.example_tools import (
     get_question_example,
     list_question_examples,
@@ -72,6 +76,20 @@ def build_tool_schemas() -> list[dict[str, Any]]:
                         "type": "string",
                         "description": "Academic term to place in <course><term>.",
                     },
+                    "title": {
+                        "type": ["string", "null"],
+                        "description": (
+                            "Optional banner headline for <course><title>. Without it the "
+                            "banner falls back to <name>."
+                        ),
+                    },
+                    "instructors": {
+                        "type": ["string", "null"],
+                        "description": (
+                            "Optional instructor line for <course><instructors>. Omitted "
+                            "from the banner when absent."
+                        ),
+                    },
                     "units": {
                         "type": "array",
                         "description": "Unit XML entries to include in <units>.",
@@ -101,7 +119,9 @@ def build_tool_schemas() -> list[dict[str, Any]]:
                         },
                     },
                 },
-                "required": ["course_name", "term", "units", "assets"],
+                # Strict mode requires every property to be listed here;
+                # optionality is expressed by the nullable types above.
+                "required": ["course_name", "term", "units", "assets", "title", "instructors"],
                 "additionalProperties": False,
             },
         },
@@ -396,6 +416,43 @@ def build_tool_schemas() -> list[dict[str, Any]]:
                 "additionalProperties": False,
             },
         },
+        {
+            "type": "function",
+            "name": "get_unit_test_structure",
+            "description": (
+                "Describe the <unit_test> grading-test format: cases pairing a trial student answer with the score it should receive, used to pin rubric behaviour across edits and model changes."
+            ),
+            "strict": True,
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": [],
+                "additionalProperties": False,
+            },
+        },
+        {
+            "type": "function",
+            "name": "validate_unit_test_xml",
+            "description": (
+                "Validate a <unit_test> document. Supply unit_path to also cross-check each case against the question it targets, which is the only way to catch assertions that do not match the question's partial_credit mode."
+            ),
+            "strict": True,
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "unit_test_xml": {
+                        "type": "string",
+                        "description": "Full <unit_test> XML document to validate.",
+                    },
+                    "unit_path": {
+                        "type": ["string", "null"],
+                        "description": "Optional path to the unit XML the cases target.",
+                    },
+                },
+                "required": ["unit_test_xml", "unit_path"],
+                "additionalProperties": False,
+            },
+        },
     ]
 
 
@@ -430,6 +487,8 @@ def execute_tool_call(name: str, arguments: dict[str, Any]) -> Any:
             term=arguments["term"],
             units=arguments["units"],
             assets=arguments.get("assets"),
+            title=arguments.get("title"),
+            instructors=arguments.get("instructors"),
         )
     if name == "create_unit_xml_skeleton":
         return create_unit_xml_skeleton(
@@ -452,6 +511,13 @@ def execute_tool_call(name: str, arguments: dict[str, Any]) -> Any:
         return scan_repo_for_config_inputs(workspace_root=arguments["workspace_root"])
     if name == "scan_repo_for_unit_inputs":
         return scan_repo_for_unit_inputs(workspace_root=arguments["workspace_root"])
+    if name == "get_unit_test_structure":
+        return get_unit_test_structure()
+    if name == "validate_unit_test_xml":
+        return validate_unit_test_xml(
+            unit_test_xml=arguments["unit_test_xml"],
+            unit_path=arguments.get("unit_path"),
+        )
     raise ValueError(f"Unknown blind-user tool: {name}")
 
 

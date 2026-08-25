@@ -55,6 +55,13 @@ The current tools are:
 - `llmgrader_create_unit_xml_skeleton`
 - `llmgrader_validate_unit_xml`
 - `llmgrader_scan_repo_for_unit_inputs`
+- `llmgrader_get_unit_test_structure`
+- `llmgrader_validate_unit_test_xml`
+
+The last two cover [grading tests](./gradetests.md).  `llmgrader_validate_unit_test_xml`
+takes an optional path to the unit under test; supply it, because the schema
+alone cannot tell whether a case uses the assertion elements its question's
+grading mode allows.
 
 ## How to Use the Agent
 

@@ -87,6 +87,13 @@ The sibling layout is why step 7 can refer to your package as
 `../robotics-soln/soln_package`.  If you put the two repos somewhere else, adjust
 that path accordingly.
 
+> **In VS Code, open both folders at once.**  Open your course folder, then use
+> **File → Add Folder to Workspace...** to add `llmgrader`.  Two separate repos,
+> one window.  This is worth doing even though you will only edit the course
+> folder: it lets an AI agent read the working examples in `example_repo/` and the
+> schemas in `llmgrader/schemas/` while it drafts your XML, which makes its output
+> markedly better.  See [Selecting an IDE](../setup/editor.md).
+
 ## 3. Write the Unit XML
 
 Create `unit1/statics.xml`.  This is a complete, working example -- paste it in,
