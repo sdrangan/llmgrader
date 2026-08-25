@@ -181,6 +181,36 @@ paths containing `..` are rejected during validation.
 
 ---
 
+## The Page Banner
+
+The `<course>` block also drives the banner across the top of the portal.  Two
+optional elements control it:
+
+```xml
+<course>
+  <name>ECE-GY 9463:  Introduction to Hardware Design</name>
+  <term>Spring 2026</term>
+  <title>LLM Grader for NYU Hardware Design</title>
+  <instructors>Profs. Ada Lovelace, Alan Turing</instructors>
+</course>
+```
+
+| Element | Effect on the banner |
+|---|---|
+| `<title>` | The large headline.  **If omitted, the banner falls back to `<name>`** |
+| `<instructors>` | The smaller line beneath it.  If omitted, that line is hidden entirely |
+
+Both are optional, so existing configuration files keep working without changes --
+they simply show `<name>` as the headline and no instructor line.
+
+The banner updates when a new course package is loaded, so an administrator who
+uploads a package does not have to restart the app to see the new title.
+
+> **Upgrading an existing course:** if your banner text used to be built into the
+> application, add `<title>` and `<instructors>` to your config to preserve it.
+> Without a `<title>`, the banner will show your `<name>` value instead, which is
+> often a course number rather than the display title you want.
+
 ## Grader configuration file `llmgrader_config.xml`
 
 Generally, we expect that the course solutions are in some file system,

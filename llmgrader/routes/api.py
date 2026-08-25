@@ -61,6 +61,18 @@ class APIController:
     def utc_now() -> str:
         return datetime.now(timezone.utc).isoformat()
 
+    def banner_context(self) -> dict:
+        """Banner title/instructors for the loaded course package.
+
+        Falls back to the built-in title when no package is loaded yet, so a
+        fresh install still renders a sensible banner.
+        """
+        course = getattr(self.grader, "course_info", None) or {}
+        return {
+            "title": (course.get("title") or "").strip() or "LLM Grader",
+            "instructors": (course.get("instructors") or "").strip(),
+        }
+
     def auth_mode(self) -> str:
         return (os.environ.get("LLMGRADER_AUTH_MODE") or "normal").strip().lower()
 
@@ -428,11 +440,11 @@ class APIController:
 
         @bp.get("/")
         def home():
-            return render_template("index.html")
+            return render_template("index.html", banner=self.banner_context())
 
         @bp.get("/dashboard")
         def dashboard():
-            return render_template("index.html")
+            return render_template("index.html", banner=self.banner_context())
 
         @app.get("/auth/login")
         def google_auth_login():
@@ -555,6 +567,7 @@ class APIController:
             return jsonify({
                 "items": payload,
                 "validation_alert": getattr(self.grader, 'unit_validation_alert', None),
+                "course": self.banner_context(),
             })
 
         STUDENT_EXCLUDED_FIELDS = {"solution", "solution_images", "grading_notes"}
@@ -882,7 +895,7 @@ class APIController:
         @app.route("/admin")
         @self.require_admin
         def admin_page():
-            return render_template("index.html")
+            return render_template("index.html", banner=self.banner_context())
 
         @app.route("/admin/upload", methods=["POST"])
         @self.require_admin

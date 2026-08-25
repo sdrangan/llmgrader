@@ -1114,12 +1114,30 @@ document.addEventListener("DOMContentLoaded", () => {
     });
 });
 
+// Keeps the banner in step with the loaded course package. The server renders
+// the same values into the page, so this only matters after an admin uploads a
+// new package without reloading.
+function updateBanner(course) {
+    if (!course) return;
+
+    const titleEl = document.getElementById("banner-title");
+    if (titleEl && course.title) titleEl.textContent = course.title;
+
+    const instructorsEl = document.getElementById("banner-instructors");
+    if (instructorsEl) {
+        const instructors = (course.instructors || "").trim();
+        instructorsEl.textContent = instructors;
+        instructorsEl.style.display = instructors ? "" : "none";
+    }
+}
+
 async function loadUnits() {
     const resp = await fetch("/units");
     const payload = await resp.json();
     const items = Array.isArray(payload) ? payload : (payload.items || []);
 
     maybeShowValidationAlert(payload.validation_alert);
+    updateBanner(payload.course);
 
     const dropdown = document.getElementById("unit-select");
     dropdown.innerHTML = "";

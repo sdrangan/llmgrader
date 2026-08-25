@@ -2,6 +2,8 @@
   <course>
     <name>Demo Class</name>
     <semester>Spring 2026</semester>
+    <title>LLM Grader for Demo Class</title>
+    <instructors>Prof. Sundeep Rangan</instructors>
   </course>
 
   <units>

@@ -31,8 +31,11 @@
         <img src="{{ url_for('static', filename='images/nyu-logo.png') }}"
              alt="NYU Logo" class="nyu-logo">
         <div class="title-section">
-            <div class="title">OpenAI Grader for NYU Applied Hardware Design</div>
-            <div class="professors">Profs. Sundeep Rangan, Siddharth Garg</div>
+            <div class="title" id="banner-title">{{ banner.title if banner else 'LLM Grader' }}</div>
+            <div class="professors" id="banner-instructors"
+                 {% if not banner or not banner.instructors %}style="display:none"{% endif %}>
+                {{- banner.instructors if banner else '' -}}
+            </div>
         </div>
     </div>
 </div>

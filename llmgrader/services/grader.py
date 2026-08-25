@@ -449,6 +449,7 @@ class Grader:
         self.xml_path_list = []
         self.unit_validation_errors = []
         self.unit_validation_alert = None
+        self.course_info = {}
         self.prompt_builder = PromptBuilder()
 
         # Remove old scratch directory if it exists
@@ -737,6 +738,7 @@ class Grader:
             self.xml_path_list = []
             self.unit_validation_errors = ["Unit package could not be loaded (None returned)"]
             self.unit_validation_alert = "Unit package could not be loaded."
+            self.course_info = {}
             return
 
         self.soln_pkg = unit_package.soln_pkg_path
@@ -747,6 +749,7 @@ class Grader:
         self.xml_path_list = unit_package.xml_path_list
         self.unit_validation_errors = unit_package.validation_errors
         self.unit_validation_alert = unit_package.validation_alert
+        self.course_info = unit_package.course_info
     
     def build_task_prompt(
         self,
