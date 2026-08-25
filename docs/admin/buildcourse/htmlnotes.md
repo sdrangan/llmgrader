@@ -78,4 +78,4 @@ input XML file for `llmgrader_config.xml` automatically.
 
 ---
 
-Next:  Go to [uploading the solution package](./dupload.md)
+Next:  Go to [uploading the solution package](./upload.md)

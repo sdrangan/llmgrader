@@ -53,7 +53,7 @@ If the unit XML has `<digitalsign>true</digitalsign>`, the portal signs each sub
 
 If you upload a submission that was not signed, or one whose signature does not match, the autograder will reject it and report an error. This prevents students from uploading hand-crafted or altered JSON files.
 
-See [Submission Signing Keys](../gskeys.md) for how to generate keys and configure the environment.
+See [Submission Signing Keys](../setup/gskeys.md) for how to generate keys and configure the environment.
 
 ---
 

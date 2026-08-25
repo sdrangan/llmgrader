@@ -15,6 +15,6 @@ authoring.
 
 Use the links below to jump into the current developer topics:
 
-* [Developer set-up](./setup_dev.md)
+* [Developer set-up](./setup.md)
 * [Unit testing and CI/CD](./pytest.md)
 * [The model registry](./models.md) — adding or retiring a model

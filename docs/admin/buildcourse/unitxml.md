@@ -216,7 +216,7 @@ Setting this to `true` requires that:
 - `LLMGRADER_PRIVATE_KEY` is set as an environment variable on Render
 - `LLMGRADER_PUBLIC_KEY` is set in the local environment where `build_autograder` is run
 
-See [Submission Signing Keys](../gskeys.md) for setup instructions.
+See [Submission Signing Keys](../setup/gskeys.md) for setup instructions.
 
 ---
 

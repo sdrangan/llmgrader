@@ -17,9 +17,11 @@ In practice, this means:
 - admin access is granted by email address on the server
 - the first admin can be bootstrapped from `LLMGRADER_INITIAL_ADMIN_EMAIL`
 
-If you are launching the app locally for development, you still need to provide
-the OAuth client settings unless you deliberately use the development bypass in
-[Google sign-in and admin access](password.md).
+**You do not need any of this to run the grader locally.**  The student-facing
+portal works with no environment variables set, and local admin access can be
+had with the [development bypass](#development-bypass) below.  Google OAuth is
+required when you deploy publicly -- see
+[Deploying on a Local Machine](../deploy/local.md) if you are still authoring.
 
 ## What You Need Before You Start
 
@@ -233,7 +235,7 @@ https://your-render-service.onrender.com/auth/callback
 That value must also be registered in the Google Cloud Console as an authorized
 redirect URI.
 
-For the broader Render deployment checklist, see [Deploying on render](deploy.md).
+For the broader Render deployment checklist, see [Deploying on render](../deploy/render.md).
 
 ## Troubleshooting
 

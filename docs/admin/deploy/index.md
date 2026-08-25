@@ -1,7 +1,7 @@
 ---
 title: Deploying the App
 parent: Administrator Guide
-nav_order: 3
+nav_order: 4
 has_children: true
 ---
 
@@ -23,5 +23,5 @@ You should now be able to see the course on your browser.
 Once you are ready to deploy the grader on a public render portal follow the following instructions:
 
 
-- [Deploying on render](deploy.md)
-- [Google sign-in and admin access](password.md)
+- [Deploying on render](./render.md)
+- [Google sign-in and admin access](../setup/oauth.md)
