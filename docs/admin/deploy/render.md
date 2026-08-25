@@ -110,7 +110,7 @@ Add these variables:
 | `LLMGRADER_INITIAL_ADMIN_EMAIL` | `you@example.com` | Bootstraps first admin |
 | `PYTHON_VERSION` | `3.12.3` | Update with python version |
 | `LLMGRADER_STORAGE_PATH` | /var/data/| Root for persistent storage |  
-| `LLMGRADER_PRIVATE_KEY` | (generated value) | Optional — required only if using [submission signing](../gskeys.md) |
+| `LLMGRADER_PRIVATE_KEY` | (generated value) | Optional — required only if using [submission signing](../setup/gskeys.md) |
 
 Example values for a Render deployment might look like this:
 
@@ -179,4 +179,4 @@ Once you are deployed, you can [upload the course package](../buildcourse/upload
 
 ---
 
-Go to [Google sign-in and admin access](./password.md)
+Go to [Google sign-in and admin access](../setup/oauth.md)

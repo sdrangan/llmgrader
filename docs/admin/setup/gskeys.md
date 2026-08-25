@@ -78,7 +78,7 @@ export LLMGRADER_PUBLIC_KEY="<paste public key here>"
 
 ### On Render
 
-Only the **private key** needs to be set on Render — the public key travels with the autograder zip. Add it following the general [Render environment variable instructions](./deploy/render.md).
+Only the **private key** needs to be set on Render — the public key travels with the autograder zip. Add it following the general [Render environment variable instructions](../deploy/render.md).
 
 ---
 
@@ -102,7 +102,7 @@ Once keys are set, enable signing in the unit XML file with:
 <digitalsign>true</digitalsign>
 ```
 
-See the [Unit XML format](./buildcourse/unitxml.md) for the full field description and where to place it.
+See the [Unit XML format](../buildcourse/unitxml.md) for the full field description and where to place it.
 
 When you then run `build_autograder`, the public key is automatically embedded in the autograder zip. If `LLMGRADER_PUBLIC_KEY` is not set and signing is enabled, `build_autograder` will print an error and exit before building.
 

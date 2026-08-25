@@ -27,7 +27,7 @@ of the repository, so Python sees your local code changes immediately.
 ## MCP Setup
 
 MCP setup for developers is installed the same way as it is for regular users;
-see the [instructor-facing guide for MCP setup](../admin/setup/mcp_instructor.md).
+see the [instructor-facing guide for MCP setup](../admin/setup/mcp_setup.md).
 
 In practice, that means you should install `llmgrader` into the environment you
 want VS Code to use for MCP and then run:

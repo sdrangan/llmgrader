@@ -21,9 +21,13 @@ have been written, you can create the package.
 * Activate the virtual environment with the `llmgrader` python package.
 * Run 
 
+```bash
+create_soln_pkg --config llmgrader_config.xml
 ```
-python create_soln_pkg.py [--config llmgrader_config.xml]
-```
+
+`create_soln_pkg` is a console script installed with the package, so it must be
+run with the virtual environment active.  If `--config` is omitted, it looks for
+`llmgrader_config.xml` in the current directory.
 
 This script produces:
 
@@ -50,7 +54,7 @@ If anything is missing, the admin upload page will reject the package with a cle
 ## Upload via the Admin Interface
 
 Navigate to the admin view with **File->Select View->Admin**.  
-You must [login in as an administrator](./login.md) for this view to be visible.
+You must [login in as an administrator](../setup/oauth.md) for this view to be visible.
 
 Then, select **File->Admin->Load course package...**.
 
