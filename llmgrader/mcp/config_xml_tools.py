@@ -28,6 +28,13 @@ def get_llmgrader_config_structure() -> dict:
             "Destination paths must be relative to the package root.",
             "Destination paths must not contain '..'.",
             "Source paths should usually be relative to the workspace root.",
+            "<course> requires exactly one of <semester> or <term>. Both spellings "
+            "are accepted; do not rewrite an existing file from one to the other.",
+            "<title> and <instructors> are optional and only affect the portal "
+            "banner. Without <title> the banner shows <name>.",
+            "Units appear to students in the order they are listed under <units>.",
+            "<section> elements may be interleaved with <unit> elements to group "
+            "them under headings.",
         ],
         "examples": {
             "minimal_document": (
@@ -66,6 +73,30 @@ def get_llmgrader_config_structure() -> dict:
                 "  </assets>\n"
                 "</llmgrader>"
             ),
+            "with_banner_and_sections": (
+                "<llmgrader>\n"
+                "  <course>\n"
+                "    <name>ECE-GY 1234 Probability</name>\n"
+                "    <semester>Fall 2026</semester>\n"
+                "    <title>LLM Grader for Probability</title>\n"
+                "    <instructors>Prof. Ada Lovelace</instructors>\n"
+                "  </course>\n"
+                "  <units>\n"
+                "    <section>Part I: Counting</section>\n"
+                "    <unit>\n"
+                "      <name>combinatorics</name>\n"
+                "      <source>units/combinatorics.xml</source>\n"
+                "      <destination>combinatorics.xml</destination>\n"
+                "    </unit>\n"
+                "    <section>Part II: Random Variables</section>\n"
+                "    <unit>\n"
+                "      <name>discrete_rvs</name>\n"
+                "      <source>units/discrete_rvs.xml</source>\n"
+                "      <destination>discrete_rvs.xml</destination>\n"
+                "    </unit>\n"
+                "  </units>\n"
+                "</llmgrader>"
+            ),
         },
     }
 
@@ -76,6 +107,8 @@ def create_config_skeleton(
     term: str,
     units: list[dict[str, str]],
     assets: list[dict[str, str]] | None = None,
+    title: str | None = None,
+    instructors: str | None = None,
 ) -> str:
     if not units:
         raise ValueError("At least one unit is required to build a config skeleton.")
@@ -84,6 +117,13 @@ def create_config_skeleton(
     course_elem = ET.SubElement(root, "course")
     ET.SubElement(course_elem, "name").text = (course_name or "").strip()
     ET.SubElement(course_elem, "term").text = (term or "").strip()
+
+    # Optional banner text; omitted entirely when not supplied so the generated
+    # file stays minimal.
+    if (title or "").strip():
+        ET.SubElement(course_elem, "title").text = title.strip()
+    if (instructors or "").strip():
+        ET.SubElement(course_elem, "instructors").text = instructors.strip()
 
     units_elem = ET.SubElement(root, "units")
     for unit in units:
@@ -125,8 +165,12 @@ def validate_config_xml(
     else:
         if not (course_elem.findtext("name") or "").strip():
             errors.append("Missing required <course>/<name> value.")
-        if not (course_elem.findtext("term") or "").strip():
-            errors.append("Missing required <course>/<term> value.")
+        # The schema accepts either <semester> or <term>; both name the same
+        # thing and existing course packages use both spellings.
+        has_term = (course_elem.findtext("term") or "").strip()
+        has_semester = (course_elem.findtext("semester") or "").strip()
+        if not has_term and not has_semester:
+            errors.append("Missing required <course>/<semester> (or <course>/<term>) value.")
 
     units_elem = root.find("units")
     unit_elems = units_elem.findall("unit") if units_elem is not None else []
@@ -220,12 +264,17 @@ def _llmgrader_structure() -> dict:
 
 def _course_structure() -> dict:
     return make_element_description(
-        "Course metadata for the packaged course.",
+        "Course metadata for the packaged course. Exactly one of <semester> or "
+        "<term> is required; <title> and <instructors> are optional and drive "
+        "the portal banner.",
         required=True,
         multiple=False,
         children={
             "name": _course_name_structure(),
+            "semester": _course_semester_structure(),
             "term": _course_term_structure(),
+            "title": _course_title_structure(),
+            "instructors": _course_instructors_structure(),
         },
     )
 
@@ -244,10 +293,26 @@ def _course_name_structure() -> dict:
     )
 
 
+def _course_semester_structure() -> dict:
+    return make_element_description(
+        "Academic term for the package. Interchangeable with <term>; supply one "
+        "of the two, not both.",
+        required=False,
+        multiple=False,
+        text_content=make_text_content_description(
+            "Semester label.",
+            required=True,
+            type="string",
+            example="Fall 2026",
+        ),
+    )
+
+
 def _course_term_structure() -> dict:
     return make_element_description(
-        "Academic term for the package.",
-        required=True,
+        "Academic term for the package. Interchangeable with <semester>; supply "
+        "one of the two, not both.",
+        required=False,
         multiple=False,
         text_content=make_text_content_description(
             "Term label.",
@@ -258,12 +323,63 @@ def _course_term_structure() -> dict:
     )
 
 
+def _course_title_structure() -> dict:
+    return make_element_description(
+        "Optional headline shown in the portal banner. When omitted the banner "
+        "falls back to <name>, which is often a course number rather than the "
+        "display title.",
+        required=False,
+        multiple=False,
+        text_content=make_text_content_description(
+            "Banner headline.",
+            required=True,
+            type="string",
+            example="LLM Grader for Introduction to Hardware Design",
+        ),
+    )
+
+
+def _course_instructors_structure() -> dict:
+    return make_element_description(
+        "Optional instructor line shown beneath the banner headline. When "
+        "omitted, that line is hidden entirely.",
+        required=False,
+        multiple=False,
+        text_content=make_text_content_description(
+            "Instructor names, already formatted for display.",
+            required=True,
+            type="string",
+            example="Profs. Ada Lovelace, Alan Turing",
+        ),
+    )
+
+
 def _units_structure() -> dict:
     return make_element_description(
-        "Collection of packaged unit XML entries.",
+        "Collection of packaged unit XML entries. Units are loaded and shown to "
+        "students in the order they appear here. Optional <section> headings may "
+        "be interleaved between units to group them.",
         required=True,
         multiple=False,
-        children={"unit": _unit_entry_structure()},
+        children={
+            "section": _section_structure(),
+            "unit": _unit_entry_structure(),
+        },
+    )
+
+
+def _section_structure() -> dict:
+    return make_element_description(
+        "Optional heading that groups the units listed after it. Rendered as a "
+        "non-selectable divider in the unit dropdown.",
+        required=False,
+        multiple=True,
+        text_content=make_text_content_description(
+            "Section heading text.",
+            required=True,
+            type="string",
+            example="Part I: Combinational Logic",
+        ),
     )
 
 

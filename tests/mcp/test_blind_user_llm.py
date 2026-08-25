@@ -20,6 +20,8 @@ def test_build_tool_schemas_exposes_expected_function_tools() -> None:
         "create_unit_xml_skeleton",
         "validate_unit_xml",
         "scan_repo_for_unit_inputs",
+        "get_unit_test_structure",
+        "validate_unit_test_xml",
     ]
     assert all(tool["type"] == "function" for tool in tools)
     assert all(tool["strict"] is True for tool in tools)
@@ -29,6 +31,8 @@ def test_build_tool_schemas_exposes_expected_function_tools() -> None:
         "term",
         "units",
         "assets",
+        "title",
+        "instructors",
     ]
     assert tool_by_name["create_config_skeleton"]["parameters"]["properties"]["assets"]["type"] == [
         "array",
@@ -79,11 +83,15 @@ def test_build_tool_schemas_exposes_expected_function_tools() -> None:
 def test_execute_tool_call_routes_to_matching_helper(monkeypatch) -> None:
     captured: dict[str, object] = {}
 
-    def fake_create_config_skeleton(*, course_name, term, units, assets=None):
+    def fake_create_config_skeleton(
+        *, course_name, term, units, assets=None, title=None, instructors=None
+    ):
         captured["course_name"] = course_name
         captured["term"] = term
         captured["units"] = units
         captured["assets"] = assets
+        captured["title"] = title
+        captured["instructors"] = instructors
         return "<llmgrader />"
 
     monkeypatch.setattr(blind_user_llm, "create_config_skeleton", fake_create_config_skeleton)
@@ -104,6 +112,8 @@ def test_execute_tool_call_routes_to_matching_helper(monkeypatch) -> None:
         "term": "Fall 2026",
         "units": [{"name": "rv", "source": "units/rv.xml", "destination": "rv.xml"}],
         "assets": [{"source": "figures", "destination": "prob_assets"}],
+        "title": None,
+        "instructors": None,
     }
 
 

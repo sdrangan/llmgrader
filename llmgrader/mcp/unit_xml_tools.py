@@ -540,7 +540,28 @@ def _unit_structure() -> dict:
                 example="1.0",
             ),
         },
-        children={"question": _question_structure()},
+        children={
+            "digitalsign": _digitalsign_structure(),
+            "question": _question_structure(),
+        },
+    )
+
+
+def _digitalsign_structure() -> dict:
+    return make_element_description(
+        "Optional. When true, the portal digitally signs each submission this "
+        "unit produces so the Gradescope autograder can reject hand-edited "
+        "files. Requires signing keys to be configured on the server; leave it "
+        "out unless the course uses that feature. Must come before <question>.",
+        required=False,
+        multiple=False,
+        text_content=make_text_content_description(
+            "Whether to sign submissions for this unit.",
+            required=True,
+            type="string",
+            example="true",
+            allowed_values=["true", "false"],
+        ),
     )
 
 

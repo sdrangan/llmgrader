@@ -9,10 +9,9 @@ has_children: false
 
 ## Course Package Overview 
 
-Each **course** is assumed to be divied into **units**.  For example, a course on probabiliy may have units such as combinatorics, or random variables.
-Each unit will have a set of questions. Corrsponding to the course is a **course package** (or **solution package**)
-is a lightweight, instructor‑authored bundle that tells the LLM grader which units belong to a course and where to find their XML definitions
-for the questions and solutions in that unit. It contains:
+Each **course** is  divided into **units**.  For example, a course on probabiliy may have units such as combinatorics, or random variables.
+Each unit will have a set of questions. A **course package** (or **solution package**)
+is a lightweight, instructor‑authored bundle that describes the units and questions within the units. Each course package contains:
 
 - a single **configuration file**: `llmgrader_config.xml`
 - one **unit XML file** for each unit, each already validated by the instructor
@@ -29,24 +28,38 @@ on a local machine using any editor (e.g., VSCode).
 These files *are not* edited on the LLM grader portal, although we may add that feature in the future.
 The files can be in any directory structure.  This way, the instructor can, for example, create a larger GitHub
 repository or local folder, with course material and include the relevant files anywhere in that file structure.  
-For example, we could have a directory structure such as:
+
+### Your Course Is a Separate Repository
+
+Your course content lives in **its own repository, alongside `llmgrader` rather
+than inside it**.  The `llmgrader` repo is application code that you pull updates
+into; the course repo is content you own and may want to keep private.  Mixing
+the two makes updating the application painful.
+
+A typical arrangement looks like this:
 
 ```
-hwdesign-soln/
-    llmgrader_config.xml        ← optional: some instructors keep it here
-    unit1/
-        basic_logic.xml
-    images/
-            circuit_diag.jpg
-            truth_table.png
-    unit2/
-        numbers.xml
-    figures/
-            number_line.png
-  shared/
-    logic_symbols.svg
-    unit3/
-        alu.xml
+repos/
+├── llmgrader/                     ← the application, cloned from GitHub
+│   ├── run.py
+│   ├── example_repo/
+│   └── ...
+│
+└── hwdesign-soln/                 ← your course content, a separate repo
+    ├── llmgrader_config.xml       ← the configuration file
+    ├── unit1/
+    │   ├── basic_logic.xml
+    │   └── images/
+    │       ├── circuit_diag.jpg
+    │       └── truth_table.png
+    ├── unit2/
+    │   ├── numbers.xml
+    │   └── figures/
+    │       └── number_line.png
+    ├── unit3/
+    │   └── alu.xml
+    └── shared/
+        └── logic_symbols.svg
 ```
 
 In this example:
@@ -56,7 +69,21 @@ In this example:
 - Supporting assets (images, diagrams, etc.) can live anywhere in the source repository
 - The `<source>` paths in `llmgrader_config.xml` refer to these locations
 
-But again, any directory structure is possible.
+But again, any directory structure is possible.  The configuration file records
+where everything is, so the layout above is a convention rather than a
+requirement.  The one thing that matters is that the two repositories stay
+separate.
+
+Separate repositories do not mean separate editor windows.  In VS Code, open your
+course folder and then use **File → Add Folder to Workspace...** to add
+`llmgrader` beside it, so both trees are visible at once.  This is worth doing
+even if you never edit the application, because it lets an AI agent read the
+working examples in `example_repo/` and the schemas in `llmgrader/schemas/` while
+drafting your XML.  See [Selecting an IDE](../setup/editor.md) for the details.
+
+If you are setting this up for the first time,
+[Build Your Own Course](../gettingstarted/buildcourse.md) walks through creating
+this structure step by step.
 
 
 
@@ -81,6 +108,7 @@ soln_package/
     ...
 ```
 
+This package is generated automatically -- you do not need to create the directory structure.
 Unit XML files are placed at the root of the package.
 Any explicit asset mappings from `llmgrader_config.xml` are copied into the package at
 the destination path you specify. This means the package layout is intentional and stable:
@@ -160,6 +188,9 @@ This shows the mapping clearly:
 - `<destination>` is the filename that will appear in the solution package
 - `<assets>` defines additional package files and directories to copy
 
+Units are loaded and displayed **in the order they are listed here**, so the
+sequence of `<unit>` blocks is what students see in the unit dropdown.
+
 Asset mappings may copy either a whole directory or a single file:
 
 - If `<source>` is a directory, its contents are copied under the destination directory.
@@ -176,8 +207,6 @@ The `<destination>` path must be relative to the package root. Absolute paths an
 paths containing `..` are rejected during validation.
 
 
-
----
 
 ---
 
@@ -210,28 +239,6 @@ uploads a package does not have to restart the app to see the new title.
 > application, add `<title>` and `<instructors>` to your config to preserve it.
 > Without a `<title>`, the banner will show your `<name>` value instead, which is
 > often a course number rather than the display title you want.
-
-## Grader configuration file `llmgrader_config.xml`
-
-Generally, we expect that the course solutions are in some file system,
-typically a GitHub repository, although any folder system can be used.
-The solution package configuration file, `llmgrader_config.xml` 
-describes how to find the unit XML files within that local repository or file system.
-Specifically, this file defines:
-
-- the **course metadata** (name, term, etc.)
-- the **list of units** included in the package
-- the **mapping** from instructor repo paths → packaged filenames
-
-The grader uses this file to:
-
-- load units in the correct order  
-- locate each unit’s XML file  
-- display course information in the admin UI  
-
-
-To make the config example concrete, here is a typical instructor solution repository:
-
 
 ---
 
