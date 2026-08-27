@@ -92,6 +92,28 @@ from pydantic import BaseModel
 
 
 
+class RubricEvalItem(BaseModel):
+    """One rubric item's assessment, as returned by the grader.
+
+    Not yet wired into GradeResult.rubric_eval: that field is populated straight
+    from LLM output, so typing it here would turn an entry the UI currently
+    renders as a blank row into a failed grade for the student. See
+    plans/feedback.md.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    evidence: str
+    point_awarded: float | None = None
+    result: Literal["pass", "fail", "feedback", "n/a"] | None = None
+
+    @model_validator(mode="after")
+    def validate_outcome(self):
+        if self.point_awarded is None and self.result is None:
+            raise ValueError("rubric_eval items must include point_awarded or result.")
+        return self
+
+
 class GradeResult(BaseModel):
     """
     Data model for the grading result.
@@ -123,33 +145,16 @@ class GradeResult(BaseModel):
         When partial_credit==True and  grading a specific part or single-part question, the grader returns the points awarded for that part.  
         This value is copied post-grader to the appropriate position in `point_parts` for consistency.
         In all other cases, the value is derived post-grader by summing the point_parts.
-class RubricEvalItem(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    evidence: str
-    point_awarded: float | None = None
-    result: Literal["pass", "fail", "feedback", "n/a"] | None = None
-
-    @model_validator(mode="after")
-    def validate_outcome(self):
-        if self.point_awarded is None and self.result is None:
-            raise ValueError("rubric_eval items must include point_awarded or result.")
-        return self
-
-
     max_points : float | None
         The total maximum points for the question, i.e., sum(max_point_parts)
         The grader does not need to return this field since the backend will compute it.
     rubric_eval : dict[str, dict] | None
-    model_config = ConfigDict(extra="forbid")
-
         For each rubric item id, the grader returns a dictionary for the assessment of 
         each rubric item with the following fields:
         rubric_eval[id]['evidence'] : str`
             A concise description of the evidence observed in the student's solution as to why or why not
             the condition of the rubric has been met.  
         rubric_eval[id]['point_awarded'] : float
-    rubric_eval: dict[str, RubricEvalItem] | None = None
             the point_adjustment specified for the rubric item in the XML.  If the condition is not met,
             the point_awarded should be 0.  This fields is filled out only for partial_credit
             grading.
@@ -157,6 +162,9 @@ class RubricEvalItem(BaseModel):
             The final recommended result in the case of binary grading.  
             - 'fail' indicates that the rubric  
     """
+
+    model_config = ConfigDict(extra="forbid")
+
     max_point_parts: float | list[float] | None
     point_parts: float | list[float] | None
     result_parts: Literal["pass", "fail", "error", "partial"] | list[Literal["pass", "fail", "error", "partial"]]
