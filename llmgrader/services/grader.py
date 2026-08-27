@@ -1461,7 +1461,10 @@ class Grader:
                     {
                         "result": "error",
                         "full_explanation": token,
-                        "feedback": reason or "",
+                        "feedback": reason or (
+                            "Grading needs an OpenAI API key, and no admin key is "
+                            "available for this model."
+                        ),
                     },
                     partial_credit=partial_credit,
                     max_points_part=max_points_part,
@@ -1487,10 +1490,11 @@ class Grader:
                     ref_solution_images=question_dict.get("solution_images", []),
                 )
             except Exception as e:
+                detail = f"Failed to initialize LLM client: {e}"
                 grade = {
                     "result": "error",
-                    "full_explanation": f"Failed to initialize LLM client: {e}",
-                    "feedback": "Initialization failed."
+                    "full_explanation": detail,
+                    "feedback": f"Initialization failed. {detail}"
                 }
 
         if grade is None:
@@ -1518,7 +1522,10 @@ class Grader:
                 grade = {
                     "result": "error",
                     "full_explanation": explanation,
-                    "feedback": f"{provider} server not responding in time. Try again."
+                    "feedback": (
+                        f"{provider} server not responding in time. Try again. "
+                        f"{explanation}"
+                    )
                 }
 
             except APITimeoutError:
@@ -1531,15 +1538,22 @@ class Grader:
                 grade = {
                     "result": "error",
                     "full_explanation": explanation,
-                    "feedback": "The grading request took too long to process."
+                    "feedback": (
+                        "The grading request took too long to process. "
+                        f"{explanation}"
+                    )
                 }
             
             except Exception as e:
                 log_error(f"{provider} API call failed: {str(e)}")
+                detail = f'{provider} API call failed: {str(e)}'
                 grade = {
-                    'result': 'error', 
-                    'full_explanation': f'{provider} API call failed: {str(e)}', 
-                    'feedback': f'There was an error while trying to grade the solution using {provider}.'}
+                    'result': 'error',
+                    'full_explanation': detail,
+                    'feedback': (
+                        f'There was an error while trying to grade the solution '
+                        f'using {provider}. {detail}'
+                    )}
             finally:
                 # IMPORTANT: do NOT overwrite grade here
                 executor.shutdown(wait=False, cancel_futures=True)
@@ -1607,7 +1621,7 @@ class Grader:
             used_admin_key=used_admin_key,
             solution_image_paths_json=json.dumps(saved_image_paths) if saved_image_paths else None,
         )
-        
+
         return grade
         
     

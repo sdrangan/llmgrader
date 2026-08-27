@@ -28,7 +28,6 @@ class GraderPage:
         self.grade_status = page.locator("#grade-status")
         self.grade_points = page.locator("#grade-points")
         self.feedback_box = page.locator("#feedback-box")
-        self.full_explanation_box = page.locator("#full-explanation-box")
 
     def navigate(self, base_url: str) -> None:
         self._page.goto(base_url)

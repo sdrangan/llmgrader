@@ -636,19 +636,11 @@ function renderMarkdownInto(element, markdownText) {
 function mirrorFeedbackWhenReady() {
     const fb = document.getElementById("feedback-box");
     const mfb = document.getElementById("mobile-feedback-box");
-    const ex = document.getElementById("full-explanation-box");
-    const mex = document.getElementById("mobile-explanation-box");
 
     if (fb && mfb) {
         mfb.innerHTML = fb.innerHTML;
         new MutationObserver(() => { mfb.innerHTML = fb.innerHTML; })
             .observe(fb, { childList: true, characterData: true, subtree: true });
-    }
-
-    if (ex && mex) {
-        mex.innerHTML = ex.innerHTML;
-        new MutationObserver(() => { mex.innerHTML = ex.innerHTML; })
-            .observe(ex, { childList: true, characterData: true, subtree: true });
     }
 }
 
@@ -673,10 +665,6 @@ function initializeGradeViewMobile() {
     const fb = document.getElementById("feedback-box");
     const mfb = document.getElementById("mobile-feedback-box");
     if (fb && mfb) mfb.innerHTML = fb.innerHTML;
-
-    const ex = document.getElementById("full-explanation-box");
-    const mex = document.getElementById("mobile-explanation-box");
-    if (ex && mex) mex.innerHTML = ex.innerHTML;
 
     // Show first panel
     showMobilePanel("question");
@@ -1223,17 +1211,10 @@ function restorePartUI(qtag, partLabel) {
     const partKey = partLabel === "all" ? "all" : partLabel;
     const partData = partKey ? getCachedPartResult(sessionData, partKey) : null;
     
-    const explanationBox = document.getElementById("full-explanation-box");
     const feedbackBox = document.getElementById("feedback-box");
     
     // Restore from part-specific data if available
     if (partData) {
-        if (partData.full_explanation) {
-            renderMarkdownInto(explanationBox, partData.full_explanation);
-        } else {
-            renderMarkdownInto(explanationBox, "Not yet graded. No explanation yet.");
-        }
-        
         if (partData.feedback) {
             renderMarkdownInto(feedbackBox, partData.feedback);
         } else {
@@ -1248,7 +1229,6 @@ function restorePartUI(qtag, partLabel) {
         });
     } else {
         // No part data available - show default state
-        renderMarkdownInto(explanationBox, "Not yet graded. No explanation yet.");
         renderMarkdownInto(feedbackBox, "Not yet graded. No feedback yet.");
         setGradeSummaryDisplay({
             result: "",
@@ -1711,7 +1691,6 @@ async function gradeCurrentQuestion() {
                 requiredLabel: currentUnitItems[qtag]?.required === false ? "optional" : "required"
             });
             renderMarkdownInto(document.getElementById("feedback-box"), statusData.feedback);
-            renderMarkdownInto(document.getElementById("full-explanation-box"), statusData.full_explanation);
 
             // Save student solution at qtag level
             updateSessionData(currentUnitName, qtag, {
