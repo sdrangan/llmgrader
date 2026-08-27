@@ -96,6 +96,21 @@ def test_feedback_box_is_the_only_prose_box(grader_page):
     )
 
 
+def test_token_usage_shown_in_feedback_box(grader_page):
+    """Token counts render as a footer node, not as feedback text.
+
+    The mock reports 50 input / 30 output tokens.  The counts must reach the
+    DOM without being part of the feedback string, which is what gets written
+    to the database.
+    """
+    grader_page.submit_answer("4")
+    grader_page.wait_for_result(timeout=20_000)
+
+    usage = grader_page._page.locator("#feedback-box .token-usage")
+    assert usage.count() == 1, "Expected exactly one token usage footer"
+    assert usage.inner_text().strip() == "Tokens: 50 in / 30 out"
+
+
 def test_grade_button_re_enabled_after_grading(grader_page):
     """Grade button should be re-enabled once the grading job completes."""
     grader_page.submit_answer("4")

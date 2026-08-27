@@ -1637,6 +1637,12 @@ class Grader:
             solution_image_paths_json=json.dumps(saved_image_paths) if saved_image_paths else None,
         )
 
+        # Token counts ride out on the response dict for display only.  They are
+        # already recorded on the submission row above, so they are deliberately
+        # not part of GradeResult and never reach the feedback column.
+        grade["tokens_in"] = tokens_in
+        grade["tokens_out"] = tokens_out
+
         return grade
         
     
