@@ -912,6 +912,9 @@ textarea {
 .text-box td {
     border: 1px solid #ccc;
     padding: 6px 8px;
+    text-align: left;
+    vertical-align: top;
+}
 
 .admin-rubrics-block table {
     min-width: 0;
@@ -984,9 +987,6 @@ textarea {
 #admin-grading-notes .admin-other-notes-block > div + div,
 #admin-mobile-grading-notes .admin-other-notes-block > div + div {
     margin-top: 0.15rem;
-}
-    text-align: left;
-    vertical-align: top;
 }
 
 .text-box th:nth-child(1),
