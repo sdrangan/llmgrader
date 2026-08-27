@@ -262,7 +262,9 @@ function createEmptyCachedGradeResult() {
         max_point_parts: null,
         result_parts: null,
         feedback: "",
-        full_explanation: ""
+        full_explanation: "",
+        tokens_in: null,
+        tokens_out: null
     };
 }
 
@@ -280,7 +282,9 @@ function getCachedPartResult(sessionData, partLabel) {
         max_point_parts: cachedPart.max_point_parts ?? null,
         result_parts: cachedPart.result_parts ?? null,
         feedback: cachedPart.feedback ?? "",
-        full_explanation: cachedPart.full_explanation ?? cachedPart.explanation ?? ""
+        full_explanation: cachedPart.full_explanation ?? cachedPart.explanation ?? "",
+        tokens_in: cachedPart.tokens_in ?? null,
+        tokens_out: cachedPart.tokens_out ?? null
     };
 }
 
@@ -633,22 +637,31 @@ function renderMarkdownInto(element, markdownText) {
     }
 }
 
+// Append the token counts as a footer *node* inside the feedback box rather
+// than as text in the feedback string: the string is what gets written to the
+// database and exported, and token usage is already counted on the submission
+// row.  Appending a child also means the mobile mirror picks it up for free.
+function appendTokenUsage(element, tokensIn, tokensOut) {
+    if (!element) return;
+    const inCount = Number(tokensIn) || 0;
+    const outCount = Number(tokensOut) || 0;
+    if (!inCount && !outCount) return;
+
+    const footer = document.createElement("div");
+    footer.className = "token-usage";
+    footer.textContent =
+        `Tokens: ${inCount.toLocaleString()} in / ${outCount.toLocaleString()} out`;
+    element.appendChild(footer);
+}
+
 function mirrorFeedbackWhenReady() {
     const fb = document.getElementById("feedback-box");
     const mfb = document.getElementById("mobile-feedback-box");
-    const ex = document.getElementById("full-explanation-box");
-    const mex = document.getElementById("mobile-explanation-box");
 
     if (fb && mfb) {
         mfb.innerHTML = fb.innerHTML;
         new MutationObserver(() => { mfb.innerHTML = fb.innerHTML; })
             .observe(fb, { childList: true, characterData: true, subtree: true });
-    }
-
-    if (ex && mex) {
-        mex.innerHTML = ex.innerHTML;
-        new MutationObserver(() => { mex.innerHTML = ex.innerHTML; })
-            .observe(ex, { childList: true, characterData: true, subtree: true });
     }
 }
 
@@ -673,10 +686,6 @@ function initializeGradeViewMobile() {
     const fb = document.getElementById("feedback-box");
     const mfb = document.getElementById("mobile-feedback-box");
     if (fb && mfb) mfb.innerHTML = fb.innerHTML;
-
-    const ex = document.getElementById("full-explanation-box");
-    const mex = document.getElementById("mobile-explanation-box");
-    if (ex && mex) mex.innerHTML = ex.innerHTML;
 
     // Show first panel
     showMobilePanel("question");
@@ -1223,19 +1232,13 @@ function restorePartUI(qtag, partLabel) {
     const partKey = partLabel === "all" ? "all" : partLabel;
     const partData = partKey ? getCachedPartResult(sessionData, partKey) : null;
     
-    const explanationBox = document.getElementById("full-explanation-box");
     const feedbackBox = document.getElementById("feedback-box");
     
     // Restore from part-specific data if available
     if (partData) {
-        if (partData.full_explanation) {
-            renderMarkdownInto(explanationBox, partData.full_explanation);
-        } else {
-            renderMarkdownInto(explanationBox, "Not yet graded. No explanation yet.");
-        }
-        
         if (partData.feedback) {
             renderMarkdownInto(feedbackBox, partData.feedback);
+            appendTokenUsage(feedbackBox, partData.tokens_in, partData.tokens_out);
         } else {
             renderMarkdownInto(feedbackBox, "Not yet graded. No feedback yet.");
         }
@@ -1248,7 +1251,6 @@ function restorePartUI(qtag, partLabel) {
         });
     } else {
         // No part data available - show default state
-        renderMarkdownInto(explanationBox, "Not yet graded. No explanation yet.");
         renderMarkdownInto(feedbackBox, "Not yet graded. No feedback yet.");
         setGradeSummaryDisplay({
             result: "",
@@ -1710,8 +1712,9 @@ async function gradeCurrentQuestion() {
                 maxPoints: statusData.max_points ?? getQuestionMaxPoints(currentUnitItems[qtag], selectedPart),
                 requiredLabel: currentUnitItems[qtag]?.required === false ? "optional" : "required"
             });
-            renderMarkdownInto(document.getElementById("feedback-box"), statusData.feedback);
-            renderMarkdownInto(document.getElementById("full-explanation-box"), statusData.full_explanation);
+            const feedbackBox = document.getElementById("feedback-box");
+            renderMarkdownInto(feedbackBox, statusData.feedback);
+            appendTokenUsage(feedbackBox, statusData.tokens_in, statusData.tokens_out);
 
             // Save student solution at qtag level
             updateSessionData(currentUnitName, qtag, {
@@ -1731,7 +1734,9 @@ async function gradeCurrentQuestion() {
                 max_point_parts: statusData.max_point_parts ?? null,
                 result_parts: statusData.result_parts ?? null,
                 feedback: statusData.feedback || "",
-                full_explanation: statusData.full_explanation || ""
+                full_explanation: statusData.full_explanation || "",
+                tokens_in: statusData.tokens_in ?? null,
+                tokens_out: statusData.tokens_out ?? null
             }, partToSave);
 
             if (liveStatus) {

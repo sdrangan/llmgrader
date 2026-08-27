@@ -43,6 +43,11 @@ def _ts():
 
 _SECRET_KEY_PATTERN = re.compile(r"key|token|secret", re.IGNORECASE)
 
+# Sentinel placed in ``full_explanation`` to tell the front end to open the API
+# key wizard.  It must survive grade_post_process untouched -- the front end
+# matches it exactly -- so every writer of that field checks for it first.
+API_KEY_WALKTHROUGH_TOKEN = "__START_API_KEY_WALKTHROUGH__"
+
 
 def redact_secrets(value):
     """Return ``value`` with any secret-looking mapping entry masked.
@@ -92,6 +97,28 @@ from pydantic import BaseModel
 
 
 
+class RubricEvalItem(BaseModel):
+    """One rubric item's assessment, as returned by the grader.
+
+    Not yet wired into GradeResult.rubric_eval: that field is populated straight
+    from LLM output, so typing it here would turn an entry the UI currently
+    renders as a blank row into a failed grade for the student. See
+    plans/feedback.md.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    evidence: str
+    point_awarded: float | None = None
+    result: Literal["pass", "fail", "feedback", "n/a"] | None = None
+
+    @model_validator(mode="after")
+    def validate_outcome(self):
+        if self.point_awarded is None and self.result is None:
+            raise ValueError("rubric_eval items must include point_awarded or result.")
+        return self
+
+
 class GradeResult(BaseModel):
     """
     Data model for the grading result.
@@ -123,33 +150,16 @@ class GradeResult(BaseModel):
         When partial_credit==True and  grading a specific part or single-part question, the grader returns the points awarded for that part.  
         This value is copied post-grader to the appropriate position in `point_parts` for consistency.
         In all other cases, the value is derived post-grader by summing the point_parts.
-class RubricEvalItem(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    evidence: str
-    point_awarded: float | None = None
-    result: Literal["pass", "fail", "feedback", "n/a"] | None = None
-
-    @model_validator(mode="after")
-    def validate_outcome(self):
-        if self.point_awarded is None and self.result is None:
-            raise ValueError("rubric_eval items must include point_awarded or result.")
-        return self
-
-
     max_points : float | None
         The total maximum points for the question, i.e., sum(max_point_parts)
         The grader does not need to return this field since the backend will compute it.
     rubric_eval : dict[str, dict] | None
-    model_config = ConfigDict(extra="forbid")
-
         For each rubric item id, the grader returns a dictionary for the assessment of 
         each rubric item with the following fields:
         rubric_eval[id]['evidence'] : str`
             A concise description of the evidence observed in the student's solution as to why or why not
             the condition of the rubric has been met.  
         rubric_eval[id]['point_awarded'] : float
-    rubric_eval: dict[str, RubricEvalItem] | None = None
             the point_adjustment specified for the rubric item in the XML.  If the condition is not met,
             the point_awarded should be 0.  This fields is filled out only for partial_credit
             grading.
@@ -157,6 +167,9 @@ class RubricEvalItem(BaseModel):
             The final recommended result in the case of binary grading.  
             - 'fail' indicates that the rubric  
     """
+
+    model_config = ConfigDict(extra="forbid")
+
     max_point_parts: float | list[float] | None
     point_parts: float | list[float] | None
     result_parts: Literal["pass", "fail", "error", "partial"] | list[Literal["pass", "fail", "error", "partial"]]
@@ -865,6 +878,11 @@ class Grader:
             return "\n".join(table_lines).lstrip("\n")
 
         def append_tool_summary(explanation: str, tool_names: list[str] | None, summary: str | None) -> str:
+            # The wizard sentinel is matched exactly by the front end; appending
+            # a tool line to it silently disables the API key walkthrough.
+            if explanation == API_KEY_WALKTHROUGH_TOKEN:
+                return explanation
+
             tool_names = tool_names or []
             tools_line = f"Tools: {', '.join(tool_names)}" if tool_names else "Tools: None"
 
@@ -950,7 +968,12 @@ class Grader:
 
         def invalid_grade(message: str) -> GradeResult:
             explanation = full_explanation
-            if explanation:
+            if explanation == API_KEY_WALKTHROUGH_TOKEN:
+                # Keep the sentinel intact -- a missing key reaches here on any
+                # multi-part question, because the stub grade carries no
+                # point_parts.
+                pass
+            elif explanation:
                 explanation += f"\n\n{message}"
             else:
                 explanation = message
@@ -1361,7 +1384,7 @@ class Grader:
         Returns a special token that tells the frontend to launch the
         API Key Setup Wizard modal.
         """
-        return "__START_API_KEY_WALKTHROUGH__"
+        return API_KEY_WALKTHROUGH_TOKEN
 
     def grade(
             self, 
@@ -1453,7 +1476,10 @@ class Grader:
                     {
                         "result": "error",
                         "full_explanation": token,
-                        "feedback": reason or "",
+                        "feedback": reason or (
+                            "Grading needs an OpenAI API key, and no admin key is "
+                            "available for this model."
+                        ),
                     },
                     partial_credit=partial_credit,
                     max_points_part=max_points_part,
@@ -1479,10 +1505,11 @@ class Grader:
                     ref_solution_images=question_dict.get("solution_images", []),
                 )
             except Exception as e:
+                detail = f"Failed to initialize LLM client: {e}"
                 grade = {
                     "result": "error",
-                    "full_explanation": f"Failed to initialize LLM client: {e}",
-                    "feedback": "Initialization failed."
+                    "full_explanation": detail,
+                    "feedback": f"Initialization failed. {detail}"
                 }
 
         if grade is None:
@@ -1510,7 +1537,10 @@ class Grader:
                 grade = {
                     "result": "error",
                     "full_explanation": explanation,
-                    "feedback": f"{provider} server not responding in time. Try again."
+                    "feedback": (
+                        f"{provider} server not responding in time. Try again. "
+                        f"{explanation}"
+                    )
                 }
 
             except APITimeoutError:
@@ -1523,15 +1553,22 @@ class Grader:
                 grade = {
                     "result": "error",
                     "full_explanation": explanation,
-                    "feedback": "The grading request took too long to process."
+                    "feedback": (
+                        "The grading request took too long to process. "
+                        f"{explanation}"
+                    )
                 }
             
             except Exception as e:
                 log_error(f"{provider} API call failed: {str(e)}")
+                detail = f'{provider} API call failed: {str(e)}'
                 grade = {
-                    'result': 'error', 
-                    'full_explanation': f'{provider} API call failed: {str(e)}', 
-                    'feedback': f'There was an error while trying to grade the solution using {provider}.'}
+                    'result': 'error',
+                    'full_explanation': detail,
+                    'feedback': (
+                        f'There was an error while trying to grade the solution '
+                        f'using {provider}. {detail}'
+                    )}
             finally:
                 # IMPORTANT: do NOT overwrite grade here
                 executor.shutdown(wait=False, cancel_futures=True)
@@ -1599,7 +1636,13 @@ class Grader:
             used_admin_key=used_admin_key,
             solution_image_paths_json=json.dumps(saved_image_paths) if saved_image_paths else None,
         )
-        
+
+        # Token counts ride out on the response dict for display only.  They are
+        # already recorded on the submission row above, so they are deliberately
+        # not part of GradeResult and never reach the feedback column.
+        grade["tokens_in"] = tokens_in
+        grade["tokens_out"] = tokens_out
+
         return grade
         
     

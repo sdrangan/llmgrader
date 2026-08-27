@@ -27,7 +27,6 @@ def test_grade_view_elements_visible(grader_page):
     assert grader_page.student_solution.is_visible()
     assert grader_page.grade_button.is_visible()
     assert grader_page.feedback_box.is_visible()
-    assert grader_page.full_explanation_box.is_visible()
 
 
 def test_unit_dropdown_populated(grader_page):
@@ -79,15 +78,37 @@ def test_grading_result_populates_feedback(grader_page):
     )
 
 
-def test_grading_result_populates_explanation(grader_page):
-    """After grading, the full-explanation box should be filled in."""
+def test_feedback_box_is_the_only_prose_box(grader_page):
+    """The grade view shows one prose box, and it carries the rubric detail.
+
+    The separate "Full Explanation" box was removed; append_rubric_feedback
+    folds the per-rubric table into #feedback-box instead.
+    """
     grader_page.submit_answer("4")
     grader_page.wait_for_result(timeout=20_000)
 
-    explanation = grader_page.full_explanation_box.inner_text()
-    assert explanation.strip() not in ("", "No explanation yet."), (
-        f"Expected explanation from mock but got: {explanation!r}"
+    assert grader_page._page.locator("#full-explanation-box").count() == 0
+    assert grader_page._page.locator("#mobile-explanation-box").count() == 0
+
+    feedback = grader_page.get_feedback_text()
+    assert "Rubric evaluation:" in feedback, (
+        f"Expected the rubric table inside the feedback box but got: {feedback!r}"
     )
+
+
+def test_token_usage_shown_in_feedback_box(grader_page):
+    """Token counts render as a footer node, not as feedback text.
+
+    The mock reports 50 input / 30 output tokens.  The counts must reach the
+    DOM without being part of the feedback string, which is what gets written
+    to the database.
+    """
+    grader_page.submit_answer("4")
+    grader_page.wait_for_result(timeout=20_000)
+
+    usage = grader_page._page.locator("#feedback-box .token-usage")
+    assert usage.count() == 1, "Expected exactly one token usage footer"
+    assert usage.inner_text().strip() == "Tokens: 50 in / 30 out"
 
 
 def test_grade_button_re_enabled_after_grading(grader_page):
