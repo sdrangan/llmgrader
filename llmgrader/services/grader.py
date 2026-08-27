@@ -43,6 +43,11 @@ def _ts():
 
 _SECRET_KEY_PATTERN = re.compile(r"key|token|secret", re.IGNORECASE)
 
+# Sentinel placed in ``full_explanation`` to tell the front end to open the API
+# key wizard.  It must survive grade_post_process untouched -- the front end
+# matches it exactly -- so every writer of that field checks for it first.
+API_KEY_WALKTHROUGH_TOKEN = "__START_API_KEY_WALKTHROUGH__"
+
 
 def redact_secrets(value):
     """Return ``value`` with any secret-looking mapping entry masked.
@@ -873,6 +878,11 @@ class Grader:
             return "\n".join(table_lines).lstrip("\n")
 
         def append_tool_summary(explanation: str, tool_names: list[str] | None, summary: str | None) -> str:
+            # The wizard sentinel is matched exactly by the front end; appending
+            # a tool line to it silently disables the API key walkthrough.
+            if explanation == API_KEY_WALKTHROUGH_TOKEN:
+                return explanation
+
             tool_names = tool_names or []
             tools_line = f"Tools: {', '.join(tool_names)}" if tool_names else "Tools: None"
 
@@ -958,7 +968,12 @@ class Grader:
 
         def invalid_grade(message: str) -> GradeResult:
             explanation = full_explanation
-            if explanation:
+            if explanation == API_KEY_WALKTHROUGH_TOKEN:
+                # Keep the sentinel intact -- a missing key reaches here on any
+                # multi-part question, because the stub grade carries no
+                # point_parts.
+                pass
+            elif explanation:
                 explanation += f"\n\n{message}"
             else:
                 explanation = message
@@ -1369,7 +1384,7 @@ class Grader:
         Returns a special token that tells the frontend to launch the
         API Key Setup Wizard modal.
         """
-        return "__START_API_KEY_WALKTHROUGH__"
+        return API_KEY_WALKTHROUGH_TOKEN
 
     def grade(
             self, 
