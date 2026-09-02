@@ -98,3 +98,128 @@
     font-style: italic;
     margin-top: 10px;
 }
+/* --- Query box + column reference ------------------------------------- */
+
+.analytics-view .query-layout {
+    display: flex;
+    align-items: stretch;
+    gap: 15px;
+}
+.analytics-view .query-layout textarea {
+    flex: 1 1 auto;
+    min-width: 0;
+    /* Tall enough that the column reference beside it does not leave a gap
+       above the Run Query button. */
+    min-height: 240px;
+}
+.analytics-view .schema-panel {
+    flex: 0 0 240px;
+    max-height: 240px;
+    display: flex;
+    flex-direction: column;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    background: white;
+    font-size: 12px;
+    overflow: hidden;
+}
+.analytics-view .schema-panel.collapsed {
+    /* Shrink to the header alone rather than stretching to the textarea. */
+    flex-basis: auto;
+    max-height: none;
+    align-self: flex-start;
+}
+.analytics-view .schema-panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 6px 10px;
+    background: #f0f0f0;
+    border-bottom: 1px solid #ddd;
+    font-weight: bold;
+}
+.analytics-view .schema-panel.collapsed .schema-panel-header {
+    border-bottom: none;
+}
+.analytics-view .schema-panel.collapsed .schema-panel-body,
+.analytics-view .schema-panel.collapsed .schema-hint {
+    display: none;
+}
+/* Override the view-wide button rule, which is sized for Run Query. */
+.analytics-view button.schema-toggle {
+    padding: 2px 8px;
+    margin: 0;
+    font-size: 11px;
+    background: none;
+    color: #57068c;
+    border: 1px solid #57068c;
+}
+.analytics-view button.schema-toggle:hover {
+    background-color: #57068c;
+    color: white;
+}
+.analytics-view .schema-panel-body {
+    flex: 1 1 auto;
+    overflow-y: auto;
+    padding: 4px 0;
+}
+.analytics-view .schema-table-name {
+    display: block;
+    width: 100%;
+    padding: 4px 10px;
+    text-align: left;
+    background: none;
+    border: none;
+    border-radius: 0;
+    margin: 0;
+    color: #333;
+    font-size: 12px;
+    font-weight: bold;
+    cursor: pointer;
+}
+.analytics-view button.schema-table-name:hover {
+    background-color: #f0f0f0;
+    color: #333;
+}
+.analytics-view .schema-columns {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 3px;
+    padding: 2px 8px 8px;
+}
+.analytics-view .schema-table.collapsed .schema-columns {
+    display: none;
+}
+.analytics-view button.schema-column {
+    padding: 2px 6px;
+    margin: 0;
+    background: #f4eef8;
+    color: #57068c;
+    border: 1px solid #e0d3ec;
+    border-radius: 3px;
+    font-family: 'Courier New', monospace;
+    font-size: 11px;
+    cursor: pointer;
+}
+.analytics-view button.schema-column:hover {
+    background-color: #57068c;
+    color: white;
+}
+.analytics-view .schema-hint {
+    margin: 0;
+    padding: 6px 10px;
+    border-top: 1px solid #eee;
+    color: #666;
+    font-size: 11px;
+    font-style: italic;
+}
+
+@media (max-width: 800px) {
+    .analytics-view .query-layout {
+        flex-direction: column;
+    }
+    .analytics-view .schema-panel {
+        flex-basis: auto;
+    }
+}

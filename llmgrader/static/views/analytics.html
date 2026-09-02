@@ -7,8 +7,24 @@
 
         <div id="analytics-error" class="error" style="display:none;"></div>
 
-        <textarea id="analytics-sql-input"
-                  placeholder="Enter your SQL query here..."></textarea>
+        <div class="query-layout">
+            <textarea id="analytics-sql-input"
+                      placeholder="Enter your SQL query here..."></textarea>
+
+            <div id="analytics-schema-panel" class="schema-panel">
+                <div class="schema-panel-header">
+                    <span>Columns</span>
+                    <button id="analytics-schema-toggle"
+                            class="schema-toggle"
+                            type="button"
+                            title="Show or hide the column reference">Hide</button>
+                </div>
+                <div id="analytics-schema-body" class="schema-panel-body">
+                    <p class="info-text">Loading columns&hellip;</p>
+                </div>
+                <p class="schema-hint">Click a column to insert it at the cursor.</p>
+            </div>
+        </div>
 
         <button id="analytics-run-btn">Run Query</button>
         <a id="analytics-download-link"
