@@ -306,6 +306,8 @@ llmgrader_test run example_repo/unit1/tests/calculus_tests.xml
 | `--timeout SEC` | Per-call timeout (default 90) |
 | `--fail-fast` | Stop at the first failing case |
 | `--api-key KEY` | Defaults to the `OPENAI_API_KEY` environment variable |
+| `--gradescope [DIR]` | Also write a Gradescope submission from the graded cases — the folder `DIR` and `DIR.zip` beside it, the same zip the portal's **Download submission** produces. Defaults to `./submission`. See [Testing the Autograder](../gradescope/submissiontest.md) |
+| `--first-case` | For `--gradescope`: when a question has several selected cases, answer it with the first in document order |
 
 `--qtag`, `--case`, `--unit` and `--pkg` work the same as they do for `check`.
 

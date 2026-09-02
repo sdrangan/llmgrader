@@ -27,6 +27,7 @@ from llmgrader.services.gradetests import (
     DEFAULT_REPORT_PATH,
     DEFAULT_TIMEOUT,
     FAILING_VERDICTS,
+    GRADESCOPE_DEFAULT_DIR,
     LEVEL_ERROR,
     LONG_CONTEXT_CAVEAT,
     VERDICT_FAIL,
@@ -184,6 +185,26 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser.add_argument(
         "--keep-db", action="store_true",
         help="Keep the temporary SQLite storage the run writes to, for inspection.",
+    )
+    run_parser.add_argument(
+        "--gradescope",
+        nargs="?",
+        const=GRADESCOPE_DEFAULT_DIR,
+        default=None,
+        metavar="DIR",
+        help=(
+            "Also write a Gradescope submission from the graded cases: the folder DIR and "
+            "DIR.zip beside it, the same zip the portal's Download submission produces. "
+            "Defaults to ./submission."
+        ),
+    )
+    run_parser.add_argument(
+        "--first-case",
+        action="store_true",
+        help=(
+            "For --gradescope: when a question has several selected cases, answer it with "
+            "the first in document order instead of refusing to choose."
+        ),
     )
 
     return parser
@@ -356,11 +377,29 @@ def _run_options(args) -> RunOptions:
         out=args.out,
         html=args.html,
         cost=args.cost,
+        gradescope=args.gradescope,
+        first_case=args.first_case,
     )
 
 
 def command_run(args) -> int:
     options = _run_options(args)
+
+    if options.fail_fast and options.gradescope is not None:
+        print(
+            "error: --fail-fast and --gradescope ask for opposite things. --fail-fast stops "
+            "at the first failing case, which leaves questions with no grade to submit.",
+            file=sys.stderr,
+        )
+        return EXIT_USAGE
+
+    if options.first_case and options.gradescope is None:
+        print(
+            "error: --first-case only means something with --gradescope; it chooses which "
+            "case answers a question that has several.",
+            file=sys.stderr,
+        )
+        return EXIT_USAGE
 
     if not options.dry_run and not options.api_key:
         print(
@@ -390,7 +429,7 @@ def command_run(args) -> int:
         _print_run_report(report, options, streamed=progress is not None)
 
     _print_run_summary(report, options)
-    return EXIT_FAILED if report.failed else EXIT_OK
+    return EXIT_FAILED if (report.failed or report.submission_error) else EXIT_OK
 
 
 def _print_dry_run(report, options: RunOptions) -> None:
@@ -402,6 +441,25 @@ def _print_dry_run(report, options: RunOptions) -> None:
     )
     for model_id, count in sorted(report.planned_by_model.items()):
         print(f"  {model_id:<24}{count:>6}")
+
+    # The plan already resolved the submission, so a dry run is where an
+    # ambiguous qtag or a missing signing key shows up -- before the money.
+    plan = report.submission_plan
+    if plan is not None:
+        answered = {qtag: item.case.case_id for qtag, item in plan.chosen.items()}
+        print()
+        print(f"gradescope submission would be written to {plan.zip_path}")
+        for qtag in plan.qtags:
+            print(f"  {qtag:<28} {answered.get(qtag, '(unanswered, scores 0)')}")
+        if plan.digitalsign:
+            print("  signed with LLMGRADER_PRIVATE_KEY")
+        if plan.optional_case_ids:
+            print(
+                f"  note: {len(plan.optional_case_ids)} case(s) answer optional questions and "
+                f"are not in the submission ({', '.join(plan.optional_case_ids)}); the portal "
+                "submits required questions only."
+            )
+
     print("no API calls were made")
 
 
@@ -525,6 +583,50 @@ def _print_run_summary(report, options: RunOptions) -> None:
         print(f"html:   {report.html_path}")
     if report.kept_db:
         print(f"kept storage: {report.storage_path}")
+
+    _print_submission(report)
+
+
+def _print_submission(report) -> None:
+    """What the submission scored, and which case answered each question.
+
+    The score is the point of it: it is what Gradescope should display back
+    after the test upload, so seeing it here is how the instructor knows the
+    autograder read the file rather than defaulted to zero.
+    """
+    if report.submission_error:
+        print()
+        print(f"gradescope submission not written: {report.submission_error}", file=sys.stderr)
+        return
+
+    submission = report.submission
+    if submission is None:
+        return
+
+    print()
+    print(
+        f"gradescope submission: {_num(submission.score)}/{_num(submission.max_score)}"
+        + ("  (signed)" if submission.signed else "")
+    )
+    for question in submission.questions:
+        answer = f"case {question.case_id}" if question.answered else "unanswered"
+        print(
+            f"  {question.qtag:<28} {_num(question.score):>4}/{_num(question.max_score):<4} {answer}"
+        )
+    if submission.zip_path:
+        print(f"  folder: {submission.directory}")
+        print(f"  zip:    {submission.zip_path}")
+
+    skipped = (report.submission_plan.optional_case_ids if report.submission_plan else []) or []
+    if skipped:
+        print(
+            f"  note: {len(skipped)} case(s) answer optional questions and are not in the "
+            f"submission ({', '.join(skipped)}); the portal submits required questions only."
+        )
+
+
+def _num(value: float) -> str:
+    return str(int(value)) if float(value).is_integer() else str(value)
 
 # ---------------------------------------------------------------------------
 # entry point

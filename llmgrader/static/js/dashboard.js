@@ -421,7 +421,9 @@ async function downloadSubmission() {
         const url = URL.createObjectURL(zipBlob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `submission_${unitName}.zip`;
+        // A plain name: unit titles run long, and results.txt names the unit
+        // inside the zip for anyone who needs to tell two downloads apart.
+        a.download = 'submission.zip';
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);

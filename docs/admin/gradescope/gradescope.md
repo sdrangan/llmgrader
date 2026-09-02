@@ -66,3 +66,8 @@ To test the autograder:
 - Go the **Dashboard** and then select **Download sumbission**.  This selection will create a JSON submission
 - Go back to the Assignment in Gradescope
 - Select **Configure Autograder**.  Select **Test autograder**.  Then, upload the JSON submission
+
+If you have already written [grading test cases](../buildcourse/solntest.md) for the unit,
+you do not have to answer the questions in the portal by hand.  `llmgrader_test run --gradescope`
+grades those cases and writes the same submission zip — see
+[Testing the Autograder with a Built Submission](./submissiontest.md).

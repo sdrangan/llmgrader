@@ -59,6 +59,8 @@ Tiers (`simple`, `standard`, `complex`) name the **difficulty of the graded prob
 
 `llmgrader/services/gradetests.py` is the single place the grading-test logic lives: parsing `<unit_test>` files, checking them against a unit, and running them through the real `Grader`. The `llmgrader_test` console script and both pytest suites (`tests/services/test_gradetests_static.py`, `tests/live/test_course_cases.py`) sit on it and add nothing of their own.
 
+`run --gradescope` also lives there: it writes the submission zip a student would have downloaded, built from the graded cases instead of a portal session, so an uploaded autograder can be tested without answering questions by hand. The layout mirrors `downloadSubmission` in `llmgrader/static/js/dashboard.js` entry for entry — the autograder verifies its signature over the exact `results.json` bytes, so both text files are written as bytes rather than in text mode. Everything the submission can be refused for (an ambiguous qtag, a missing `LLMGRADER_PRIVATE_KEY`, an unsafe target directory) is resolved in `plan_gradescope_submission` before any grading call.
+
 Which assertion elements a case may carry depends on the question's `<partial_credit>` mode, which lives in a different file, so `unit_test.xsd` is deliberately permissive and `check` carries roughly half the validation. The runner redirects `LLMGRADER_STORAGE_PATH` to a temp tree -- `Grader.__init__` rmtrees its scratch dir and writes a submission row per grade -- and looks token counts up by the synthetic `session_id` it passes, never by newest row. See `docs/admin/buildcourse/gradetests.md` for the instructor-facing contract.
 
 ### Course content format

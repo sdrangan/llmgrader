@@ -1124,6 +1124,11 @@ class RunOptions:
     out: str | None = DEFAULT_REPORT_PATH
     html: str | None = None
     cost: bool = False
+    #: Where to write the Gradescope submission folder.  ``None`` means the run
+    #: was not asked for one; ``GRADESCOPE_DEFAULT_DIR`` means derive the path.
+    gradescope: str | None = None
+    #: Resolve a qtag with several selected cases by document order.
+    first_case: bool = False
 
 
 class RunEnvironment:
@@ -1675,6 +1680,13 @@ class RunReport:
     report_path: str | None = None
     html_path: str | None = None
     kept_db: bool = False
+    #: The Gradescope submission, once written.  ``submission_plan`` is set as
+    #: soon as the run is planned, so ``--dry-run`` can name the path it would
+    #: have written; ``submission_error`` carries a failure that only surfaced
+    #: after grading, which the reports have already been paid for.
+    submission_plan: "SubmissionPlan | None" = None
+    submission: "SubmissionResult | None" = None
+    submission_error: str | None = None
 
     @property
     def cases(self) -> list[CaseRun]:
@@ -2054,6 +2066,437 @@ def _execute_run(planned, options: RunOptions, env: RunEnvironment, progress) ->
             announce(item.case_run)
 
 
+# ---------------------------------------------------------------------------
+# Gradescope submission (--gradescope)
+# ---------------------------------------------------------------------------
+
+# The zip a student downloads, built from graded test cases instead.
+#
+# Gradescope offers to test a freshly uploaded autograder against a student
+# submission, and the only thing that counts as one is the zip the portal's
+# "Download submission" button produces. Building that by hand means answering
+# every question in the portal first; the cases in a test file are already
+# those answers, already graded, so --gradescope writes the same zip from a run.
+#
+# The layout below is not a format of this module's own invention -- it mirrors
+# `downloadSubmission` in llmgrader/static/js/dashboard.js entry for entry,
+# because the autograder verifies the signature over the exact results.json
+# bytes and rejects anything that differs. Every divergence from that function
+# is a bug here. Two consequences worth naming:
+#
+# * Every attempt is graded with part_label="all" (see _grade_attempt), which is
+#   precisely the branch buildQuestionResult takes for a student who graded a
+#   whole question, so the mapping below is a transcription rather than a
+#   reconstruction.
+# * Both text files are written as bytes. json.dumps emits LF, and text mode on
+#   Windows would turn those into CRLF *after* the signature was computed over
+#   the untranslated string -- a zip that verifies on the author's machine and
+#   fails on their colleague's.
+
+#: results.json's top-level ``output``, verbatim from the portal's
+#: RESULTS_OUTPUT_SUMMARY.
+SUBMISSION_OUTPUT_SUMMARY = "See detailed feedback for individual questions"
+
+#: ``--gradescope`` given no path: derive the directory from the unit name.
+GRADESCOPE_DEFAULT_DIR = ""
+
+#: The separator buildResultsTxt puts between questions.
+_SUBMISSION_RULE = "-" * 40
+
+_DATA_URI_RE = re.compile(r"^data:([^;]+);base64,(.+)$", re.DOTALL)
+
+
+def _json_number(value: float):
+    """A whole number as an int, so the JSON reads like the portal's.
+
+    ``JSON.stringify`` writes 10, not 10.0.  Gradescope does not care, but a
+    file that diffs cleanly against a real download is worth three lines.
+    """
+    number = float(value)
+    return int(number) if number.is_integer() else number
+
+
+def _question_total(question_dict: dict) -> float:
+    return sum(float(part.get("points") or 0) for part in question_dict.get("parts") or [])
+
+
+#: Characters Windows refuses in a file name, plus the separators.  A qtag is
+#: free-form instructor text and may hold any of them.
+_UNSAFE_COMPONENT_RE = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
+
+
+def _safe_component(name: str) -> str:
+    """A qtag as one path component, for the ``images/<qtag>/`` directories.
+
+    The portal puts qtags into zip *entry* names untouched, which a zip
+    tolerates; here they become real directories, and a qtag holding a colon
+    would be unwritable on Windows.  Spaces are left alone -- they are ordinary
+    in a qtag and legal everywhere -- so this stays as close to the portal's
+    naming as a filesystem allows.
+    """
+    cleaned = _UNSAFE_COMPONENT_RE.sub("_", name).strip(" .")
+    return cleaned or "_"
+
+
+@dataclass
+class SubmissionQuestion:
+    """One entry of ``results.json``: a required question, answered or not."""
+
+    qtag: str
+    case_id: str | None
+    score: float
+    max_score: float
+    feedback: str = ""
+    explanation: str = ""
+    images: list[str] = field(default_factory=list)
+
+    @property
+    def answered(self) -> bool:
+        return self.case_id is not None
+
+    @property
+    def output(self) -> str:
+        # An unanswered question carries an empty output in the portal's zip.
+        if not self.answered:
+            return ""
+        return f"[all] Feedback: {self.feedback}\n[all] Explanation: {self.explanation}"
+
+
+@dataclass
+class SubmissionPlan:
+    """Everything ``--gradescope`` needs, settled before a call is made.
+
+    Planning is separate from writing so that a missing signing key, an
+    ambiguous qtag or an unwritable target costs nothing: all three are known
+    from the test file and the unit, and discovering one after the grading
+    calls would mean paying for a run that cannot produce what was asked for.
+    """
+
+    unit_name: str
+    directory: str
+    zip_path: str
+    digitalsign: bool
+    private_key: str | None
+    qtags: list[str]
+    question_dicts: dict
+    chosen: dict
+    optional_case_ids: list[str] = field(default_factory=list)
+
+
+@dataclass
+class SubmissionResult:
+    """What was written, for the terminal to report."""
+
+    unit_name: str
+    directory: str
+    zip_path: str
+    signed: bool
+    questions: list[SubmissionQuestion] = field(default_factory=list)
+
+    @property
+    def score(self) -> float:
+        return sum(question.score for question in self.questions)
+
+    @property
+    def max_score(self) -> float:
+        return sum(question.max_score for question in self.questions)
+
+    @property
+    def answered(self) -> list[SubmissionQuestion]:
+        return [question for question in self.questions if question.answered]
+
+
+def _choose_submission_cases(planned: list, *, first_case: bool) -> dict:
+    """One case per qtag, or an error naming the ones that competed.
+
+    A test file holds several cases per question -- a correct solution and one
+    per misconception -- while a submission holds one answer per question, so
+    something has to choose.  A qtag with a single selected case chooses
+    itself; beyond that the run either says which with ``--case`` or accepts
+    document order with ``--first-case``.  Choosing silently would produce a
+    zip whose score cannot be predicted from the command line, which is most of
+    the value of uploading it as a test.
+    """
+    by_qtag: dict[str, list] = {}
+    for item in planned:
+        by_qtag.setdefault(item.case.qtag, []).append(item)
+
+    chosen: dict = {}
+    for qtag, items in by_qtag.items():
+        if len(items) == 1 or first_case:
+            chosen[qtag] = items[0]
+            continue
+        ids = ", ".join(f"`{item.case.case_id}`" for item in items)
+        raise GradeTestError(
+            f"--gradescope: qtag '{qtag}' has {len(items)} selected cases ({ids}), and a "
+            "submission holds one answer per question. Choose one with --case, or pass "
+            "--first-case to take the first in document order."
+        )
+    return chosen
+
+
+def _submission_directory(options: RunOptions) -> str:
+    """``./submission`` unless the command line named somewhere else.
+
+    A plain name rather than one built from the unit: the folder is written
+    into the unit's own directory, where the unit name adds length without
+    adding information, and a title like "Data Types and Combinational Logic"
+    makes a path nobody wants to type.  The unit is named inside
+    ``results.txt`` for anyone who needs it.
+    """
+    return os.path.abspath(options.gradescope or os.path.join(os.getcwd(), "submission"))
+
+
+def _check_submission_directory(directory: str) -> None:
+    """Refuse a target that is not ours to delete.
+
+    ``build_autograder`` rmtrees ``autograder/`` before rebuilding it and this
+    does the same, but ``--gradescope`` takes its path from the command line,
+    where a stray ``.`` would aim that rmtree at the course repository.  An
+    empty directory, or one holding a ``results.json``, is a submission folder;
+    anything else is someone's work.
+    """
+    if os.path.isfile(directory):
+        raise GradeTestError(f"--gradescope: {directory} is a file, not a directory.")
+    if os.path.isdir(directory) and os.listdir(directory):
+        if not os.path.isfile(os.path.join(directory, "results.json")):
+            raise GradeTestError(
+                f"--gradescope: refusing to overwrite {directory} -- it is not empty and does "
+                "not look like a submission folder (no results.json in it). Point --gradescope "
+                "at another path, or remove the directory yourself."
+            )
+
+
+def plan_gradescope_submission(planned: list, options: RunOptions) -> SubmissionPlan:
+    """Resolve the submission before any grading happens.  Raises on trouble."""
+    if not planned:
+        raise GradeTestError("--gradescope: no case was selected, so there is nothing to submit.")
+
+    unit_names = sorted({item.unit_name for item in planned})
+    if len(unit_names) > 1:
+        listed = ", ".join(f"'{name}'" for name in unit_names)
+        raise GradeTestError(
+            "--gradescope builds one submission for one unit, but the selected cases span "
+            f"{listed}. Narrow the run to a single unit's test file."
+        )
+
+    unit_name = planned[0].unit_name
+    grader = planned[0].grader
+    questions = getattr(grader, "units", {}).get(unit_name) or {}
+
+    chosen = _choose_submission_cases(planned, first_case=options.first_case)
+
+    # The portal only ever submits required questions, so a case answering an
+    # optional one has nowhere to go.  Dropping it silently would leave the
+    # instructor looking for a score against a question that was never in the
+    # file, so it is dropped and named.
+    def _required(qtag: str) -> bool:
+        return bool((questions.get(qtag) or {}).get("required", True))
+
+    optional_case_ids = [
+        item.case.case_id for qtag, item in chosen.items() if not _required(qtag)
+    ]
+    chosen = {qtag: item for qtag, item in chosen.items() if _required(qtag)}
+
+    required_qtags = [qtag for qtag in questions if _required(qtag)]
+    if not required_qtags:
+        raise GradeTestError(
+            f"--gradescope: unit '{unit_name}' has no required questions, so a submission "
+            "would be empty."
+        )
+
+    digitalsign = bool(
+        (getattr(grader, "unit_metadata", None) or {}).get(unit_name, {}).get("digitalsign")
+    )
+    private_key = None
+    if digitalsign:
+        from llmgrader.services.signing import private_key_from_env
+
+        private_key = private_key_from_env()
+        if not private_key:
+            raise GradeTestError(
+                f"--gradescope: unit '{unit_name}' has <digitalsign>true</digitalsign> but "
+                "LLMGRADER_PRIVATE_KEY is not set. The autograder rejects an unsigned "
+                "submission with a message about re-downloading from the portal, which would "
+                "not point back at this. Run `generate_signing_keys`, or set the variable."
+            )
+
+    directory = _submission_directory(options)
+    _check_submission_directory(directory)
+
+    return SubmissionPlan(
+        unit_name=unit_name,
+        directory=directory,
+        zip_path=directory + ".zip",
+        digitalsign=digitalsign,
+        private_key=private_key,
+        qtags=required_qtags,
+        question_dicts=questions,
+        chosen=chosen,
+        optional_case_ids=optional_case_ids,
+    )
+
+
+def _submission_questions(plan: SubmissionPlan) -> list[SubmissionQuestion]:
+    """One entry per required qtag, in the unit's own question order."""
+    questions: list[SubmissionQuestion] = []
+
+    for qtag in plan.qtags:
+        question_dict = plan.question_dicts.get(qtag) or {}
+        item = plan.chosen.get(qtag)
+
+        if item is None:
+            questions.append(
+                SubmissionQuestion(
+                    qtag=qtag,
+                    case_id=None,
+                    score=0.0,
+                    max_score=_question_total(question_dict),
+                )
+            )
+            continue
+
+        if not item.case_run.attempts:
+            raise GradeTestError(
+                f"--gradescope: case `{item.case.case_id}` was never graded, so question "
+                f"'{qtag}' has no answer. --fail-fast stops a run early; drop it when "
+                "building a submission."
+            )
+
+        # Attempt 1 under --repeat: N grades of one answer are N readings of a
+        # single submission, and a student only ever submits one of them.
+        attempt = item.case_run.attempts[0]
+        if attempt.error is not None:
+            detail = attempt.error.strip().splitlines()
+            raise GradeTestError(
+                f"--gradescope: case `{item.case.case_id}` (qtag '{qtag}') did not grade: "
+                f"{detail[0] if detail else 'unknown error'}. A submission built around a "
+                "failed call would test the autograder against a score no student could have "
+                "produced."
+            )
+
+        questions.append(
+            SubmissionQuestion(
+                qtag=qtag,
+                case_id=item.case.case_id,
+                score=float(attempt.points or 0),
+                max_score=float(
+                    attempt.max_points
+                    if attempt.max_points is not None
+                    else _question_total(question_dict)
+                ),
+                feedback=attempt.feedback or "",
+                explanation=attempt.full_explanation or "",
+                images=load_case_images(item.case, item.file_path),
+            )
+        )
+
+    return questions
+
+
+def submission_results_json(questions: list[SubmissionQuestion]) -> str:
+    """``results.json`` exactly as ``buildResultsJson`` would have written it."""
+    payload = {
+        "score": _json_number(sum(question.score for question in questions)),
+        "output": SUBMISSION_OUTPUT_SUMMARY,
+        "tests": [
+            {
+                "name": question.qtag,
+                "score": _json_number(question.score),
+                "max_score": _json_number(question.max_score),
+                "output": question.output,
+            }
+            for question in questions
+        ],
+    }
+    return json.dumps(payload, indent=2)
+
+
+def submission_results_txt(unit_name: str, questions: list[SubmissionQuestion]) -> str:
+    """``results.txt`` exactly as ``buildResultsTxt`` would have written it."""
+    lines = [f"Unit: {unit_name}", ""]
+    last = len(questions) - 1
+
+    for index, question in enumerate(questions):
+        lines.append(f"Question {question.qtag} (selected part: all)")
+        lines.append(f"Score: {_num(question.score)} / {_num(question.max_score)}")
+        lines.append("")
+        lines.append("Feedback:")
+        lines.append(question.feedback)
+        lines.append("")
+        lines.append("Explanation:")
+        lines.append(question.explanation)
+        lines.append("")
+        lines.append(_SUBMISSION_RULE)
+        if index != last:
+            lines.append("")
+
+    return "\n".join(lines)
+
+
+def _write_submission_text(path: str, text: str) -> None:
+    """Write text as bytes -- see the note on newline translation above."""
+    with open(path, "wb") as handle:
+        handle.write(text.encode("utf-8"))
+
+
+def _write_submission_images(directory: str, questions: list[SubmissionQuestion]) -> None:
+    for question in questions:
+        for index, data_uri in enumerate(question.images):
+            match = _DATA_URI_RE.match(data_uri)
+            if not match:
+                continue
+            mime, encoded = match.group(1), match.group(2)
+            extension = (mime.split("/")[-1] or "png").split("+")[0]
+            path = os.path.join(
+                directory, "images", _safe_component(question.qtag), f"{index}.{extension}"
+            )
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "wb") as handle:
+                handle.write(base64.b64decode(encoded))
+
+
+def write_gradescope_submission(plan: SubmissionPlan) -> SubmissionResult:
+    """Write the submission folder, and the zip of it beside it."""
+    questions = _submission_questions(plan)
+    results_json = submission_results_json(questions)
+
+    if os.path.isdir(plan.directory):
+        shutil.rmtree(plan.directory)
+    os.makedirs(plan.directory)
+
+    _write_submission_text(os.path.join(plan.directory, "results.json"), results_json)
+    _write_submission_text(
+        os.path.join(plan.directory, "results.txt"),
+        submission_results_txt(plan.unit_name, questions),
+    )
+
+    if plan.digitalsign:
+        from llmgrader.services.signing import sign_data
+
+        signature = sign_data(results_json.encode("utf-8"), plan.private_key)
+        _write_submission_text(os.path.join(plan.directory, "signature.txt"), signature)
+
+    _write_submission_images(plan.directory, questions)
+
+    if os.path.exists(plan.zip_path):
+        os.remove(plan.zip_path)
+    with zipfile.ZipFile(plan.zip_path, "w", zipfile.ZIP_DEFLATED) as archive:
+        for root, _dirs, names in os.walk(plan.directory):
+            for name in sorted(names):
+                full = os.path.join(root, name)
+                arcname = os.path.relpath(full, plan.directory).replace(os.sep, "/")
+                archive.write(full, arcname)
+
+    return SubmissionResult(
+        unit_name=plan.unit_name,
+        directory=plan.directory,
+        zip_path=plan.zip_path,
+        signed=plan.digitalsign,
+        questions=questions,
+    )
+
+
 def run_test_files(paths, options: RunOptions | None = None, *, progress=None) -> RunReport:
     """Grade every case in `paths` and compare the results to its expectations.
 
@@ -2085,11 +2528,21 @@ def run_test_files(paths, options: RunOptions | None = None, *, progress=None) -
 
         planned, files = _plan_run(resolved_paths, options, env, pkg_context, model_override)
 
+        # Everything a submission can be refused for -- an ambiguous qtag, a
+        # missing signing key, a target directory that is not ours -- is known
+        # now, and refusing after the calls would be refusing after the bill.
+        submission_plan = (
+            plan_gradescope_submission(planned, options)
+            if options.gradescope is not None
+            else None
+        )
+
         report = RunReport(
             files=files,
             storage_path=env.storage,
             dry_run=options.dry_run,
             kept_db=options.keep_db,
+            submission_plan=submission_plan,
         )
         repeat = max(1, options.repeat)
         report.planned_calls = len(planned) * repeat
@@ -2114,6 +2567,15 @@ def run_test_files(paths, options: RunOptions | None = None, *, progress=None) -
             report.report_path = write_json_report(report, options.out)
         if options.html and not options.dry_run:
             report.html_path = write_html_report(report, options.html)
+
+        # After the reports, deliberately: a case that failed to grade makes the
+        # submission impossible but the run's own results are still worth what
+        # they cost, so the failure is carried back rather than raised over them.
+        if submission_plan is not None and not options.dry_run:
+            try:
+                report.submission = write_gradescope_submission(submission_plan)
+            except GradeTestError as exc:
+                report.submission_error = str(exc)
 
         return report
     finally:
