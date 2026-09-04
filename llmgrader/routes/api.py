@@ -207,6 +207,14 @@ class APIController:
             "oauth_enabled": oauth_ready,
         }
 
+    # (table, column) pairs left out of the Analytics column reference.
+    # submissions.user_email is a dead column from an older schema: it is
+    # scrubbed to NULL by Grader.temp_modify_db and never written again, so
+    # listing it would imply we still hold student emails.
+    SCHEMA_HIDDEN_COLUMNS = {
+        ("submissions", "user_email"),
+    }
+
     @staticmethod
     def is_safe_analytics_sql(sql_query: str) -> bool:
         sql = (sql_query or "").strip()
@@ -980,6 +988,47 @@ class APIController:
                 })
 
         
+
+        @app.route("/admin/dbviewer/schema")
+        @self.require_admin
+        def dbviewer_schema():
+            """
+            Column reference for the Analytics query box.
+
+            Read live from the database rather than from Grader.DB_SCHEMA: older
+            databases are patched column-by-column by temp_modify_db, so the
+            class attribute is the target schema, not necessarily what this
+            particular file holds.
+
+            Returns: { "tables": [ { "name": ..., "columns": [...] }, ... ] }
+            """
+            try:
+                conn = sqlite3.connect(self.grader.db_path)
+                cursor = conn.cursor()
+
+                cursor.execute(
+                    "SELECT name FROM sqlite_master "
+                    "WHERE type = 'table' AND name NOT LIKE 'sqlite_%' "
+                    "ORDER BY name"
+                )
+                table_names = [row[0] for row in cursor.fetchall()]
+
+                tables = []
+                for name in table_names:
+                    # Table names come from sqlite_master, so they cannot be
+                    # injected, but PRAGMA takes no bound parameters anyway.
+                    cursor.execute(f"PRAGMA table_info('{name}')")
+                    columns = [
+                        row[1] for row in cursor.fetchall()
+                        if (name, row[1]) not in self.SCHEMA_HIDDEN_COLUMNS
+                    ]
+                    tables.append({"name": name, "columns": columns})
+
+                conn.close()
+                return jsonify({"tables": tables, "error": None})
+
+            except Exception as e:
+                return jsonify({"tables": [], "error": f"Schema Error: {str(e)}"})
 
         @app.route("/admin/dbviewer/download")
         @self.require_admin
