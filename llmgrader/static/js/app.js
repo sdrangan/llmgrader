@@ -1383,7 +1383,14 @@ function populateQuestionDropdown(qtags, selectedQtag = null) {
     qtags.forEach(qtag => {
         const opt = document.createElement("option");
         opt.value = qtag;
-        opt.textContent = qtag;   // display qtag directly
+        // Required questions carry a "* " prefix so the required set is
+        // visible without clicking through every question.  The marker has to
+        // live in the text: macOS hands the popup to the OS and the mobile
+        // pickers are fully native, so per-option CSS is ignored on both.
+        // The value stays the bare qtag -- it is the identity key for session
+        // state, results.json and the Gradescope submission.
+        const required = currentUnitItems[qtag]?.required !== false;
+        opt.textContent = required ? `* ${qtag}` : qtag;
         dropdown.appendChild(opt);
     });
 
