@@ -10,7 +10,7 @@ nav_order: 1
 
 Before using the LLM grader, you will need to [register an OpenAI API key](./openai.md).  Loading the OpenAI API key takes just a moment and lets you control your own usage and costs — nothing is stored on the server, and you can turn it off anytime.
 
-Your instructor should provide you with the URL where they have deployed the class. Typically, this website is on `render.com`. For example, for the Introduction ot Hardware Design class at NYU, uses the following [render web portal](https://llmgrader-e6o7.onrender.com/)
+Your instructor should provide you with the URL where they have deployed the class. Typically, this website is on `render.com`. For example, the Introduction to Hardware Design class at NYU uses this [render web portal](https://llmgrader-e6o7.onrender.com/).
 
 
 ## Grade View
@@ -18,7 +18,9 @@ Once you have set the OpenAI API key and a course URL, go to the **Grade View** 
 No mystery, no hidden steps — just a clean loop of *try → grade → improve*.
 
 - Select a unit from the **Unit** dropdown.
-- Select a question from the **Questions** dropdown.
+- Select a question from the **Question** dropdown.  Questions whose name begins with an asterisk (`*`) are **required**; on desktop, the `* = required` legend beside the dropdown is there to remind you.
+
+  Required means that, if you are an NYU student in the class, you will have to submit a solution for that problem — see the [dashboard](./dashboard.md) for submitting solutions on Gradescope.  Every student, though — in the NYU class or just trying out the portal — is free and encouraged to try any problem for practice.  On desktop, once you open a question, the badge above the **Feedback** panel also shows whether it is `required` or `optional`.
 - In the **Question** panel (left side on desktop, or the **Question** tab on mobile), you will see the problem and any diagrams or code snippets.
 - Below the question, the **Your Solution** panel contains a composer where you enter your answer.  You can write in plain English, math, or short code fragments — whatever the question calls for.  The grader is flexible, but clearer answers usually get clearer feedback.
 
@@ -43,16 +45,14 @@ If your answer includes hand-written work, circuit diagrams, or plots, attach th
 
 You can also paste an image from the clipboard while the text area is focused.  This is useful for screenshots or copied whiteboard work.
 
-Attached images are sent to the LLM along with your text, so the grader can see both.  Up to three images may be attached per question.
+Attached images are sent to the LLM along with your text, so the grader can see both.  Up to five images may be attached per question.
 
 ### Grading
 
-Once you have typed your answer (and optionally attached images), click the **Grade** button in the composer.  Within a few seconds (typically 5-10 seconds) you will see:
+Once you have typed your answer (and optionally attached images), click the **Grade** button in the composer.  Within a few seconds (typically 5-10 seconds) you will see a response in the **Feedback** panel (on the right in desktop view and on a tab in mobile view).  
 
-- **Summary** — a quick, student-friendly explanation of how your answer compares.
-- **Full Explanation** — a more detailed breakdown of the reasoning.
 
-This feedback is meant to help you understand *why* something is correct or incorrect, not just whether you got it right.
+This feedback is meant to help you understand *why* something is correct or incorrect, not just whether you got it right.  You will also see a score for the problem.
 
 You can revise your answer as many times as you like.  If the feedback points out something you missed, edit your answer and grade again.  Many students use this loop to check their understanding before submitting the final version.
 

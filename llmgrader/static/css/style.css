@@ -1072,6 +1072,17 @@ textarea {
     white-space: nowrap;
 }
 
+/* Legend for the "* " prefix the question dropdown puts on required
+   questions.  It carries .dropdown-label so it hides on mobile with the other
+   labels; a phone student learns the marker from the required/optional badge
+   after opening any one question. */
+.top-controls .required-legend {
+    font-size: 0.85em;
+    font-weight: bold;
+    color: #57068c;
+    white-space: nowrap;
+}
+
 /* Solution panel should clip, not scroll — the composer handles its own overflow */
 #grade-solution-panel {
     overflow: hidden;
