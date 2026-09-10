@@ -28,6 +28,10 @@ llmgrader_test check example_repo/unit1/tests/calculus_tests.xml
 
 # Grade those cases for real (costs money; --dry-run prints the call count)
 llmgrader_test run example_repo/unit1/tests/calculus_tests.xml --repeat 3 --html report.html
+
+# Have a model answer a unit blind, as a rubric stress test (--dry-run is free)
+llmgrader_answer example_repo/unit1/calculus.xml --dry-run --cost
+llmgrader_answer example_repo/unit1/calculus.xml --out ai_answers.xml
 ```
 
 ## Architecture
@@ -62,6 +66,30 @@ Tiers (`simple`, `standard`, `complex`) name the **difficulty of the graded prob
 `run --gradescope` also lives there: it writes the submission zip a student would have downloaded, built from the graded cases instead of a portal session, so an uploaded autograder can be tested without answering questions by hand. The layout mirrors `downloadSubmission` in `llmgrader/static/js/dashboard.js` entry for entry — the autograder verifies its signature over the exact `results.json` bytes, so both text files are written as bytes rather than in text mode. Everything the submission can be refused for (an ambiguous qtag, a missing `LLMGRADER_PRIVATE_KEY`, an unsafe target directory) is resolved in `plan_gradescope_submission` before any grading call.
 
 Which assertion elements a case may carry depends on the question's `<partial_credit>` mode, which lives in a different file, so `unit_test.xsd` is deliberately permissive and `check` carries roughly half the validation. The runner redirects `LLMGRADER_STORAGE_PATH` to a temp tree -- `Grader.__init__` rmtrees its scratch dir and writes a submission row per grade -- and looks token counts up by the synthetic `session_id` it passes, never by newest row. See `docs/admin/buildcourse/gradetests.md` for the instructor-facing contract.
+
+### Answering a unit blind
+
+`llmgrader/services/answers.py` + the `llmgrader_answer` console script ask a
+model to answer a unit's questions from the **question text alone** and write
+the answers as a `<unit_test>` file that `llmgrader_test run` then grades. The
+planner mirrors `gradetests._plan_run` and the runner mirrors `_execute_run`,
+with the grading call swapped for a free-form sibling of
+`grader._make_openai_caller` -- same client construction and same
+`spec.supports_temperature` gate, but no `text.format` and no
+`GraderRawResult`.
+
+The property the tool rests on is that `build_answer_prompt` sees
+`question_text`, the part labels and their points, and question images, and
+nothing else: never `solution`, `solution_images`, `grading_notes`, `rubrics`
+or `rubric_total`. A sentinel test guards each of those fields, because a leak
+there leaves every number the tool prints meaningless while still looking
+fine. Provenance goes in `<description>` and an XML comment -- `caseType` is a
+closed `xs:all` shared with hand-written files, so `unit_test.xsd` does not
+grow an attribute for it. Empty and refusing answers are emitted and marked,
+never dropped; an unresolved question image is a loud warning naming `--pkg`
+rather than the fatal error `run` raises, so an image-free unit works from a
+loose unit file. See `docs/admin/buildcourse/answers.md` and
+`plans/answer_cli.md`.
 
 ### Course content format
 

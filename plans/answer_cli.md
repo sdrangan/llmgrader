@@ -206,3 +206,56 @@ Mirror the gradetests split exactly:
 - Any non-OpenAI provider. `PROVIDER_CALLERS` has one entry today; follow it.
 - Persisting results to the submissions DB. The XML file is the artifact.
 - Any change to the student-facing grading path.
+
+## Implementation status
+
+Implemented on `feature/answer-cli`, one commit per phase. Nothing in the
+student-facing grading path was touched: no edit to `routes/api.py`,
+`services/prompt.py`, `grader.py`'s `grade()`, or the model-selection path.
+
+| Phase | What landed | State |
+| --- | --- | --- |
+| 1 | `llmgrader/services/answers.py` — planner, prompt assembly, XML emitter, dataclasses, and the free-form OpenAI caller behind a `caller_factory` seam. `tests/services/test_answers.py`, 49 tests. | Done |
+| 2 | `llmgrader/scripts/llmgrader_answer.py` — argparse, terminal output, exit code. `[project.scripts]` entry. 10 more tests. Console script exercised by hand through `pip install -e .`. | Done |
+| 3 | Caller tests against a fake client, per-call failure contract, concurrency, and the `llmgrader_test check` round trip. 9 more tests. `tests/live/test_answer_cli.py` added, deselected by default and **not run**. | Done, no live call made |
+| 4 | `docs/admin/buildcourse/answers.md`, linked from `index.md`; `CLAUDE.md` command and architecture note; this section. | Done |
+
+Tests: 329 passing before, **397 after** (33 live deselected, up from 32). No
+existing test was edited.
+
+### What the implementation learned that this plan did not say
+
+**The XML comment needs escaping too.** `--` is illegal anywhere inside an XML
+comment, so a model id, a unit file name, or the plan's own prose in the
+generated header can make the document not well-formed. The emitter runs the
+whole comment body through one `_comment_safe` pass rather than escaping the
+interpolated parts and trusting the literals.
+
+**`check_file`'s coverage report fires on every generated file.** Coverage
+reports rubric items no case asserts on, and a file of blind answers asserts
+on no rubric item by design — so a three-question unit produces about a dozen
+coverage warnings. They are warnings, so `llmgrader_test check` still exits 0
+and §2's claim holds; but the round-trip tests pass `coverage=False`, and the
+docs tell the instructor to expect them. This is the one place §2's "passes
+`check`" is true only because coverage findings are not errors.
+
+**A zero-point part cannot carry an `--expect full` band.** §2 says the band is
+`min = that part's points`; with a part worth 0 that is `min <= 0`, which trips
+the "spans the whole range and so asserts nothing" warning. Such a part is left
+unasserted. No question in `example_repo` has one, so this is defensive.
+
+**A failed call is not emitted as a case.** Caveat 2 covers the model returning
+nothing or refusing — both are emitted. A call that *errors* is different:
+there is no answer, and a case with an empty `<solution>` would both invent a
+blank submission nobody made and trip `check`'s "empty solution" **error**. The
+failure is counted, named in the summary, and exits 1 instead.
+
+**`--out` cannot serve several units.** A `<unit_test>` file targets one unit,
+so a run over several unit files with `--out` is a usage error; without it,
+each unit gets its own `<unit-stem>_answers.xml`.
+
+**`--dry-run --cost` has no tokens to price.** `price_call` needs token counts
+and a dry run has spent none, so the dry-run estimate sizes the prompt it would
+send at ~4 characters per token and assumes a 900-token answer. Enough to tell
+a $0.02 run from a $2 one, which is what the flag is for; the post-run
+`--cost` figure uses the real counts.
