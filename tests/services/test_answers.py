@@ -1,4 +1,4 @@
-"""``llmgrader_answer``: the prompt, the emitter and the plan.
+"""``llmgrader_answer``: the prompt, the emitter, the plan and the CLI.
 
 Nothing here makes an API call.  The model call is replaced at the
 ``caller_factory`` seam -- the same fake-client shape
@@ -20,6 +20,8 @@ from pathlib import Path
 
 import pytest
 
+from llmgrader.scripts.llmgrader_answer import main as llmgrader_answer_main
+from llmgrader.scripts.llmgrader_test import main as llmgrader_test_main
 from llmgrader.services.answers import (
     EXPECT_FULL,
     EXPECT_NONE,
@@ -603,3 +605,148 @@ def test_question_images_are_attached_to_the_call(tmp_path, monkeypatch) -> None
     assert len(calls) == 3
     assert all(call["images"] == [] for call in calls)
     assert all(call["api_key"] == "test-key" for call in calls)
+
+
+# ---------------------------------------------------------------------------
+# The CLI
+# ---------------------------------------------------------------------------
+
+
+def _cli(monkeypatch, tmp_path, argv, *, caller_factory=None):
+    """Run the console script's main() with the model call replaced."""
+    monkeypatch.chdir(tmp_path)
+    caller = caller_factory or _fake_caller()
+    monkeypatch.setattr(
+        "llmgrader.scripts.llmgrader_answer._caller_factory",
+        lambda: caller,
+    )
+    return llmgrader_answer_main(argv)
+
+
+def test_cli_dry_run_prints_the_call_count_and_makes_no_calls(tmp_path, monkeypatch, capsys) -> None:
+    code = _cli(
+        monkeypatch,
+        tmp_path,
+        [str(EXAMPLE_UNIT), "--dry-run"],
+        caller_factory=_never_called_caller(),
+    )
+    out = capsys.readouterr().out
+
+    assert code == 0
+    assert "dry run: 3 calls across 3 questions" in out
+    assert "no API calls were made" in out
+    assert not list(tmp_path.glob("*_answers.xml"))
+
+
+def test_cli_dry_run_breaks_the_count_down_by_model(tmp_path, monkeypatch, capsys) -> None:
+    from llmgrader.services.models import resolve_preferred_model
+
+    _cli(
+        monkeypatch,
+        tmp_path,
+        [str(EXAMPLE_UNIT), "--dry-run", "--repeat", "2"],
+        caller_factory=_never_called_caller(),
+    )
+    out = capsys.readouterr().out
+
+    assert "6 calls across 3 questions, 2 repeats each" in out
+    assert resolve_preferred_model("simple").id in out
+    assert resolve_preferred_model("standard").id in out
+
+
+def test_cli_cost_prints_an_estimate_and_the_caveat(tmp_path, monkeypatch, capsys) -> None:
+    from llmgrader.services.gradetests import LONG_CONTEXT_CAVEAT
+
+    _cli(
+        monkeypatch,
+        tmp_path,
+        [str(EXAMPLE_UNIT), "--dry-run", "--cost"],
+        caller_factory=_never_called_caller(),
+    )
+    out = capsys.readouterr().out
+
+    assert "estimated cost $" in out
+    assert LONG_CONTEXT_CAVEAT in out
+
+
+def test_cli_writes_the_file_and_summarises(tmp_path, monkeypatch, capsys) -> None:
+    code = _cli(monkeypatch, tmp_path, [str(EXAMPLE_UNIT), "--api-key", "k"])
+    out = capsys.readouterr().out
+
+    assert code == 0
+    assert "3 answered, 0 empty, 0 failed" in out
+    assert "calculus_answers.xml" in out
+    assert (tmp_path / "calculus_answers.xml").exists()
+
+
+def test_cli_summary_counts_unresolved_images(tmp_path, monkeypatch, capsys) -> None:
+    unit = tmp_path / "imgunit.xml"
+    unit.write_text(
+        """<unit id="img" title="Images" version="1.0">
+  <question qtag="Read the figure">
+    <question_text><![CDATA[<p>What does <img src="figures/absent.png"/> show?</p>]]></question_text>
+    <solution><![CDATA[<p>A curve.</p>]]></solution>
+    <partial_credit>false</partial_credit>
+    <parts><part><part_label>all</part_label><points>10</points></part></parts>
+  </question>
+</unit>
+""",
+        encoding="utf-8",
+    )
+
+    code = _cli(monkeypatch, tmp_path, [str(unit), "--api-key", "k"])
+    out = capsys.readouterr().out
+
+    assert code == 0
+    assert "1 question image did not resolve" in out
+    assert "--pkg" in out
+
+
+def test_cli_refuses_to_clobber_without_force(tmp_path, monkeypatch, capsys) -> None:
+    assert _cli(monkeypatch, tmp_path, [str(EXAMPLE_UNIT), "--api-key", "k"]) == 0
+    capsys.readouterr()
+
+    code = _cli(monkeypatch, tmp_path, [str(EXAMPLE_UNIT), "--api-key", "k"])
+    err = capsys.readouterr().err
+    assert code == 2
+    assert "already exists" in err
+
+    assert _cli(monkeypatch, tmp_path, [str(EXAMPLE_UNIT), "--api-key", "k", "--force"]) == 0
+
+
+def test_cli_needs_a_key_unless_it_is_a_dry_run(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    code = _cli(monkeypatch, tmp_path, [str(EXAMPLE_UNIT)])
+    err = capsys.readouterr().err
+    assert code == 2
+    assert "no API key" in err
+
+
+def test_cli_falls_back_to_the_environment_key(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "from-env")
+    calls: list[dict] = []
+    code = _cli(
+        monkeypatch, tmp_path, [str(EXAMPLE_UNIT)], caller_factory=_fake_caller(record=calls)
+    )
+    assert code == 0
+    assert {call["api_key"] for call in calls} == {"from-env"}
+
+
+def test_cli_reports_a_failed_call_and_exits_nonzero(tmp_path, monkeypatch, capsys) -> None:
+    code = _cli(
+        monkeypatch,
+        tmp_path,
+        [str(EXAMPLE_UNIT), "--api-key", "k"],
+        caller_factory=_fake_caller(fail=RuntimeError("the provider hung up")),
+    )
+    out, err = capsys.readouterr()
+
+    assert code == 1
+    assert "3 failed" in out
+    assert "the provider hung up" in (out + err)
+
+
+def test_cli_rejects_repeat_below_one(tmp_path, monkeypatch, capsys) -> None:
+    code = _cli(monkeypatch, tmp_path, [str(EXAMPLE_UNIT), "--dry-run", "--repeat", "0"])
+    assert code == 2
+    assert "--repeat must be at least 1" in capsys.readouterr().err
