@@ -141,10 +141,6 @@ class PlannedQuestion:
     #: see, and the score means nothing.
     missing_images: int = 0
 
-    @property
-    def max_points(self) -> float:
-        return sum(float(part.get("points") or 0) for part in self.parts)
-
 
 @dataclass
 class AnswerResult:
@@ -553,7 +549,6 @@ def render_unit_test(
     *,
     expect: str = EXPECT_NONE,
     generated_on: str | None = None,
-    repeat: int = 1,
 ) -> str:
     """Render one unit's answers as a ``<unit_test>`` document.
 
@@ -640,9 +635,7 @@ def write_answer_file(unit: UnitAnswers, options: AnswerOptions, *, generated_on
     if directory:
         os.makedirs(directory, exist_ok=True)
 
-    text = render_unit_test(
-        unit, expect=options.expect, generated_on=generated_on, repeat=max(1, options.repeat)
-    )
+    text = render_unit_test(unit, expect=options.expect, generated_on=generated_on)
     with open(unit.out_path, "w", encoding="utf-8", newline="\n") as handle:
         handle.write(text)
     return unit.out_path
