@@ -18,4 +18,5 @@ unit.
 - [HTML notes](htmlnotes.md)
 - [Testing the solution](./solntest.md)
 - [Testing your grading](./gradetests.md)
+- [Testing with AI answers](./aitest.md)
 - [Upload](upload.md)
