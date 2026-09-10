@@ -24,7 +24,6 @@ from llmgrader.scripts.llmgrader_answer import main as llmgrader_answer_main
 from llmgrader.scripts.llmgrader_test import main as llmgrader_test_main
 from llmgrader.services.answers import (
     EXPECT_FULL,
-    EXPECT_NONE,
     AnswerError,
     AnswerOptions,
     AnswerResult,
@@ -34,6 +33,7 @@ from llmgrader.services.answers import (
     case_id_for,
     default_out_path,
     looks_like_refusal,
+    make_openai_answer_caller,
     render_unit_test,
     resolve_question_images,
     run_answers,
@@ -54,7 +54,6 @@ EXAMPLE_UNIT = REPO_ROOT / "example_repo" / "unit1" / "calculus.xml"
 SECOND_UNIT = REPO_ROOT / "example_repo" / "unit2" / "python.xml"
 
 BINARY_QTAG = "Exponential derivative"
-PARTIAL_QTAG = "Integration by parts"
 MULTIPART_QTAG = "Exponential graphing"
 
 
@@ -750,3 +749,206 @@ def test_cli_rejects_repeat_below_one(tmp_path, monkeypatch, capsys) -> None:
     code = _cli(monkeypatch, tmp_path, [str(EXAMPLE_UNIT), "--dry-run", "--repeat", "0"])
     assert code == 2
     assert "--repeat must be at least 1" in capsys.readouterr().err
+
+
+# ---------------------------------------------------------------------------
+# Failed calls (caveat: one question failing must not lose the others)
+# ---------------------------------------------------------------------------
+
+
+def test_a_failed_call_does_not_lose_the_other_answers(tmp_path, monkeypatch) -> None:
+    """One question erroring must not cost the questions that succeeded."""
+    calls = {"n": 0}
+
+    def factory(*, model, api_key, prompt, timeout, images):
+        def call():
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise RuntimeError("connection reset")
+            return "An answer.", 5, 5
+
+        return call
+
+    report = _run(tmp_path, monkeypatch, caller_factory=factory)
+    assert len(report.errors) == 1
+    assert "RuntimeError: connection reset" in report.errors[0].error
+
+    # The failed call produced no answer, so it is not invented as a blank
+    # case -- but the two that worked are written.
+    text = Path(report.written[0]).read_text(encoding="utf-8")
+    assert text.count("<case ") == 2
+    assert _findings(Path(report.written[0]), level=LEVEL_ERROR) == []
+
+
+def test_concurrent_answers_keep_the_units_document_order(tmp_path, monkeypatch) -> None:
+    """--jobs runs the calls in parallel; the file must still read in order."""
+    monkeypatch.chdir(tmp_path)
+    report = run_answers(
+        [str(EXAMPLE_UNIT)],
+        AnswerOptions(api_key="k", jobs=4),
+        caller_factory=_fake_caller(lambda model, prompt: prompt[:40]),
+    )
+    assert [result.qtag for result in report.units[0].results] == [
+        BINARY_QTAG,
+        "Integration by parts",
+        MULTIPART_QTAG,
+    ]
+    assert _findings(Path(report.written[0]), level=LEVEL_ERROR) == []
+
+
+# ---------------------------------------------------------------------------
+# The OpenAI caller (phase 3a) -- a fake client, never the real API
+# ---------------------------------------------------------------------------
+
+
+class _FakeUsage:
+    input_tokens = 31
+    output_tokens = 17
+
+
+class _FakeResponse:
+    def __init__(self, text="a^x ln(a)") -> None:
+        self.output_text = text
+        self.usage = _FakeUsage()
+        self.output = []
+
+
+class _FakeResponses:
+    def __init__(self, text) -> None:
+        self.calls: list[dict] = []
+        self._text = text
+
+    def create(self, **kwargs):
+        self.calls.append(kwargs)
+        return _FakeResponse(self._text)
+
+
+class _FakeOpenAI:
+    last_instance = None
+    text = "a^x ln(a)"
+
+    def __init__(self, *args, **kwargs) -> None:
+        self.kwargs = kwargs
+        self.responses = _FakeResponses(_FakeOpenAI.text)
+        _FakeOpenAI.last_instance = self
+
+
+@pytest.fixture
+def fake_openai(monkeypatch):
+    _FakeOpenAI.text = "a^x ln(a)"
+    monkeypatch.setattr("llmgrader.services.grader.OpenAI", _FakeOpenAI)
+    return _FakeOpenAI
+
+
+def test_answer_caller_sends_prose_not_json(fake_openai) -> None:
+    from llmgrader.services.models import DEFAULT_MODEL_SIMPLE
+
+    call = make_openai_answer_caller(
+        model=DEFAULT_MODEL_SIMPLE,
+        api_key="k",
+        prompt="Answer this.",
+        timeout=42,
+        images=None,
+    )
+    text, tokens_in, tokens_out = call()
+
+    assert text == "a^x ln(a)"
+    assert (tokens_in, tokens_out) == (31, 17)
+
+    request = fake_openai.last_instance.responses.calls[0]
+    assert request["input"] == "Answer this."
+    assert request["timeout"] == 42
+    # The grading caller pins text.format to json_object; this one must not.
+    assert "text" not in request
+    assert "tools" not in request
+
+
+def test_answer_caller_attaches_question_images_as_input_image_parts(fake_openai) -> None:
+    from llmgrader.services.models import DEFAULT_MODEL_SIMPLE
+
+    call = make_openai_answer_caller(
+        model=DEFAULT_MODEL_SIMPLE,
+        api_key="k",
+        prompt="Answer this.",
+        timeout=10,
+        images=["data:image/png;base64,figure"],
+    )
+    call()
+
+    request = fake_openai.last_instance.responses.calls[0]
+    assert request["input"] == [
+        {
+            "role": "user",
+            "content": [
+                {"type": "input_text", "text": "Answer this."},
+                {"type": "input_image", "image_url": "data:image/png;base64,figure"},
+            ],
+        }
+    ]
+
+
+@pytest.mark.parametrize("supports", [True, False])
+def test_answer_caller_gates_temperature_on_the_model_spec(fake_openai, monkeypatch, supports) -> None:
+    from llmgrader.services.models import DEFAULT_MODEL_SIMPLE, get_spec
+
+    spec = get_spec(DEFAULT_MODEL_SIMPLE)
+    monkeypatch.setattr(
+        "llmgrader.services.models.get_spec",
+        lambda model_id: type(spec)(**{**spec.__dict__, "supports_temperature": supports}),
+    )
+
+    call = make_openai_answer_caller(
+        model=DEFAULT_MODEL_SIMPLE, api_key="k", prompt="q", timeout=10, images=None
+    )
+    call()
+
+    request = fake_openai.last_instance.responses.calls[0]
+    assert ("temperature" in request) is supports
+    if supports:
+        assert request["temperature"] == 0
+
+
+def test_answer_caller_returns_an_empty_reply_rather_than_raising(fake_openai) -> None:
+    """The grading caller raises on empty output; here it is the finding."""
+    from llmgrader.services.models import DEFAULT_MODEL_SIMPLE
+
+    fake_openai.text = ""
+    call = make_openai_answer_caller(
+        model=DEFAULT_MODEL_SIMPLE, api_key="k", prompt="q", timeout=10, images=None
+    )
+    text, _, _ = call()
+    assert text == ""
+
+
+# ---------------------------------------------------------------------------
+# End to end: the generated file is one llmgrader_test accepts (phase 3c)
+# ---------------------------------------------------------------------------
+
+
+def test_generated_file_passes_llmgrader_test_check(tmp_path, monkeypatch, capsys) -> None:
+    assert _cli(monkeypatch, tmp_path, [str(EXAMPLE_UNIT), "--api-key", "k"]) == 0
+    capsys.readouterr()
+
+    code = llmgrader_test_main(["check", str(tmp_path / "calculus_answers.xml")])
+    out = capsys.readouterr().out
+    assert code == 0, out
+    assert "0 errors" in out
+
+
+def test_generated_file_with_expect_full_passes_check_strict(tmp_path, monkeypatch, capsys) -> None:
+    """--expect full asserts something, so even --strict has nothing to say.
+
+    Coverage is off because a file of blind answers asserts on no rubric item
+    by design; with it on, `check` would report every item as uncovered.
+    """
+    assert (
+        _cli(monkeypatch, tmp_path, [str(EXAMPLE_UNIT), "--api-key", "k", "--expect", "full"]) == 0
+    )
+    capsys.readouterr()
+
+    code = llmgrader_test_main(
+        ["check", str(tmp_path / "calculus_answers.xml"), "--no-coverage", "--strict"]
+    )
+    out = capsys.readouterr().out
+    assert code == 0, out
+    assert "0 errors, 0 warnings" in out
