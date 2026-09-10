@@ -218,7 +218,7 @@ student-facing grading path was touched: no edit to `routes/api.py`,
 | 1 | `llmgrader/services/answers.py` — planner, prompt assembly, XML emitter, dataclasses, and the free-form OpenAI caller behind a `caller_factory` seam. `tests/services/test_answers.py`, 49 tests. | Done |
 | 2 | `llmgrader/scripts/llmgrader_answer.py` — argparse, terminal output, exit code. `[project.scripts]` entry. 10 more tests. Console script exercised by hand through `pip install -e .`. | Done |
 | 3 | Caller tests against a fake client, per-call failure contract, concurrency, and the `llmgrader_test check` round trip. 9 more tests. `tests/live/test_answer_cli.py` added, deselected by default and **not run**. | Done, no live call made |
-| 4 | `docs/admin/buildcourse/answers.md`, linked from `index.md`; `CLAUDE.md` command and architecture note; this section. | Done |
+| 4 | `docs/admin/buildcourse/aitest.md`, linked from `index.md`; `CLAUDE.md` command and architecture note; this section. | Done |
 
 Tests: 329 passing before, **397 after** (33 live deselected, up from 32). No
 existing test was edited.

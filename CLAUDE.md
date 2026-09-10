@@ -88,7 +88,7 @@ closed `xs:all` shared with hand-written files, so `unit_test.xsd` does not
 grow an attribute for it. Empty and refusing answers are emitted and marked,
 never dropped; an unresolved question image is a loud warning naming `--pkg`
 rather than the fatal error `run` raises, so an image-free unit works from a
-loose unit file. See `docs/admin/buildcourse/answers.md` and
+loose unit file. See `docs/admin/buildcourse/aitest.md` and
 `plans/answer_cli.md`.
 
 ### Course content format
