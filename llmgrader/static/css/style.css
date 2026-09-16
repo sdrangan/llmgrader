@@ -931,22 +931,26 @@ textarea {
     table-layout: fixed;
 }
 
-.admin-rubrics-block th:nth-child(1),
-.admin-rubrics-block td:nth-child(1) {
-    width: 3.5rem;
+/* Scoped under .text-box so these beat the generic .text-box column widths
+   further down the file, which otherwise win on source order. */
+.text-box .admin-rubrics-block th:nth-child(1),
+.text-box .admin-rubrics-block td:nth-child(1) {
+    width: 2.5rem;
     white-space: nowrap;
 }
 
-.admin-rubrics-block th:nth-child(2),
-.admin-rubrics-block td:nth-child(2) {
+.text-box .admin-rubrics-block th:nth-child(2),
+.text-box .admin-rubrics-block td:nth-child(2) {
     width: 11rem;
+    white-space: normal;
     overflow-wrap: anywhere;
 }
 
-.admin-rubrics-block th:nth-child(3),
-.admin-rubrics-block td:nth-child(3) {
+.text-box .admin-rubrics-block th:nth-child(3),
+.text-box .admin-rubrics-block td:nth-child(3) {
     width: auto;
     min-width: 0;
+    white-space: normal;
     overflow-wrap: anywhere;
 }
 
@@ -1324,6 +1328,52 @@ textarea {
         font-size: 0.75rem;
         padding: 2px 6px;
         min-width: 52px;
+    }
+
+    /* Three columns leave the condition/notes column unreadably narrow on a
+       phone, so each rubric row becomes a stacked card instead of a table row
+       and the prose gets the full panel width. */
+    .text-box .admin-rubrics-block table,
+    .text-box .admin-rubrics-block tbody,
+    .text-box .admin-rubrics-block tr,
+    .text-box .admin-rubrics-block td {
+        display: block;
+        width: auto;
+    }
+
+    .text-box .admin-rubrics-block tr {
+        border: 1px solid #ccc;
+        border-radius: 4px;
+        padding: 8px 10px;
+    }
+
+    .text-box .admin-rubrics-block tr + tr {
+        margin-top: 8px;
+    }
+
+    .text-box .admin-rubrics-block td {
+        border: none;
+        padding: 0;
+    }
+
+    /* The desktop column widths are per-nth-child, so they have to be undone
+       at the same specificity -- a media query adds none of its own. */
+    .text-box .admin-rubrics-block td:nth-child(1),
+    .text-box .admin-rubrics-block td:nth-child(2),
+    .text-box .admin-rubrics-block td:nth-child(3) {
+        width: auto;
+    }
+
+    .text-box .admin-rubrics-block td:nth-child(1) {
+        color: #666;
+        font-size: 0.85em;
+        margin-bottom: 0.15rem;
+    }
+
+    .text-box .admin-rubrics-block td:nth-child(3) {
+        margin-top: 0.4rem;
+        padding-top: 0.4rem;
+        border-top: 1px solid #e6e6e6;
     }
 
     /* Mobile panels stack vertically */
