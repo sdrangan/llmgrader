@@ -113,6 +113,29 @@ id, orphaning every submission row and every student's saved localStorage state
 with no error message anywhere. Re-uploading a package whose `<course>` block
 has changed updates the display name and leaves the id alone.
 
+**That decision requires a guard at upload.** `create_soln_pkg` writes a
+hardcoded `soln_package.zip` (`scripts/create_soln_pkg.py:206`) into the working
+directory; the `<course>` block is read only to *print* a confirmation line. So
+an instructor running two courses has two files with the same name, and the
+portal cannot tell them apart from the upload alone. Without a check, uploading
+course B's ZIP into course A silently replaces A's content and renames it to B,
+while keeping A's id and A's submission history -- which is precisely the
+corruption the "never re-derive the id" rule was meant to prevent.
+
+Uploading into an existing course therefore derives the id from the package's
+`<course>` block and compares it to the target. On a mismatch, refuse with both
+names shown and require an explicit "rename this course" confirmation. Deriving
+the id is already needed to create a course, so this is a comparison, not new
+machinery.
+
+The upstream half is worth doing too: have `create_soln_pkg` name its archive
+after the course slug -- `demo-class-spring-2026.zip` -- instead of
+`soln_package.zip`. It is a few lines, it makes the ZIP self-describing on disk,
+and it removes the ambiguity at the point where it is created rather than
+catching it at the point where it does damage. Keep `soln_package/` as the
+staging directory name so nothing else in the docs moves, and mention the new
+archive name in `docs/admin/buildcourse/upload.md`.
+
 Registry file at `<storage>/courses/courses.json`:
 
 ```json
@@ -264,10 +287,17 @@ before each of these merges.
 | 3 | `course_id` column | `DB_SCHEMA` + `temp_modify_db` + index + backfill. Analytics default query filters by course. |
 | 4 | Per-session grade jobs | Independent of the rest; ship whenever ready. |
 | 5 | URL scoping and the picker | `/c/<id>/...`, `g.grader`, scoped `pkg_assets`, `GET /api/courses`, "Select Course..." in the File menu, localStorage namespacing + migration. The big front-end commit. |
-| 6 | Course management and Gradescope | Admin create/rename/delete course, upload scoped to a course, `course_id` in `results.json` and the autograder. |
+| 6 | Course management and Gradescope | Admin create/rename/delete course, upload scoped to a course with the id-mismatch guard, `create_soln_pkg` naming its archive after the course slug, `course_id` in `results.json` and the autograder. |
 
 Phases 1-4 are invisible to users and can land over several weeks. Phase 5 is
 the one that needs a careful deploy and a hand-run UI suite.
+
+**Phase 1 is done** on `feature/course-registry-refactor` (`fb4d8dc`):
+`PortalStorage` in `services/portal_storage.py` owns the database, the admin
+preferences file and the student image store; `Grader` keeps course content and
+holds a `storage`, with delegating shims so existing callers still work. Scratch
+ownership is decided once in `claim_scratch_dir`. Verified at that commit: 451
+passed / 33 deselected, and `tests/ui/` green three runs out of three.
 
 ## Test fixtures: a second course belongs in `tests/ui/fixtures/`, not `example_repo`
 
@@ -308,3 +338,13 @@ existing path stays valid, the docs keep working unchanged, and
 - **Cross-course dashboard.** A student in two courses on one portal sees them
   as unrelated sites. Whether that is a problem depends on how many such
   students exist; defer until it is observed.
+- **Scratch ownership across gunicorn workers.** `claim_scratch_dir` (phase 1)
+  is a process-global set, which is the right scope for several `Grader`s in one
+  process and no protection at all across processes. Render runs `gunicorn
+  run:app` with no `--workers` flag (`docs/admin/deploy/render.md:69`), so today
+  there is one worker and the claim holds. But more students on one instance is
+  the point of this work, and `--workers 2` is the obvious response to that --
+  at which point both workers rmtree `cwd/scratch` and both run `init_db`. This
+  is pre-existing, not introduced by phase 1. Phase 2 should make scratch
+  per-course *and* per-process (append the pid, or a per-worker temp root)
+  rather than rely on a lock.
