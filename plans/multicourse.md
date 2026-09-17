@@ -128,13 +128,14 @@ names shown and require an explicit "rename this course" confirmation. Deriving
 the id is already needed to create a course, so this is a comparison, not new
 machinery.
 
-The upstream half is worth doing too: have `create_soln_pkg` name its archive
-after the course slug -- `demo-class-spring-2026.zip` -- instead of
-`soln_package.zip`. It is a few lines, it makes the ZIP self-describing on disk,
-and it removes the ambiguity at the point where it is created rather than
-catching it at the point where it does damage. Keep `soln_package/` as the
-staging directory name so nothing else in the docs moves, and mention the new
-archive name in `docs/admin/buildcourse/upload.md`.
+Note what that guard does *not* depend on: the file name. The check reads the
+`<course>` block **inside** the archive, which is the only thing that was ever
+authoritative. So `create_soln_pkg` can keep writing `soln_package.zip` for
+every course. Renaming the archive after the course slug is a convenience for
+the instructor's own filesystem, not a safety mechanism, and it should not be
+mistaken for one -- an admin who renames a ZIP by hand, or re-downloads one from
+a browser as `soln_package (2).zip`, must still be protected. Leave
+`create_soln_pkg` alone.
 
 Registry file at `<storage>/courses/courses.json`:
 
@@ -163,9 +164,18 @@ come back up with its course intact and no admin action.
   courses/
     courses.json
     <course_id>/
-      soln_pkg/            # was <storage>/soln_pkg
+      soln_pkg/            # was <storage>/soln_pkg -- extracted, this is what is served
+      uploads/             # the archives as uploaded, newest few retained
       scratch/             # was cwd/scratch, shared
 ```
+
+`uploads/` is new. Today the uploaded ZIP is written to scratch and dropped
+once extracted (`grader.py:674`), so a bad upload is unrecoverable without the
+instructor's own copy -- and the extraction rmtrees the live package first
+(`grader.py:694`), so the course is already gone by the time the failure shows
+up. Keeping the archive under the course costs a few megabytes and buys
+re-extraction without re-upload, and rollback to the previous package. Retain
+the newest three by upload timestamp and prune the rest.
 
 `UnitParser._resolve_solution_package_path()` (`unit_parser.py:689`) gains a
 course id and resolves under `courses/<id>/soln_pkg`. Scratch moves under the
@@ -273,6 +283,42 @@ storage or routing concern.
 to drop `self.active_grade_job_id` as a single slot and key the
 already-running check by `session_id` instead. Do this before the picker ships.
 
+### 10. "Add course" is an upload, not a form
+
+The admin surface is a **Manage Courses** dialog with Add and Delete, and the
+existing "Load Course Package..." item gains a target-course selector.
+
+Do not let Add Course ask the instructor to *type* a name. The package already
+carries `<name>` and `<semester>`, and a typed name that disagrees with the XML
+creates exactly the ambiguity decision 3 exists to remove -- two candidate
+identities for one course, with no rule for which wins. Instead:
+
+- **Add Course** is "upload a package as a new course". The server reads the
+  `<course>` block, mints the id, creates the course and extracts into it. No
+  typing, so a mismatch on creation is not representable. If the minted id
+  already belongs to a registered course, refuse and offer "that is *Demo Class,
+  Spring 2026* -- update it instead?".
+- **Load Course Package...** targets a course the admin selects, and applies the
+  decision-3 guard: derive the id from the archive, compare, refuse on mismatch
+  with both course names shown, and require an explicit "rename this course"
+  confirmation to proceed.
+- **Delete Course** archives rather than deletes -- `deleted_at` on the registry
+  entry, submission rows retained. Grades are the one thing here that is not
+  reconstructible. Hard deletion is a separate, explicitly-worded action.
+
+The selector plus the guard are belt and braces on purpose, and they fail in
+different directions. The selector catches the admin who grabbed the wrong
+course; the guard catches the admin who grabbed the wrong *file* for the right
+course -- the likelier mistake, since every archive is named `soln_package.zip`.
+Neither alone covers both.
+
+Also stop the destructive half of `save_uploaded_file` (`grader.py:694`) from
+running before the archive has been validated. It currently rmtrees the live
+package and then extracts, so a corrupt ZIP or a failed parse takes the course
+down with it. Extract to a temporary directory, parse, and swap only once the
+package loads -- which is also what makes "upload the wrong file" recoverable
+rather than merely detectable.
+
 ## Phases
 
 Each phase is independently shippable and leaves single-course behaviour intact
@@ -287,7 +333,7 @@ before each of these merges.
 | 3 | `course_id` column | `DB_SCHEMA` + `temp_modify_db` + index + backfill. Analytics default query filters by course. |
 | 4 | Per-session grade jobs | Independent of the rest; ship whenever ready. |
 | 5 | URL scoping and the picker | `/c/<id>/...`, `g.grader`, scoped `pkg_assets`, `GET /api/courses`, "Select Course..." in the File menu, localStorage namespacing + migration. The big front-end commit. |
-| 6 | Course management and Gradescope | Admin create/rename/delete course, upload scoped to a course with the id-mismatch guard, `create_soln_pkg` naming its archive after the course slug, `course_id` in `results.json` and the autograder. |
+| 6 | Course management and Gradescope | Manage Courses dialog (decision 10), upload targeting a selected course with the id-mismatch guard, validate-then-swap extraction, `uploads/` retention, `course_id` in `results.json` and the autograder. |
 
 Phases 1-4 are invisible to users and can land over several weeks. Phase 5 is
 the one that needs a careful deploy and a hand-run UI suite.
