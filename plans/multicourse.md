@@ -86,6 +86,11 @@ The one real argument for separate files is portability -- handing a colleague
 their course's data, or a hard legal separation. Neither applies yet, and
 `SELECT ... WHERE course_id = ?` exports per course whenever it does.
 
+The column stores the authored `<course_id>` verbatim (decision 3), so
+`WHERE course_id = 'intro_prob'` is something an instructor can type into the
+Analytics view without first looking anything up. That readability is most of
+the argument for authoring the id rather than slugging it.
+
 ### 2. Admin preferences stay global
 
 `admin-config.json` holds `openaiApiKey`, `allowedModels` and `tokenLimit`
@@ -102,25 +107,106 @@ is a per-course override file that merges over the global defaults, exactly as
 
 This means the admin Preferences modal is unchanged by this plan.
 
-### 3. Course id is assigned at upload, never re-derived
+### 3. The course id is authored in `llmgrader_config.xml`
 
-The id is a slug of `<name>` + `<semester>` -- `demo-class-spring-2026` -- but it
-is computed **once**, when a package is first loaded into a new course, and then
-stored in a small registry file. It is not recomputed from the XML on each boot.
+`<course>` gains a `<course_id>`: a short, stable, machine-facing identifier,
+distinct from the human-facing `<name>`.
 
-This matters: an instructor fixing a typo in `<name>` would otherwise change the
-id, orphaning every submission row and every student's saved localStorage state
-with no error message anywhere. Re-uploading a package whose `<course>` block
-has changed updates the display name and leaves the id alone.
+```xml
+<course>
+  <course_id>intro_prob</course_id>
+  <name>ECE-GY 6201 Introduction to Probability</name>
+  <semester>Spring 2026</semester>
+</course>
+```
+
+The alternative -- slugging `<name>` + `<semester>` into
+`ece-gy-6201-introduction-to-probability-spring-2026` -- works, but it makes the
+id a *function of display text*. An instructor fixing a typo in `<name>`, or
+dropping the course number from it, silently changes the id and orphans every
+submission row, every student's saved localStorage state and every URL. Guarding
+against that is possible; not creating the hazard is better. An authored id also
+gives readable storage paths and URLs (`/c/intro_prob/…`) and a
+human-meaningful `course_id` in the Gradescope `results.json`.
+
+The id is still recorded in the registry at creation and read from there
+afterwards, so a later edit to `<course_id>` in the package is a *rename*
+requiring confirmation (decision 10) rather than a silent fork.
+
+**Constrain it in the schema, not in prose.** It becomes a directory name under
+`<storage>/courses/` and a URL path segment, so validation belongs where the
+authoring tools will catch it:
+
+```xml
+<xs:element name="course_id" minOccurs="0">
+  <xs:simpleType>
+    <xs:restriction base="xs:token">
+      <xs:pattern value="[a-z0-9][a-z0-9_-]{0,63}"/>
+    </xs:restriction>
+  </xs:simpleType>
+</xs:element>
+```
+
+Lowercase so two courses cannot differ only by case on a case-insensitive
+filesystem; no dots or slashes, which rules out `.` and `..` as path segments;
+leading character alphanumeric; capped at 64.
+
+**Optional in the schema, for one release.** There are eight
+`llmgrader_config.xml` files in this repo alone, plus every instructor's course
+and the package already deployed -- and the phase 2 boot migration must, by
+definition, run against a package authored before this field existed. When
+`<course_id>` is absent, mint the slug from `<name>` + `<semester>` as the
+fallback and store *that* in the registry. Because the id is recorded once, the
+fallback runs once per course and never again. `create_soln_pkg` should warn
+when the field is missing, the MCP skeleton in `mcp/config_xml_tools.py:42`
+should emit it, and `docs/admin/buildcourse/pkgconfig.md` should present it as
+the recommended way to author a course.
+
+**Deliberately excludes the term.** `intro_prob`, not `intro_prob_s26`. The
+common operation is re-uploading a corrected package mid-semester, which must
+land on the same course; an id containing the term makes the *frequent* action
+the dangerous one. The cost is that next semester's package carries the same id
+and so updates the same course, inheriting the previous term's submissions.
+Decision 10 makes that an explicit choice rather than an accident: Add Course
+refuses an id that already exists and offers to update the named course instead,
+so an instructor who wants a clean slate authors `intro_prob_f26` and gets a
+genuinely separate course.
+
+**A guard is still needed at upload.** An authored id removes the
+typo-changes-the-id hazard, but not the wrong-file hazard.
+`create_soln_pkg` writes a
+hardcoded `soln_package.zip` (`scripts/create_soln_pkg.py:206`) into the working
+directory; the `<course>` block is read only to *print* a confirmation line. So
+an instructor running two courses has two files with the same name, and the
+portal cannot tell them apart from the upload alone. Without a check, uploading
+course B's ZIP into course A silently replaces A's content and renames it to B,
+while keeping A's id and A's submission history -- which is precisely the
+corruption the "never re-derive the id" rule was meant to prevent.
+
+Uploading into an existing course therefore derives the id from the package's
+`<course>` block and compares it to the target. On a mismatch, refuse with both
+names shown and require an explicit "rename this course" confirmation. Deriving
+the id is already needed to create a course, so this is a comparison, not new
+machinery.
+
+Note what that guard does *not* depend on: the file name. The check reads the
+`<course>` block **inside** the archive, which is the only thing that was ever
+authoritative. So `create_soln_pkg` can keep writing `soln_package.zip` for
+every course. Renaming the archive after the course slug is a convenience for
+the instructor's own filesystem, not a safety mechanism, and it should not be
+mistaken for one -- an admin who renames a ZIP by hand, or re-downloads one from
+a browser as `soln_package (2).zip`, must still be protected. Leave
+`create_soln_pkg` alone.
 
 Registry file at `<storage>/courses/courses.json`:
 
 ```json
 {
   "courses": [
-    {"id": "demo-class-spring-2026", "name": "Demo Class", "semester": "Spring 2026", "created_at": "..."}
+    {"id": "intro_prob", "name": "ECE-GY 6201 Introduction to Probability",
+     "semester": "Spring 2026", "created_at": "...", "id_source": "authored"}
   ],
-  "default": "demo-class-spring-2026"
+  "default": "intro_prob"
 }
 ```
 
@@ -140,9 +226,18 @@ come back up with its course intact and no admin action.
   courses/
     courses.json
     <course_id>/
-      soln_pkg/            # was <storage>/soln_pkg
+      soln_pkg/            # was <storage>/soln_pkg -- extracted, this is what is served
+      uploads/             # the archives as uploaded, newest few retained
       scratch/             # was cwd/scratch, shared
 ```
+
+`uploads/` is new. Today the uploaded ZIP is written to scratch and dropped
+once extracted (`grader.py:674`), so a bad upload is unrecoverable without the
+instructor's own copy -- and the extraction rmtrees the live package first
+(`grader.py:694`), so the course is already gone by the time the failure shows
+up. Keeping the archive under the course costs a few megabytes and buys
+re-extraction without re-upload, and rollback to the previous package. Retain
+the newest three by upload timestamp and prune the rest.
 
 `UnitParser._resolve_solution_package_path()` (`unit_parser.py:689`) gains a
 course id and resolves under `courses/<id>/soln_pkg`. Scratch moves under the
@@ -204,8 +299,8 @@ place, and it keeps the served HTML self-contained.
 `sessionState` lives in `localStorage["llmgrader_session"]`, keyed
 `[unitName][qtag]` (`app.js:173`, `app.js:197`). Namespace it by course.
 
-Use a **separate key per course** -- `llmgrader_session:<course_id>` -- rather
-than adding a third nesting level. One course's state can then be cleared
+Use a **separate key per course**, under the authored id --
+`llmgrader_session:intro_prob` -- rather than adding a third nesting level. One course's state can then be cleared
 without touching another's, and the quota failure in `saveSessionState`
 (`app.js:188`) degrades per course instead of globally.
 
@@ -250,6 +345,51 @@ storage or routing concern.
 to drop `self.active_grade_job_id` as a single slot and key the
 already-running check by `session_id` instead. Do this before the picker ships.
 
+### 10. "Add course" is an upload, not a form
+
+The admin surface is a **Manage Courses** dialog with Add and Delete, and the
+existing "Load Course Package..." item gains a target-course selector.
+
+Do not let Add Course ask the instructor to *type* a name. The package already
+carries `<name>` and `<semester>`, and a typed name that disagrees with the XML
+creates exactly the ambiguity decision 3 exists to remove -- two candidate
+identities for one course, with no rule for which wins. Instead:
+
+- **Add Course** is "upload a package as a new course". The server reads the
+  `<course>` block, mints the id, creates the course and extracts into it. No
+  typing, so a mismatch on creation is not representable. If the minted id
+  already belongs to a registered course, refuse and offer "that is *Demo Class,
+  Spring 2026* -- update it instead?".
+- **Load Course Package...** targets a course the admin selects, and applies the
+  decision-3 guard: read the id from the archive, compare, refuse on mismatch
+  with both course names shown, and require an explicit "rename this course"
+  confirmation to proceed.
+
+  Confirming a rename is a **migration, not a field update**. The id is the key
+  in three independent stores: `submissions.course_id`, the storage directory
+  under `<storage>/courses/`, and `llmgrader_session:<id>` in every student's
+  browser. The first two the server can move in one transaction. The third it
+  cannot reach -- so a renamed course must keep serving the old key as a
+  fallback, reading it once and rewriting under the new one, exactly as the
+  phase 5 legacy-key migration does. This is the concrete reason renaming asks
+  for confirmation rather than just doing it.
+- **Delete Course** archives rather than deletes -- `deleted_at` on the registry
+  entry, submission rows retained. Grades are the one thing here that is not
+  reconstructible. Hard deletion is a separate, explicitly-worded action.
+
+The selector plus the guard are belt and braces on purpose, and they fail in
+different directions. The selector catches the admin who grabbed the wrong
+course; the guard catches the admin who grabbed the wrong *file* for the right
+course -- the likelier mistake, since every archive is named `soln_package.zip`.
+Neither alone covers both.
+
+Also stop the destructive half of `save_uploaded_file` (`grader.py:694`) from
+running before the archive has been validated. It currently rmtrees the live
+package and then extracts, so a corrupt ZIP or a failed parse takes the course
+down with it. Extract to a temporary directory, parse, and swap only once the
+package loads -- which is also what makes "upload the wrong file" recoverable
+rather than merely detectable.
+
 ## Phases
 
 Each phase is independently shippable and leaves single-course behaviour intact
@@ -264,10 +404,17 @@ before each of these merges.
 | 3 | `course_id` column | `DB_SCHEMA` + `temp_modify_db` + index + backfill. Analytics default query filters by course. |
 | 4 | Per-session grade jobs | Independent of the rest; ship whenever ready. |
 | 5 | URL scoping and the picker | `/c/<id>/...`, `g.grader`, scoped `pkg_assets`, `GET /api/courses`, "Select Course..." in the File menu, localStorage namespacing + migration. The big front-end commit. |
-| 6 | Course management and Gradescope | Admin create/rename/delete course, upload scoped to a course, `course_id` in `results.json` and the autograder. |
+| 6 | Course management and Gradescope | Manage Courses dialog (decision 10), upload targeting a selected course with the id-mismatch guard, validate-then-swap extraction, `uploads/` retention, `course_id` in `results.json` and the autograder. |
 
 Phases 1-4 are invisible to users and can land over several weeks. Phase 5 is
 the one that needs a careful deploy and a hand-run UI suite.
+
+**Phase 1 is done** on `feature/course-registry-refactor` (`fb4d8dc`):
+`PortalStorage` in `services/portal_storage.py` owns the database, the admin
+preferences file and the student image store; `Grader` keeps course content and
+holds a `storage`, with delegating shims so existing callers still work. Scratch
+ownership is decided once in `claim_scratch_dir`. Verified at that commit: 451
+passed / 33 deselected, and `tests/ui/` green three runs out of three.
 
 ## Test fixtures: a second course belongs in `tests/ui/fixtures/`, not `example_repo`
 
@@ -308,3 +455,13 @@ existing path stays valid, the docs keep working unchanged, and
 - **Cross-course dashboard.** A student in two courses on one portal sees them
   as unrelated sites. Whether that is a problem depends on how many such
   students exist; defer until it is observed.
+- **Scratch ownership across gunicorn workers.** `claim_scratch_dir` (phase 1)
+  is a process-global set, which is the right scope for several `Grader`s in one
+  process and no protection at all across processes. Render runs `gunicorn
+  run:app` with no `--workers` flag (`docs/admin/deploy/render.md:69`), so today
+  there is one worker and the claim holds. But more students on one instance is
+  the point of this work, and `--workers 2` is the obvious response to that --
+  at which point both workers rmtree `cwd/scratch` and both run `init_db`. This
+  is pre-existing, not introduced by phase 1. Phase 2 should make scratch
+  per-course *and* per-process (append the pid, or a per-worker temp root)
+  rather than rely on a lock.
