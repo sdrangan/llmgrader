@@ -1,5 +1,6 @@
 <llmgrader>
   <course>
+    <course_id>ui_test_course</course_id>
     <name>UI Test Course</name>
     <term>Spring 2026</term>
   </course>

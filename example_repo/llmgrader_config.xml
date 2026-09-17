@@ -1,5 +1,10 @@
 <llmgrader>
   <course>
+    <!-- The machine-facing course id: it names this course's directory under
+         the portal's storage, and the course is registered under it once and
+         then keyed by it forever.  Optional, but authoring it means a later
+         edit to <name> cannot silently rename the course. -->
+    <course_id>demo_class</course_id>
     <name>Demo Class</name>
     <semester>Spring 2026</semester>
     <title>LLM Grader for Demo Class</title>

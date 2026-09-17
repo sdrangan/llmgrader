@@ -6,6 +6,27 @@
         <xs:element name="course">
           <xs:complexType>
             <xs:sequence>
+              <!-- Optional machine-facing course identifier.  It names a
+                   directory under <storage>/courses/ and, later, a URL path
+                   segment, so the pattern is deliberately narrow: lowercase
+                   only (two courses must not differ by case alone on a
+                   case-insensitive filesystem), no dots or slashes (rules out
+                   "." and ".." as path segments), alphanumeric first
+                   character, 64 characters at most.
+
+                   Optional for one release: every course package authored
+                   before this field existed must still validate, and the boot
+                   migration in CourseRegistry runs against exactly such a
+                   package.  When it is absent the id is derived once from
+                   <name> + <semester> and recorded in courses.json.
+                   See plans/multicourse.md, decision 3. -->
+              <xs:element name="course_id" minOccurs="0">
+                <xs:simpleType>
+                  <xs:restriction base="xs:token">
+                    <xs:pattern value="[a-z0-9][a-z0-9_-]{0,63}"/>
+                  </xs:restriction>
+                </xs:simpleType>
+              </xs:element>
               <xs:element name="name" type="xs:token"/>
               <xs:choice>
                 <xs:element name="semester" type="xs:token"/>
