@@ -51,6 +51,28 @@ HTTP POST /grade  (APIController, routes/api.py)
   → client polls /grade/<job_id> until job state = completed
 ```
 
+### Portal storage vs. course content
+
+`llmgrader/services/portal_storage.py` holds `PortalStorage`: the half of the
+old `Grader` that is global to a deployed portal rather than to a course -- the
+SQLite path and its `DB_SCHEMA`/`init_db`/`temp_modify_db`/`insert_submission`,
+the `admin-config.json` path, the `soln_images/` path, and the `FIELD_FORMAT`
+display rules for a submission row. `Grader` keeps the course: units,
+`course_info`, the solution package, the scratch directory and the grading
+path, and holds a `PortalStorage` on `self.storage`.
+
+`Grader` still exposes delegating shims (`db_path`, `get_admin_pref_path`,
+`format_db_entry`, ...) because `routes/api.py`, `services/gradetests.py`,
+`tools/replay_submissions.py` and several test modules reach through a grader
+for them. They are labelled as shims in the source; new code should use
+`grader.storage`.
+
+Scratch ownership is decided in `claim_scratch_dir` (`grader.py`) and recorded
+on `Grader.owns_scratch`: the first Grader to claim a directory clears it, later
+ones sharing that path do not. Before the split, every `Grader.__init__`
+rmtree'd unconditionally, so a second instance erased the first's staged
+package. See `plans/multicourse.md` for where this is going.
+
 ### Model registry
 
 `llmgrader/services/models.py` is the single source of truth for the supported model slate. Every model id, price, capability flag and tier default lives there; the front end reads it through `GET /api/models`, and the grader, the CLI tools and the admin allow-list import from it. Add or retire a model by editing that file alone — see `docs/developer/models.md`.
@@ -65,7 +87,7 @@ Tiers (`simple`, `standard`, `complex`) name the **difficulty of the graded prob
 
 `run --gradescope` also lives there: it writes the submission zip a student would have downloaded, built from the graded cases instead of a portal session, so an uploaded autograder can be tested without answering questions by hand. The layout mirrors `downloadSubmission` in `llmgrader/static/js/dashboard.js` entry for entry — the autograder verifies its signature over the exact `results.json` bytes, so both text files are written as bytes rather than in text mode. Everything the submission can be refused for (an ambiguous qtag, a missing `LLMGRADER_PRIVATE_KEY`, an unsafe target directory) is resolved in `plan_gradescope_submission` before any grading call.
 
-Which assertion elements a case may carry depends on the question's `<partial_credit>` mode, which lives in a different file, so `unit_test.xsd` is deliberately permissive and `check` carries roughly half the validation. The runner redirects `LLMGRADER_STORAGE_PATH` to a temp tree -- `Grader.__init__` rmtrees its scratch dir and writes a submission row per grade -- and looks token counts up by the synthetic `session_id` it passes, never by newest row. See `docs/admin/buildcourse/gradetests.md` for the instructor-facing contract.
+Which assertion elements a case may carry depends on the question's `<partial_credit>` mode, which lives in a different file, so `unit_test.xsd` is deliberately permissive and `check` carries roughly half the validation. The runner redirects `LLMGRADER_STORAGE_PATH` to a temp tree -- `Grader.__init__` clears the scratch dir it owns and writes a submission row per grade -- and looks token counts up by the synthetic `session_id` it passes, never by newest row. See `docs/admin/buildcourse/gradetests.md` for the instructor-facing contract.
 
 ### Answering a unit blind
 
