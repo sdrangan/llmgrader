@@ -1681,7 +1681,10 @@ async function gradeCurrentQuestion() {
             && (startData.unit !== currentUnitName || startData.qtag !== qtag || startData.part_label !== selectedPart)
         ) {
             if (liveStatus) {
-                liveStatus.textContent = "Another grading job is already in progress. Please wait for it to finish.";
+                // A 409 is now always this student's own job (the server keys
+                // the check by session), so name it as theirs rather than
+                // leaving them wondering who else is grading.
+                liveStatus.textContent = "Your grading job for a different question is still running. Please wait for it to finish.";
             }
             return;
         }
