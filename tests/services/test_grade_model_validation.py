@@ -4,6 +4,8 @@ from pathlib import Path
 
 import pytest
 
+from conftest import course_path
+
 from llmgrader.app import create_app
 from llmgrader.services.models import DEFAULT_MODEL_SIMPLE
 
@@ -38,7 +40,7 @@ def flask_test_client(tmp_path: Path, pkg_dir: Path, monkeypatch):
 def _post(client, **overrides):
     body = {"unit": "unit1", "qtag": "q1", "student_solution": "42"}
     body.update(overrides)
-    return client.post("/grade", json=body)
+    return client.post(course_path(client, "/grade"), json=body)
 
 
 def test_unknown_model_is_rejected_with_400(flask_test_client) -> None:

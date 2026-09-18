@@ -142,6 +142,14 @@ packages should prefer explicit `<assets>` mappings.
 > automatically). `create_qfile` rewrites `/pkg_assets/...` URLs to local file
 > paths for the generated document.
 
+> **Write `/pkg_assets/...` exactly as shown.** The portal serves assets under
+> the course they belong to -- `/c/<course_id>/pkg_assets/...` -- and adds that
+> prefix itself when it loads your package, so that one course's question can
+> never resolve a figure out of another course's package. Do not write the
+> prefix by hand: the course id is assigned by the portal, and a hard-coded one
+> would break as soon as the package is loaded into a differently-named
+> course.
+
 ---
 
 ## 🧠 `<solution>` Element

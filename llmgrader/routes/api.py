@@ -9,7 +9,7 @@ import time
 import uuid
 from functools import wraps
 from urllib.parse import urlencode
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, g, has_request_context
 from flask import render_template, session, Response, send_from_directory, redirect, url_for
 import sqlite3
 import csv
@@ -49,12 +49,20 @@ class APIController:
 
     # A request with no session cookie cannot be told apart from any other, so
     # those share a single slot -- the conservative choice.  In practice
-    # unreachable: ensure_session_id is a before_request on the same blueprint
-    # that owns /grade.
+    # unreachable: ensure_session_id is a before_request on every blueprint
+    # that owns a /grade route.
     ANONYMOUS_SESSION_KEY = "__no_session__"
 
-    def __init__(self, grader):
-        self.grader = grader
+    def __init__(self, registry):
+        """
+        Parameters
+        ----------
+        registry: CourseRegistry
+            The courses this portal serves.  The controller holds the registry
+            rather than a single Grader because which course a request is for
+            comes from its URL (plans/multicourse.md, decision 5).
+        """
+        self.registry = registry
         self.grade_job_lock = threading.Lock()
         self.grade_jobs = {}
         # session key -> job_id of that session's in-flight grading job.
@@ -86,6 +94,45 @@ class APIController:
     def active_job_ids_locked(self) -> set:
         return set(self.active_job_by_session.values())
 
+    @property
+    def grader(self):
+        """The Grader for the course this request is for.
+
+        Bound by course_bp.before_request from the ``/c/<course_id>/`` path
+        segment, which is the only authority on which course a request means.
+        Off a course route -- the admin pages, analytics, OAuth -- there is no
+        course in the URL and this falls back to the registry default; those
+        routes use the grader only to reach portal-wide storage (the database,
+        the admin preferences file, the image store), which every course
+        shares.
+
+        The exception is /admin/upload, which does load a package into this
+        course.  With one registered course that is the same thing; targeting
+        an admin-chosen course is phase 6.
+        """
+        bound = getattr(g, "grader", None) if has_request_context() else None
+        return bound if bound is not None else self.registry.default_grader()
+
+    @property
+    def course_id(self) -> str | None:
+        """The course id from the request path, or the registry default."""
+        bound = getattr(g, "course_id", None) if has_request_context() else None
+        return bound if bound is not None else self.registry.default_course_id
+
+    def remembered_course_id(self) -> str | None:
+        """Which course to send a bare / to.
+
+        session["course_id"] is a *memory* of the last course this browser
+        visited, used for this redirect and nothing else.  It is never
+        consulted to decide what a request means -- that always comes from the
+        path -- so a stale or tampered value can only land someone on a course
+        listing page, never grade them against the wrong course.
+        """
+        remembered = session.get("course_id")
+        if remembered and self.registry.get(remembered) is not None:
+            return remembered
+        return self.registry.default_course_id
+
     @staticmethod
     def normalize_email(email: str | None) -> str:
         return (email or "").strip().lower()
@@ -111,6 +158,14 @@ class APIController:
             "title": (course.get("title") or "").strip() or "LLM Grader",
             "instructors": (course.get("instructors") or "").strip(),
             "course_id": (getattr(self.grader, "course_id", None) or "").strip(),
+            # Whether this is the course a single-course portal was serving.
+            # The pre-namespacing localStorage key can only hold work for that
+            # course, so only that course may adopt it -- see
+            # migrateLegacyStorage in static/js/app.js.
+            "is_default_course": (
+                (getattr(self.grader, "course_id", None) or "")
+                == (self.registry.default_course_id or "")
+            ),
         }
 
     def auth_mode(self) -> str:
@@ -479,20 +534,98 @@ class APIController:
 
     def register(self, app):
         self.ensure_auth_tables()
-        bp = Blueprint("api", __name__)
 
-        @bp.before_request
+        # Two blueprints, split by whether a route is about *a course* or about
+        # *the portal*.  Course content is served only under /c/<course_id>/,
+        # so there is no unprefixed /units or /pkg_assets left to fall back to
+        # the default course -- which is the whole point: serving another
+        # course's content is a silent failure (a wrong figure, a wrong
+        # question), not an error anyone would notice.
+        #
+        # Admin, analytics and OAuth stay global and unprefixed: the admin
+        # list, the preferences file and the database are portal-wide.
+        bp = Blueprint("api", __name__)
+        course_bp = Blueprint("course", __name__, url_prefix="/c/<course_id>")
+
         def ensure_session_id():
             if "session_id" not in session:
                 session["session_id"] = uuid.uuid4().hex[:8]
 
+        bp.before_request(ensure_session_id)
+        course_bp.before_request(ensure_session_id)
+
+        @course_bp.url_value_preprocessor
+        def pull_course_id(endpoint, values):
+            """Take course_id out of the view arguments and onto g.
+
+            Every view under this blueprint would otherwise have to accept and
+            ignore a course_id parameter.
+            """
+            g.course_id = values.pop("course_id", None)
+
+        @course_bp.url_defaults
+        def add_course_id(endpoint, values):
+            """Let url_for("course.units") work without repeating the course."""
+            if "course_id" not in values and getattr(g, "course_id", None):
+                values["course_id"] = g.course_id
+
+        @course_bp.before_request
+        def bind_course():
+            """Resolve the path's course to a Grader, or 404.
+
+            An unknown id is an error, never a fall back to the default:
+            grading someone against the wrong course silently is worse than an
+            error page.
+            """
+            course_id = getattr(g, "course_id", None)
+            if not course_id or self.registry.get(course_id) is None:
+                return jsonify({"error": f"Unknown course '{course_id}'"}), 404
+
+            g.grader = self.registry.grader_for(course_id)
+            # Remembered for the bare "/" redirect only.  See
+            # remembered_course_id.
+            session["course_id"] = course_id
+
         @bp.get("/")
         def home():
-            return render_template("index.html", banner=self.banner_context())
+            return redirect(url_for("course.course_home", course_id=self.remembered_course_id()))
 
         @bp.get("/dashboard")
         def dashboard():
+            return redirect(url_for("course.course_dashboard", course_id=self.remembered_course_id()))
+
+        @course_bp.get("/")
+        def course_home():
             return render_template("index.html", banner=self.banner_context())
+
+        @course_bp.get("/dashboard")
+        def course_dashboard():
+            return render_template("index.html", banner=self.banner_context())
+
+        @bp.get("/api/courses")
+        def list_courses():
+            """The courses this portal serves, for the File > Select Course picker.
+
+            Built here rather than from banner_context, which returns the two
+            fields the banner needs and is deliberately not a course record.
+            "loaded" distinguishes a registered course whose package has been
+            uploaded from one that is still an empty shell -- a fresh portal
+            registers a course so that an upload has somewhere to land.
+            """
+            entries = []
+            for entry in self.registry.courses():
+                grader = self.registry.grader_for(entry.id)
+                entries.append({
+                    "id": entry.id,
+                    "name": entry.name or entry.id,
+                    "semester": entry.semester or "",
+                    "loaded": bool(getattr(grader, "units", None)),
+                })
+            return jsonify({
+                "courses": entries,
+                "default": self.registry.default_course_id,
+                "current": self.course_id,
+            })
 
         @app.get("/auth/login")
         def google_auth_login():
@@ -591,14 +724,14 @@ class APIController:
         def auth_session():
             return jsonify(self.get_auth_status())
 
-        @bp.post("/chat")
+        @course_bp.post("/chat")
         def chat():
             data = request.json
             msg = data.get("message", "")
             reply = self.llm_client.chat(msg)
             return jsonify({"reply": reply})
 
-        @bp.post("/load_file")
+        @course_bp.post("/load_file")
         def load_file():
             file = request.files.get("file")
             if not file:
@@ -608,7 +741,7 @@ class APIController:
             parsed = self.grader.load_solution_file(text)
             return jsonify(parsed)
 
-        @bp.get("/units")
+        @course_bp.get("/units")
         def units():
             units_order = getattr(self.grader, 'units_order', None)
             payload = units_order if units_order else [{"type": "unit", "name": k} for k in self.grader.units.keys()]
@@ -630,7 +763,7 @@ class APIController:
             payload["preferred_model_resolved"] = preferred_model_for(question, qtag)
             return payload
 
-        @bp.get("/unit/<unit_name>")
+        @course_bp.get("/unit/<unit_name>")
         def unit(unit_name):
             units = self.grader.units
 
@@ -648,7 +781,7 @@ class APIController:
                 "digitalsign": meta.get("digitalsign", False),
             })
 
-        @bp.get("/unit/<unit_name>/<qtag>/solution")
+        @course_bp.get("/unit/<unit_name>/<qtag>/solution")
         @self.require_admin
         def unit_solution(unit_name, qtag):
             units = self.grader.units
@@ -690,8 +823,8 @@ class APIController:
                 "default_model_complex": DEFAULT_MODEL_COMPLEX,
             })
 
-        @bp.post("/grade")
-        @bp.post("/grade/jobs")
+        @course_bp.post("/grade")
+        @course_bp.post("/grade/jobs")
         def start_grade_job():
             data = request.get_json(silent=True) or {}
             session_id = session.get("session_id")
@@ -780,7 +913,7 @@ class APIController:
 
             return jsonify(self.serialize_grade_job(job, include_result=False)), 202
 
-        @bp.get("/grade/jobs/<job_id>")
+        @course_bp.get("/grade/jobs/<job_id>")
         def grade_job_status(job_id):
             with self.grade_job_lock:
                 self.expire_stale_active_jobs_locked()
@@ -798,7 +931,7 @@ class APIController:
 
             return jsonify(payload)
 
-        @bp.post("/reload")
+        @course_bp.post("/reload")
         def reload_units():
             print("In /reload endpoint")
             self.grader.load_unit_pkg()
@@ -807,7 +940,7 @@ class APIController:
                 "validation_alert": getattr(self.grader, 'unit_validation_alert', None),
             })
 
-        @bp.get("/pkg_assets/<path:filename>")
+        @course_bp.get("/pkg_assets/<path:filename>")
         def pkg_assets(filename):
             """Serve static assets (e.g. images) from the uploaded solution package.
 
@@ -1175,7 +1308,7 @@ class APIController:
             images_dir = self.grader.get_soln_images_path()
             return send_from_directory(images_dir, filename)
 
-        @bp.post("/api/sign/<unit_name>")
+        @course_bp.post("/api/sign/<unit_name>")
         def sign_submission(unit_name):
             meta = self.grader.unit_metadata.get(unit_name, {})
             if not meta.get("digitalsign", False):
@@ -1199,3 +1332,4 @@ class APIController:
             return jsonify({"signature": signature})
 
         app.register_blueprint(bp)
+        app.register_blueprint(course_bp)

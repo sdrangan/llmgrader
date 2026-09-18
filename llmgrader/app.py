@@ -30,9 +30,11 @@ def create_app(
     registry = CourseRegistry(soln_pkg=soln_pkg, scratch_dir=scratch_dir)
     app.registry = registry
 
-    # Exactly one course is registered today, so the controller still holds a
-    # single Grader.  Resolving it per request from the URL is phase 5.
-    controller = APIController(registry.default_grader())
+    # The controller holds the registry, not one Grader: which course a
+    # request is for comes from its /c/<course_id>/ path (plans/multicourse.md,
+    # phase 5).
+    controller = APIController(registry)
+    app.api_controller = controller
     controller.register(app)
 
     return app

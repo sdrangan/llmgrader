@@ -9,6 +9,8 @@ from pathlib import Path
 
 import pytest
 
+from conftest import course_path
+
 from llmgrader.app import create_app
 from llmgrader.services.grader import Grader, preferred_model_for
 from llmgrader.services.models import (
@@ -232,7 +234,7 @@ def _model_used(client, monkeypatch, qtag, **overrides):
     try:
         body = {"unit": UNIT, "qtag": qtag, "student_solution": "4"}
         body.update(overrides)
-        resp = client.post("/grade", json=body)
+        resp = client.post(course_path(client, "/grade"), json=body)
         assert resp.status_code == 202, resp.get_json()
     finally:
         monkeypatch.setattr(api_module.APIController, "run_grade_job", original)
@@ -265,7 +267,7 @@ def test_an_unresolvable_preference_falls_back_and_does_not_raise(client, monkey
 
 def test_an_unknown_client_model_is_still_rejected(client) -> None:
     resp = client.post(
-        "/grade",
+        course_path(client, "/grade"),
         json={
             "unit": UNIT,
             "qtag": "q_complex",
@@ -283,7 +285,7 @@ def test_an_unknown_client_model_is_still_rejected(client) -> None:
 # ---------------------------------------------------------------------------
 
 def test_the_unit_payload_carries_raw_and_resolved_preferences(client) -> None:
-    items = client.get(f"/unit/{UNIT}").get_json()["items"]
+    items = client.get(course_path(client, f"/unit/{UNIT}")).get_json()["items"]
 
     assert items["q_complex"]["preferred_model"] == "complex"
     assert items["q_complex"]["preferred_model_resolved"] == DEFAULT_MODEL_COMPLEX
@@ -292,7 +294,7 @@ def test_the_unit_payload_carries_raw_and_resolved_preferences(client) -> None:
 
 
 def test_the_unit_payload_still_hides_the_solution(client) -> None:
-    items = client.get(f"/unit/{UNIT}").get_json()["items"]
+    items = client.get(course_path(client, f"/unit/{UNIT}")).get_json()["items"]
 
     assert "solution" not in items["q_complex"]
     assert "grading_notes" not in items["q_complex"]

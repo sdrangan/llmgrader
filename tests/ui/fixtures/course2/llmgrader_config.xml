@@ -1,0 +1,14 @@
+<llmgrader>
+  <course>
+    <course_id>course2</course_id>
+    <name>Second Test Course</name>
+    <term>Fall 2026</term>
+  </course>
+  <units>
+    <unit>
+      <name>Second Unit</name>
+      <source>second_unit.xml</source>
+      <destination>second_unit.xml</destination>
+    </unit>
+  </units>
+</llmgrader>

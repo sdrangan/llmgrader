@@ -100,6 +100,14 @@ def controller(app, controller_spy) -> APIController:
 
 
 @pytest.fixture()
+def prefix(app) -> str:
+    """``/c/<course_id>``: course content moved under the course blueprint in
+    phase 5 (``plans/multicourse.md``, decision 5), and grading is course
+    content -- it is the course's units and rubrics being graded against."""
+    return f"/c/{app.registry.default_course_id}"
+
+
+@pytest.fixture()
 def gate(monkeypatch, controller):
     blocker = Gate()
     monkeypatch.setattr(Grader, "grade", blocker.grade)
@@ -123,11 +131,11 @@ def gate(monkeypatch, controller):
     raise AssertionError("a grading worker was still in flight at teardown")
 
 
-def wait_for_status(client, job_id: str, wanted: set[str], timeout: float = 3.0) -> dict:
+def wait_for_status(client, prefix: str, job_id: str, wanted: set[str], timeout: float = 3.0) -> dict:
     deadline = time.time() + timeout
     payload = None
     while time.time() < deadline:
-        response = client.get(f"/grade/jobs/{job_id}")
+        response = client.get(f"{prefix}/grade/jobs/{job_id}")
         assert response.status_code == 200, response.get_json()
         payload = response.get_json()
         if payload["status"] in wanted:
@@ -141,35 +149,35 @@ def wait_for_status(client, job_id: str, wanted: set[str], timeout: float = 3.0)
 # ---------------------------------------------------------------------------
 
 
-def test_two_sessions_can_grade_at_the_same_time(app, gate: Gate) -> None:
+def test_two_sessions_can_grade_at_the_same_time(app, prefix, gate: Gate) -> None:
     """The whole point of the phase: one student no longer blocks another."""
     alice, bob = app.test_client(), app.test_client()
-    first = alice.post("/grade/jobs", json=GRADE_BODY)
+    first = alice.post(f"{prefix}/grade/jobs", json=GRADE_BODY)
     assert first.status_code == 202
     assert gate.started.wait(timeout=2.0)
 
     # Alice's job is in flight and deliberately not released.
-    second = bob.post("/grade/jobs", json=GRADE_BODY)
+    second = bob.post(f"{prefix}/grade/jobs", json=GRADE_BODY)
     assert second.status_code == 202, second.get_json()
     assert second.get_json()["job_id"] != first.get_json()["job_id"]
 
     gate.release.set()
 
     for client, response in ((alice, first), (bob, second)):
-        payload = wait_for_status(client, response.get_json()["job_id"], {"done"})
+        payload = wait_for_status(client, prefix, response.get_json()["job_id"], {"done"})
         assert payload["result"] == "pass"
 
     assert gate.calls == 2, "both sessions should have reached the grader"
 
 
-def test_one_session_still_cannot_start_two(app, gate: Gate) -> None:
+def test_one_session_still_cannot_start_two(app, prefix, gate: Gate) -> None:
     """A double-click must not pay for two gradings."""
     alice = app.test_client()
-    first = alice.post("/grade/jobs", json=GRADE_BODY)
+    first = alice.post(f"{prefix}/grade/jobs", json=GRADE_BODY)
     assert first.status_code == 202
     assert gate.started.wait(timeout=2.0)
 
-    second = alice.post("/grade/jobs", json=GRADE_BODY)
+    second = alice.post(f"{prefix}/grade/jobs", json=GRADE_BODY)
     assert second.status_code == 409
     payload = second.get_json()
     assert payload["status"] == "already_running"
@@ -178,23 +186,23 @@ def test_one_session_still_cannot_start_two(app, gate: Gate) -> None:
     assert payload["job_id"] == first.get_json()["job_id"]
 
     gate.release.set()
-    wait_for_status(alice, first.get_json()["job_id"], {"done"})
+    wait_for_status(alice, prefix, first.get_json()["job_id"], {"done"})
 
     assert gate.calls == 1
 
 
-def test_a_session_can_grade_again_once_its_job_finishes(app, gate: Gate) -> None:
+def test_a_session_can_grade_again_once_its_job_finishes(app, prefix, gate: Gate) -> None:
     alice = app.test_client()
-    first = alice.post("/grade/jobs", json=GRADE_BODY)
+    first = alice.post(f"{prefix}/grade/jobs", json=GRADE_BODY)
     assert first.status_code == 202
     gate.release.set()
-    wait_for_status(alice, first.get_json()["job_id"], {"done"})
+    wait_for_status(alice, prefix, first.get_json()["job_id"], {"done"})
 
-    second = alice.post("/grade/jobs", json=GRADE_BODY)
+    second = alice.post(f"{prefix}/grade/jobs", json=GRADE_BODY)
     assert second.status_code == 202, second.get_json()
 
 
-def test_a_failed_job_frees_its_sessions_slot(app, monkeypatch) -> None:
+def test_a_failed_job_frees_its_sessions_slot(app, prefix, monkeypatch) -> None:
     """An exception in the worker must not wedge that student out of grading."""
     def exploding_grade(self, **kwargs):
         raise RuntimeError("provider exploded")
@@ -202,17 +210,17 @@ def test_a_failed_job_frees_its_sessions_slot(app, monkeypatch) -> None:
     monkeypatch.setattr(Grader, "grade", exploding_grade)
 
     alice = app.test_client()
-    first = alice.post("/grade/jobs", json=GRADE_BODY)
+    first = alice.post(f"{prefix}/grade/jobs", json=GRADE_BODY)
     assert first.status_code == 202
-    wait_for_status(alice, first.get_json()["job_id"], {"error"})
+    wait_for_status(alice, prefix, first.get_json()["job_id"], {"error"})
 
-    second = alice.post("/grade/jobs", json=GRADE_BODY)
+    second = alice.post(f"{prefix}/grade/jobs", json=GRADE_BODY)
     assert second.status_code == 202, second.get_json()
 
     # Wait for the retry to settle too.  Leaving a worker in flight lets
     # monkeypatch restore the real Grader.grade underneath it, which then makes
     # a live OpenAI call with the fake key in GRADE_BODY.
-    wait_for_status(alice, second.get_json()["job_id"], {"error"})
+    wait_for_status(alice, prefix, second.get_json()["job_id"], {"error"})
 
 
 # ---------------------------------------------------------------------------
@@ -220,14 +228,14 @@ def test_a_failed_job_frees_its_sessions_slot(app, monkeypatch) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_a_stale_job_is_expired_and_frees_the_slot(app, controller, gate: Gate) -> None:
+def test_a_stale_job_is_expired_and_frees_the_slot(app, prefix, controller, gate: Gate) -> None:
     """A student who closed the tab mid-grade must not hold their slot for good.
 
     The deadline is pushed into the past directly rather than waited out, so
     the test exercises the sweep instead of the clock.
     """
     alice = app.test_client()
-    first = alice.post("/grade/jobs", json=GRADE_BODY)
+    first = alice.post(f"{prefix}/grade/jobs", json=GRADE_BODY)
     assert first.status_code == 202
     assert gate.started.wait(timeout=2.0)
     job_id = first.get_json()["job_id"]
@@ -235,20 +243,20 @@ def test_a_stale_job_is_expired_and_frees_the_slot(app, controller, gate: Gate) 
     with controller.grade_job_lock:
         controller.grade_jobs[job_id]["deadline_ts"] = time.time() - 1.0
 
-    second = alice.post("/grade/jobs", json=GRADE_BODY)
+    second = alice.post(f"{prefix}/grade/jobs", json=GRADE_BODY)
     assert second.status_code == 202, second.get_json()
 
     assert controller.grade_jobs[job_id]["status"] == "timed_out"
     gate.release.set()
 
 
-def test_one_sessions_stale_job_does_not_disturb_another(app, controller, gate: Gate) -> None:
+def test_one_sessions_stale_job_does_not_disturb_another(app, prefix, controller, gate: Gate) -> None:
     """The sweep visits every session, and must time out only the late one."""
     alice, bob = app.test_client(), app.test_client()
-    first = alice.post("/grade/jobs", json=GRADE_BODY)
+    first = alice.post(f"{prefix}/grade/jobs", json=GRADE_BODY)
     assert first.status_code == 202
     assert gate.started.wait(timeout=2.0)
-    second = bob.post("/grade/jobs", json=GRADE_BODY)
+    second = bob.post(f"{prefix}/grade/jobs", json=GRADE_BODY)
     assert second.status_code == 202
 
     stale_id = first.get_json()["job_id"]

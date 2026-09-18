@@ -5,6 +5,8 @@ from pathlib import Path
 
 import pytest
 
+from conftest import course_path
+
 from llmgrader.app import create_app
 from llmgrader.routes.api import APIController
 from llmgrader.services.grader import Grader
@@ -189,7 +191,7 @@ def test_grade_route_passes_session_id(app_factory, monkeypatch, signed_in_email
                 sess["user_name"] = "Student"
 
         start_resp = client.post(
-            "/grade/jobs",
+            course_path(client, "/grade/jobs"),
             json={
                 "unit": "unit1",
                 "qtag": "q1",
@@ -205,7 +207,7 @@ def test_grade_route_passes_session_id(app_factory, monkeypatch, signed_in_email
         deadline = time.time() + 2.0
         final_payload = None
         while time.time() < deadline:
-            status_resp = client.get(f"/grade/jobs/{job_id}")
+            status_resp = client.get(course_path(client, f"/grade/jobs/{job_id}"))
             assert status_resp.status_code == 200
             status_payload = status_resp.get_json()
             if status_payload["status"] == "done":
@@ -248,7 +250,7 @@ def test_grade_job_start_rejects_concurrent_runs(app_factory, monkeypatch):
 
     with app.test_client() as client:
         first_resp = client.post(
-            "/grade/jobs",
+            course_path(client, "/grade/jobs"),
             json={
                 "unit": "unit1",
                 "qtag": "q1",
@@ -261,7 +263,7 @@ def test_grade_job_start_rejects_concurrent_runs(app_factory, monkeypatch):
         assert first_job_started.wait(timeout=1.0)
 
         second_resp = client.post(
-            "/grade/jobs",
+            course_path(client, "/grade/jobs"),
             json={
                 "unit": "unit1",
                 "qtag": "q1",
@@ -308,7 +310,7 @@ def test_grade_job_status_marks_stale_running_job_timed_out(app_factory, monkeyp
 
     with app.test_client() as client:
         start_resp = client.post(
-            "/grade/jobs",
+            course_path(client, "/grade/jobs"),
             json={
                 "unit": "unit1",
                 "qtag": "q1",
@@ -323,7 +325,7 @@ def test_grade_job_status_marks_stale_running_job_timed_out(app_factory, monkeyp
         assert job_started.wait(timeout=1.0)
 
         time.sleep(1.1)
-        status_resp = client.get(f"/grade/jobs/{job_id}")
+        status_resp = client.get(course_path(client, f"/grade/jobs/{job_id}"))
         assert status_resp.status_code == 200
         status_payload = status_resp.get_json()
         assert status_payload["status"] == "timed_out"

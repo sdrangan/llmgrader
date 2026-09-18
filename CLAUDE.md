@@ -136,6 +136,36 @@ definition, which is exactly why the slug fallback exists.
 course, uses the scratch directory it is given verbatim, and writes no registry
 file.
 
+### Course URLs
+
+Course content is served only under `/c/<course_id>/` -- `/units`,
+`/unit/<name>`, `/grade`, `/reload`, `/pkg_assets`, `/api/sign`. Those routes
+live on the `course` blueprint in `routes/api.py`; a `url_value_preprocessor`
+lifts the id onto `g` and a `before_request` resolves it to a `Grader`, or 404s.
+An unknown id is never a fall back to the default: serving the wrong course's
+content is a wrong figure or a wrong question, not an error anyone notices.
+
+`APIController.grader` is a property returning `g.grader` when a course is bound
+and the registry default otherwise, so admin and analytics routes -- which stay
+global and unprefixed, because the admin list, preferences and database are
+portal-wide -- keep reaching portal storage through it.
+
+`session["course_id"]` remembers the last course visited and decides where a
+bare `/` redirects. It is never the authority for a request; that always comes
+from the path.
+
+`UnitParser` rewrites `/pkg_assets/...` in question and solution HTML to
+`/c/<id>/pkg_assets/...` as it parses, after `_extract_solution_images` has
+resolved the unprefixed form off disk. Course authors keep writing the
+unprefixed form.
+
+Student state in the browser is namespaced per course as separate keys --
+`llmgrader_session:<course_id>`, `selectedUnit:<course_id>` -- with a migration
+that adopts the legacy unprefixed key on first load and **leaves it in place**
+for one release. Preferences (`selectedModel`, `gradeTimeout`,
+`openai_api_key`) are deliberately not namespaced: they follow the user across
+courses.
+
 ### Model registry
 
 `llmgrader/services/models.py` is the single source of truth for the supported model slate. Every model id, price, capability flag and tier default lives there; the front end reads it through `GET /api/models`, and the grader, the CLI tools and the admin allow-list import from it. Add or retire a model by editing that file alone — see `docs/developer/models.md`.

@@ -2,6 +2,31 @@
 console.log("UI loaded.");
 
 //
+// ---------------------------
+//  COURSE SCOPING
+// ---------------------------
+//
+// Every request for course content goes to /c/<course_id>/..., and the id
+// comes from the path the page was served on -- never from a stored
+// preference.  index.html renders it into window.LLMGRADER_COURSE_ID
+// (plans/multicourse.md, decision 5).
+//
+// Portal-wide endpoints -- /api/models, /api/auth/session, /api/courses,
+// /admin/* -- stay unprefixed and are fetched as-is.
+const COURSE_ID = (window.LLMGRADER_COURSE_ID || "").trim();
+const IS_DEFAULT_COURSE = window.LLMGRADER_IS_DEFAULT_COURSE === true;
+
+function courseUrl(path) {
+    if (!COURSE_ID) {
+        // No course in the page: only reachable if index.html was rendered
+        // outside a course route.  Sending the bare path lets the server
+        // answer or 404 rather than producing "/c//units".
+        return path;
+    }
+    return `/c/${encodeURIComponent(COURSE_ID)}${path}`;
+}
+
+//
 // GLOBAL STATE
 //
 let currentUnitQtags = [];          // list of qtags
@@ -170,8 +195,55 @@ function initializeModelSelection() {
 // ---------------------------
 //  SESSION STATE PERSISTENCE
 // ---------------------------
+// Saved work is namespaced per course as a SEPARATE key -- not a third level
+// of nesting inside one key -- so one course's state can be cleared without
+// touching another's, and so the quota failure in saveSessionState degrades
+// per course instead of globally (plans/multicourse.md, decision 7).
+const LEGACY_SESSION_KEY = "llmgrader_session";
+const LEGACY_SELECTED_UNIT_KEY = "selectedUnit";
+
+function sessionStateKey() {
+    return COURSE_ID ? `${LEGACY_SESSION_KEY}:${COURSE_ID}` : LEGACY_SESSION_KEY;
+}
+
+function selectedUnitKey() {
+    return COURSE_ID ? `${LEGACY_SELECTED_UNIT_KEY}:${COURSE_ID}` : LEGACY_SELECTED_UNIT_KEY;
+}
+
+// Adopt the pre-namespacing key on first load under a course.
+//
+// Students have real graded work under the legacy key, and losing it on deploy
+// day is the most visible way this change can fail -- for people who have no
+// way to diagnose it.  So copy it across and LEAVE THE LEGACY KEY IN PLACE for
+// one release: a student who loads the old build again (a cached page, a
+// rollback) still finds their work where that build looks for it.
+//
+// Only ever runs when the namespaced key is absent, so it cannot overwrite
+// newer per-course work with a stale copy.
+//
+// And only for the DEFAULT course.  The legacy key was written when the portal
+// served exactly one course, so the work in it belongs to that course and no
+// other.  Without this check, a course added later (phase 6) would adopt the
+// first course's saved work the first time a returning student opened it --
+// and because sessionState is keyed by unit name and qtag, any unit whose name
+// appears in both courses ("Unit 1: Introduction") would show that student
+// their other course's answer.
+function migrateLegacyStorage(storage, legacyKey, scopedKey) {
+    if (!COURSE_ID || !IS_DEFAULT_COURSE || legacyKey === scopedKey) return;
+    try {
+        if (storage.getItem(scopedKey) !== null) return;
+        const legacy = storage.getItem(legacyKey);
+        if (legacy === null) return;
+        storage.setItem(scopedKey, legacy);
+        console.log(`Adopted ${legacyKey} into ${scopedKey}; the legacy key is left in place.`);
+    } catch (e) {
+        console.warn("Could not migrate saved work to the per-course key:", e);
+    }
+}
+
 function loadSessionState() {
-    const stored = localStorage.getItem("llmgrader_session");
+    migrateLegacyStorage(localStorage, LEGACY_SESSION_KEY, sessionStateKey());
+    const stored = localStorage.getItem(sessionStateKey());
     if (stored) {
         try {
             sessionState = JSON.parse(stored);
@@ -187,7 +259,7 @@ function loadSessionState() {
 
 function saveSessionState() {
     try {
-        localStorage.setItem("llmgrader_session", JSON.stringify(sessionState));
+        localStorage.setItem(sessionStateKey(), JSON.stringify(sessionState));
         console.log("Session state saved to localStorage");
     } catch (e) {
         console.warn("Failed to save session state (storage quota may be exceeded):", e);
@@ -880,7 +952,7 @@ function setupAdminDropdowns() {
 
     // Populate units from currentUnitQtags data
     // We'll need to fetch units first
-    fetch("/units").then(r => r.json()).then(payload => {
+    fetch(courseUrl("/units")).then(r => r.json()).then(payload => {
         const items = Array.isArray(payload) ? payload : (payload.items || []);
 
         if (!Array.isArray(items)) {
@@ -941,7 +1013,7 @@ function populateAdminQuestions() {
     if (!unit) return;
 
     // Fetch unit data
-    fetch(`/unit/${unit}`).then(r => r.json()).then(data => {
+    fetch(courseUrl(`/unit/${unit}`)).then(r => r.json()).then(data => {
         qSelect.innerHTML = data.qtags.map(qtag => `<option value="${qtag}">${qtag}</option>`).join("");
 
         // ⭐ ADD THESE TWO LINES
@@ -1071,8 +1143,8 @@ function buildAdminGradingNotesHtml(question) {
 // Admin View: Display selected question with reference solution and grading notes
 function displayAdminQuestion(unit, qtag) {
     Promise.all([
-        fetch(`/unit/${unit}`).then(r => r.json()),
-        fetch(`/unit/${unit}/${qtag}/solution`).then(r => r.json()),
+        fetch(courseUrl(`/unit/${unit}`)).then(r => r.json()),
+        fetch(courseUrl(`/unit/${unit}/${qtag}/solution`)).then(r => r.json()),
     ]).then(([unitData, solnData]) => {
         const q = unitData.items[qtag];
         if (!q) return;
@@ -1166,7 +1238,7 @@ function updateBanner(course) {
 }
 
 async function loadUnits() {
-    const resp = await fetch("/units");
+    const resp = await fetch(courseUrl("/units"));
     const payload = await resp.json();
     const items = Array.isArray(payload) ? payload : (payload.items || []);
 
@@ -1194,7 +1266,8 @@ async function loadUnits() {
     const unitNames = items.filter(i => i.type === "unit").map(i => i.name);
 
     if (unitNames.length > 0) {
-        const savedUnit = sessionStorage.getItem("selectedUnit");
+        migrateLegacyStorage(sessionStorage, LEGACY_SELECTED_UNIT_KEY, selectedUnitKey());
+        const savedUnit = sessionStorage.getItem(selectedUnitKey());
         if (savedUnit && unitNames.includes(savedUnit)) {
             dropdown.value = savedUnit;
             await loadUnit(savedUnit);   // <-- IMPORTANT
@@ -1216,14 +1289,14 @@ async function loadUnits() {
     const unitSelect = dropdown;
     dropdown.onchange = () => {
         if (!dropdown.value) return; // ignore clicks on section separators
-        sessionStorage.setItem("selectedUnit", dropdown.value);
+        sessionStorage.setItem(selectedUnitKey(), dropdown.value);
         currentUnitName = unitSelect.value;
         loadUnit(dropdown.value);
     };
 }
 
 async function loadUnit(unitName) {
-    const resp = await fetch(`/unit/${unitName}`);
+    const resp = await fetch(courseUrl(`/unit/${unitName}`));
     const data = await resp.json();
 
     currentUnitName = unitName;
@@ -1648,7 +1721,7 @@ async function gradeCurrentQuestion() {
     try {
         const sessionData = getSessionData(currentUnitName, qtag);
         const solutionImages = sessionData.solution_images || [];
-        const startResp = await fetch("/grade/jobs", {
+        const startResp = await fetch(courseUrl("/grade/jobs"), {
             method: "POST",
             headers: {"Content-Type": "application/json"},
             body: JSON.stringify({
@@ -1691,7 +1764,7 @@ async function gradeCurrentQuestion() {
 
         const startedAt = Date.now();
         while (true) {
-            const statusResp = await fetch(`/grade/jobs/${encodeURIComponent(jobId)}`);
+            const statusResp = await fetch(courseUrl(`/grade/jobs/${encodeURIComponent(jobId)}`));
             const statusData = await statusResp.json();
 
             if (!statusResp.ok) {
@@ -1802,7 +1875,7 @@ async function gradeCurrentQuestion() {
 async function reloadUnitData() {
     console.log("Reloading all units...");
 
-    const res = await fetch("/reload", { method: "POST" });
+    const res = await fetch(courseUrl("/reload"), { method: "POST" });
     const data = await res.json();
 
     if (data.status === "ok") {
