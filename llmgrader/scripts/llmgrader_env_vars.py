@@ -21,6 +21,10 @@ ENV_VARS = [
     EnvVarSpec("LLMGRADER_STORAGE_PATH"),
     EnvVarSpec("LLMGRADER_PRIVATE_KEY", sensitive=True),
     EnvVarSpec("LLMGRADER_PUBLIC_KEY"),
+    # Read only on the boot where a course is first registered, so this
+    # normally reports MISSING and should.  It matters for exactly one
+    # deploy: the upgrade of a portal whose package predates <course_id>.
+    EnvVarSpec("LLMGRADER_MIGRATE_COURSE_ID"),
 ]
 
 

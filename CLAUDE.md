@@ -97,9 +97,11 @@ lets a second one arrive later without another storage-layout migration.
 **A course id is resolved once and then read.** `<course>` in
 `llmgrader_config.xml` gains an optional `<course_id>`, pattern-constrained in
 `llmgrader_config.xsd` because it becomes a directory name and later a URL path
-segment. When it is absent the id is slugged from `<name>` + `<semester>`.
-Either way it is written to `courses.json` at registration with an `id_source`
-of `authored` or `derived`, and every later boot reads it from there -- so an
+segment. When it is absent the id comes from
+`LLMGRADER_MIGRATE_COURSE_ID` if that is set, and otherwise is slugged from
+`<name>` + `<semester>`. Either way it is written to `courses.json` at
+registration with an `id_source` of `authored`, `env` or `derived`, and every
+later boot reads it from there -- so an
 instructor's typo fix in `<name>` cannot silently rename the course out from
 under its submissions, its storage directory and its saved student state.
 
