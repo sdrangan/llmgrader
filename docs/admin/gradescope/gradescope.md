@@ -55,6 +55,29 @@ If you upload a submission that was not signed, or one whose signature does not 
 
 See [Submission Signing Keys](../setup/gskeys.md) for how to generate keys and configure the environment.
 
+## Checking the course (Optional)
+
+If your portal serves more than one course, a student downloads a file called
+`submission.zip` from each of them. Uploading the wrong one would otherwise be
+graded as if it were the right one, against questions they never answered.
+
+Build the autograder with the course it grades:
+
+```bash
+build_autograder --schema unit1_basic_logic.xml --course-id intro_prob
+```
+
+The id is the `<course_id>` in that course's `llmgrader_config.xml`. You can
+set `LLMGRADER_COURSE_ID` instead of passing the flag.
+
+The autograder then refuses a submission built against a different course and
+tells the student which one they uploaded. Omit both and no course check is
+made, which is the right choice for a portal that serves one course.
+
+Submissions downloaded before this release do not name a course at all. Those
+are accepted with a warning for one release, so nothing a student already has
+in hand stops working.
+
 ---
 
 ## Testing the Autograder

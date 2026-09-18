@@ -317,9 +317,14 @@ function buildResultsJson(unitName, sessionState, unitItems) {
         });
     });
 
+    // course_id sits between output and tests, and services/gradetests.py
+    // writes it in the same place.  Key order is not cosmetic: the autograder
+    // verifies an Ed25519 signature over these exact bytes, so the two writers
+    // have to agree character for character (plans/multicourse.md, decision 8).
     return {
         score: totalScore,
         output: RESULTS_OUTPUT_SUMMARY,
+        course_id: COURSE_ID,
         tests: tests
     };
 }

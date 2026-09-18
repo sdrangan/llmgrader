@@ -45,6 +45,7 @@ import os
 import re
 import shutil
 import sys
+import zipfile
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, asdict
 from datetime import datetime, timezone
@@ -237,6 +238,56 @@ def _pid_is_running(pid: int) -> bool:
     return True
 
 
+class CoursePackageError(Exception):
+    """An uploaded archive that cannot become a course, with a reason to show."""
+
+    def __init__(self, message: str, *, status: int = 400, **extra):
+        super().__init__(message)
+        self.message = message
+        self.status = status
+        self.extra = extra
+
+    def payload(self) -> dict:
+        return {"error": self.message, **self.extra}
+
+
+def extract_archive(archive_path: str, destination: str) -> None:
+    """Unpack *archive_path* into an empty *destination*.
+
+    Raises CoursePackageError rather than letting a zipfile exception reach a
+    route: "not a zip" is something an admin can act on, a traceback is not.
+    """
+    os.makedirs(destination, exist_ok=True)
+    try:
+        with zipfile.ZipFile(archive_path, "r") as archive:
+            archive.extractall(destination)
+    except zipfile.BadZipFile:
+        raise CoursePackageError("Uploaded file is not a valid zip file.")
+    except OSError as exc:
+        raise CoursePackageError(f"Could not read the uploaded archive: {exc}", status=500)
+
+
+def identify_package(package_dir: str) -> tuple[str, str, dict]:
+    """``(course_id, id_source, course_block)`` for an extracted package.
+
+    The identity comes out of the package and nowhere else -- no admin types a
+    name, so a package that disagrees with what the admin believes is a
+    refusal rather than two candidate identities for one course
+    (plans/multicourse.md, decisions 3 and 10).
+    """
+    block = read_course_block(package_dir)
+    course_id, id_source = resolve_course_id(block)
+    return course_id, id_source, block
+
+
+def describe_course(entry: "CourseEntry") -> str:
+    """A course named the way an admin would recognise it, for error text."""
+    parts = [entry.name or entry.id]
+    if entry.semester:
+        parts.append(entry.semester)
+    return f"{', '.join(parts)} ({entry.id})"
+
+
 @dataclass
 class CourseEntry:
     """One row of ``courses.json``."""
@@ -246,15 +297,26 @@ class CourseEntry:
     semester: str
     created_at: str
     id_source: str
+    # When set, the course is archived: hidden from the picker and no longer
+    # routable, with its files and its submission rows left where they are.
+    # Grades are the one thing here that cannot be reconstructed, so dropping a
+    # course never drops them (plans/multicourse.md, decision 10).
+    deleted_at: str | None = None
+
+    @property
+    def deleted(self) -> bool:
+        return bool(self.deleted_at)
 
     @classmethod
     def from_dict(cls, data: dict) -> "CourseEntry":
+        deleted_at = data.get("deleted_at") or None
         return cls(
             id=str(data.get("id", "")),
             name=str(data.get("name", "")),
             semester=str(data.get("semester", "")),
             created_at=str(data.get("created_at", "")),
             id_source=str(data.get("id_source", "")),
+            deleted_at=str(deleted_at) if deleted_at else None,
         )
 
     def to_dict(self) -> dict:
@@ -373,12 +435,33 @@ class CourseRegistry:
     # The registry file
     # ------------------------------------------------------------------
 
-    def courses(self) -> list[CourseEntry]:
-        """Registered courses, in registration order."""
-        return list(self._entries.values())
+    def courses(self, *, include_deleted: bool = False) -> list[CourseEntry]:
+        """Registered courses, in registration order.
 
-    def get(self, course_id: str) -> CourseEntry | None:
-        return self._entries.get(course_id)
+        Archived courses are left out by default: every caller but the admin
+        listing wants the courses this portal actually serves.
+        """
+        entries = list(self._entries.values())
+        if include_deleted:
+            return entries
+        return [entry for entry in entries if not entry.deleted]
+
+    def get(self, course_id: str, *, include_deleted: bool = False) -> CourseEntry | None:
+        """The entry for *course_id*, or None.
+
+        An archived course reads as absent, which is what makes it stop being
+        routable: routes/api.py resolves the path's id through here, so a
+        deleted course 404s by the same rule an unknown one does.
+        """
+        entry = self._entries.get(course_id)
+        if entry is None:
+            return None
+        if entry.deleted and not include_deleted:
+            return None
+        return entry
+
+    def live_ids(self) -> list[str]:
+        return [entry.id for entry in self.courses()]
 
     @property
     def default_course_id(self) -> str | None:
@@ -406,8 +489,18 @@ class CourseRegistry:
             return False
 
         self._entries = {entry.id: entry for entry in entries}
+
+        # The default must name a course that is still served.  A registry
+        # whose default points at an archived course would send every student
+        # arriving at "/" to a 404.
+        live = [entry.id for entry in entries if not entry.deleted]
+        if not live:
+            print(f"[CourseRegistry] Every course in {path} is archived; ignoring the file.")
+            self._entries = {}
+            return False
+
         default_id = data.get("default")
-        self._default_id = default_id if default_id in self._entries else entries[0].id
+        self._default_id = default_id if default_id in live else live[0]
         return True
 
     def _write_registry_file(self) -> None:
@@ -464,6 +557,192 @@ class CourseRegistry:
             id_source=id_source,
             make_default=make_default,
         )
+
+    # ------------------------------------------------------------------
+    # Course management (admin)
+    # ------------------------------------------------------------------
+
+    def staging_dir(self, purpose: str) -> str:
+        """A scratch directory for an archive that has not been accepted yet.
+
+        Under the courses root rather than the system temp dir so the move into
+        place stays on one filesystem: os.replace across devices fails, and a
+        copy-then-delete would not be atomic.
+        """
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%f")
+        path = os.path.join(self.courses_root(), f".staging-{purpose}-{stamp}")
+        os.makedirs(path, exist_ok=True)
+        return path
+
+    def add_course_from_archive(self, archive_path: str) -> CourseEntry:
+        """Register a new course from an uploaded package. Raises CoursePackageError.
+
+        Add Course is an upload, not a form: the server reads <course> out of
+        the archive and mints the id from it, so an admin never types a name
+        that could disagree with the XML (decision 10).
+        """
+        if not self.uses_registry_file:
+            raise CoursePackageError(
+                "This portal is serving a single package from the command line, so "
+                "courses cannot be added through the admin page. Restart without "
+                "--soln_pkg to use the course registry.",
+                status=409,
+            )
+
+        staging = self.staging_dir("add")
+        try:
+            extract_archive(archive_path, staging)
+            course_id, id_source, block = identify_package(staging)
+
+            existing = self.get(course_id, include_deleted=True)
+            if existing is not None:
+                # Refuse and name what is already there.  Creating a second
+                # course under one id is not representable, and quietly
+                # updating the existing one is not what "Add" was asked to do.
+                raise CoursePackageError(
+                    f"A course with id '{course_id}' already exists: "
+                    f"{describe_course(existing)}. Use Load Course Package to update it "
+                    "instead of adding it again.",
+                    status=409,
+                    course_id=course_id,
+                    existing_course=existing.to_dict(),
+                )
+
+            target = os.path.join(self.course_dir(course_id), "soln_pkg")
+            if os.path.exists(target):
+                raise CoursePackageError(
+                    f"{target} already exists on disk but no course is registered for it. "
+                    "Restart the portal so the registry can recover it, or move the "
+                    "directory aside.",
+                    status=409,
+                )
+
+            os.makedirs(os.path.dirname(target), exist_ok=True)
+            shutil.move(staging, target)
+            staging = None
+
+            entry = self.register(
+                course_id=course_id,
+                name=block.get("name", ""),
+                semester=block.get("semester", ""),
+                id_source=id_source,
+            )
+            print(f"[CourseRegistry] Added course '{course_id}' from an uploaded package")
+            return entry
+        finally:
+            if staging and os.path.isdir(staging):
+                shutil.rmtree(staging, ignore_errors=True)
+
+    def archive_course(self, course_id: str) -> CourseEntry:
+        """Stop serving a course, keeping its files and its grades.
+
+        Not a delete: ``deleted_at`` is stamped on the registry entry and
+        nothing else moves.  Submission rows keep the course's id, so the
+        grades stay queryable in Analytics and the course can be brought back
+        by hand.  Hard deletion is deliberately not built here (decision 10).
+        """
+        entry = self.get(course_id, include_deleted=True)
+        if entry is None:
+            raise CoursePackageError(f"Unknown course '{course_id}'.", status=404)
+        if entry.deleted:
+            raise CoursePackageError(
+                f"{describe_course(entry)} is already archived.", status=409
+            )
+
+        remaining = [other for other in self.courses() if other.id != course_id]
+        if not remaining:
+            # default_grader() would have nothing to return, and every student
+            # would meet a 404 at "/".  Refuse rather than brick the portal.
+            raise CoursePackageError(
+                "This is the only course on the portal. Add another course before "
+                "archiving this one.",
+                status=409,
+            )
+
+        entry.deleted_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        self._graders.pop(course_id, None)
+        if self._default_id == course_id:
+            self._default_id = remaining[0].id
+        self._write_registry_file()
+        print(f"[CourseRegistry] Archived course '{course_id}' (files and grades kept)")
+        return entry
+
+    def adopt_authored_id(self, placeholder_id: str, archive_path: str) -> CourseEntry | None:
+        """Re-key a placeholder course to the id its first package authors.
+
+        A portal that boots with nothing uploaded registers a course anyway, so
+        an upload has somewhere to land -- with the fallback id "default" and
+        ``id_source="fallback"``.  Because ids are never re-derived, that
+        placeholder would otherwise become permanent for the first real course
+        on every fresh portal: in its URLs, in submissions.course_id, and in
+        every student's localStorage key.
+
+        This is safe exactly because the course is a placeholder.  A portal
+        with no package cannot have graded anything, so there is nothing filed
+        under the old id and no student state to migrate -- which is what makes
+        this a re-registration rather than the three-store rename decision 10
+        declines to build.  The submission count is checked rather than
+        assumed.
+
+        Returns the new entry, or None when there is nothing to adopt.
+        """
+        entry = self.get(placeholder_id, include_deleted=True)
+        if entry is None or entry.id_source != ID_SOURCE_FALLBACK:
+            return None
+        if not self.uses_registry_file:
+            return None
+
+        staging = self.staging_dir("identify")
+        try:
+            extract_archive(archive_path, staging)
+            new_id, id_source, block = identify_package(staging)
+        finally:
+            shutil.rmtree(staging, ignore_errors=True)
+
+        if not new_id or new_id == placeholder_id or id_source == ID_SOURCE_FALLBACK:
+            return None
+        if self.get(new_id, include_deleted=True) is not None:
+            # Another course already owns that id; leave the placeholder alone
+            # and let the caller's mismatch guard report it.
+            return None
+
+        graded = self.storage.count_submissions_for_course(placeholder_id)
+        if graded:
+            # Should be unreachable -- a placeholder has no package to grade
+            # against -- but re-keying with rows filed under the old id would
+            # orphan grades silently, so it stops here instead.
+            print(
+                f"[CourseRegistry] Not adopting '{new_id}': {graded} submission row(s) "
+                f"are already filed under '{placeholder_id}'."
+            )
+            return None
+
+        old_dir = self.course_dir(placeholder_id)
+        new_dir = self.course_dir(new_id)
+        if os.path.isdir(old_dir):
+            if os.path.exists(new_dir):
+                return None
+            shutil.move(old_dir, new_dir)
+
+        was_default = self._default_id == placeholder_id
+        self._entries.pop(placeholder_id, None)
+        self._graders.pop(placeholder_id, None)
+        new_entry = CourseEntry(
+            id=new_id,
+            name=block.get("name", ""),
+            semester=block.get("semester", ""),
+            created_at=entry.created_at,
+            id_source=id_source,
+        )
+        self._entries[new_id] = new_entry
+        if was_default or self._default_id is None:
+            self._default_id = new_id
+        self._write_registry_file()
+        print(
+            f"[CourseRegistry] Adopted authored id '{new_id}' for the placeholder "
+            f"course '{placeholder_id}'"
+        )
+        return new_entry
 
     # ------------------------------------------------------------------
     # Boot

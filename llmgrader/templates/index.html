@@ -124,6 +124,7 @@
     <div class="menu-group view-menu" role="none" data-view="admin">
         <button class="menu-button" role="menuitem" aria-haspopup="true" aria-expanded="false">Admin</button>
         <div class="menu-dropdown" role="menu">
+            <button class="menu-item" role="menuitem" type="button" id="manage-courses-menu-item">Manage Courses…</button>
             <button class="menu-item" role="menuitem" type="button" id="load-course-menu-item">Load Course Package…</button>
             <button class="menu-item" role="menuitem" type="button" disabled>Save Unit Package... (future)</button>
             <button class="menu-item" role="menuitem" type="button" disabled>Edit Questions... (future)</button>
@@ -288,12 +289,49 @@
     <div class="modal-dialog">
         <h2>Load Course Package</h2>
         <div class="modal-content">
+            <label for="load-course-target">Load into course</label>
+            <select id="load-course-target" style="width:100%;"></select>
+            <div style="font-size:0.85em; opacity:0.8; margin-top:6px;">
+                The package must be for the course you choose. Every archive is called
+                soln_package.zip, so a package for a different course is refused rather
+                than loaded.
+            </div>
+        </div>
+        <div class="modal-content">
             <label for="course-package-file">Select Course Package (.zip)</label>
             <input id="course-package-file" type="file" accept=".zip">
         </div>
+        <div id="load-course-error" class="modal-content" style="display:none; color:#b00020;"></div>
         <div class="modal-buttons">
             <button id="load-course-btn" class="modal-btn modal-btn-primary">Load</button>
             <button id="load-course-cancel-btn" class="modal-btn">Cancel</button>
+        </div>
+    </div>
+</div>
+
+<!-- Manage Courses Modal.  Add is an upload, not a form: the package carries
+     <name>, <semester> and usually <course_id>, so nothing here asks the admin
+     to type an identity that could disagree with the XML. -->
+<div id="manage-courses-modal" class="modal-overlay" style="display: none;">
+    <div class="modal-dialog">
+        <h2>Manage Courses</h2>
+        <div class="modal-content">
+            <div id="manage-courses-message" style="font-size:0.9em; opacity:0.8;">Loading courses…</div>
+            <table id="manage-courses-table" style="width:100%; border-collapse:collapse;">
+                <tbody id="manage-courses-body"></tbody>
+            </table>
+        </div>
+        <div class="modal-content">
+            <label for="add-course-file">Add a course from a package (.zip)</label>
+            <input id="add-course-file" type="file" accept=".zip">
+            <div style="font-size:0.85em; opacity:0.8; margin-top:6px;">
+                The course name and id are read from the package. Nothing to type.
+            </div>
+        </div>
+        <div id="manage-courses-error" class="modal-content" style="display:none; color:#b00020;"></div>
+        <div class="modal-buttons">
+            <button id="add-course-btn" class="modal-btn modal-btn-primary">Add Course</button>
+            <button id="manage-courses-close-btn" class="modal-btn">Close</button>
         </div>
     </div>
 </div>
