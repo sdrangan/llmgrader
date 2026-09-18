@@ -1003,6 +1003,26 @@ class UnitParser:
 
         return groups
 
+    def _scope_pkg_asset_urls(self, html: str) -> str:
+        """Prefix ``/pkg_assets/`` URLs in served HTML with this course.
+
+        Question and solution HTML carry ``/pkg_assets/<path>`` image URLs that
+        the browser fetches back.  Unprefixed, they resolve against whichever
+        course the server happens to look up -- so course A's figure can be
+        served out of course B's package, silently and as a wrong picture
+        rather than an error (plans/multicourse.md, decision 6).
+
+        Done here rather than in the front end because there is one parser and
+        several renderers, and because it keeps the HTML the server sends
+        self-contained.
+
+        No course id (a loose unit file, the authoring tools) leaves the URLs
+        alone: there is nothing to scope them to.
+        """
+        if not html or not self.course_id or "/pkg_assets/" not in html:
+            return html
+        return html.replace("/pkg_assets/", f"/c/{self.course_id}/pkg_assets/")
+
     @staticmethod
     def _extract_solution_images(solution_html: str, soln_pkg_path: str, xml_path: str, log) -> list[str]:
         """Extract images from solution HTML and return them as base64 data URIs.
@@ -1211,7 +1231,12 @@ class UnitParser:
 
                         solution_elem = question.find("solution")
                         solution = clean_cdata(solution_elem.text if solution_elem is not None else "")
+                        # Extract first: the extractor resolves the unprefixed
+                        # /pkg_assets/ form against the package on disk, and it
+                        # has no business knowing about URLs.
                         solution_images = self._extract_solution_images(solution, soln_pkg_path, xml_path, log)
+                        solution = self._scope_pkg_asset_urls(solution)
+                        question_text = self._scope_pkg_asset_urls(question_text)
 
                         grading_notes_elem = question.find("grading_notes")
                         grading_notes = clean_cdata(grading_notes_elem.text if grading_notes_elem is not None else "")

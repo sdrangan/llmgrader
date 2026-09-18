@@ -7,6 +7,8 @@ only accessible to admins via the dedicated solution endpoint.
 import pytest
 from pathlib import Path
 
+from conftest import course_path
+
 from llmgrader.app import create_app
 from llmgrader.services.grader import Grader
 
@@ -53,7 +55,7 @@ def app_with_units(tmp_path: Path, monkeypatch):
 
 def test_unit_endpoint_strips_solution_fields(app_with_units):
     with app_with_units.test_client() as client:
-        resp = client.get("/unit/unit1")
+        resp = client.get(course_path(client, "/unit/unit1"))
         assert resp.status_code == 200
         data = resp.get_json()
         q = data["items"]["q1"]
@@ -64,7 +66,7 @@ def test_unit_endpoint_strips_solution_fields(app_with_units):
 
 def test_unit_endpoint_preserves_non_sensitive_fields(app_with_units):
     with app_with_units.test_client() as client:
-        resp = client.get("/unit/unit1")
+        resp = client.get(course_path(client, "/unit/unit1"))
         assert resp.status_code == 200
         data = resp.get_json()
         q = data["items"]["q1"]
@@ -77,14 +79,14 @@ def test_unit_endpoint_preserves_non_sensitive_fields(app_with_units):
 def test_solution_endpoint_requires_admin(app_with_units, monkeypatch):
     monkeypatch.setenv("LLMGRADER_AUTH_MODE", "normal")
     with app_with_units.test_client() as client:
-        resp = client.get("/unit/unit1/q1/solution")
+        resp = client.get(course_path(client, "/unit/unit1/q1/solution"))
         assert resp.status_code == 403
 
 
 def test_solution_endpoint_returns_data_for_admin(app_with_units, monkeypatch):
     monkeypatch.setenv("LLMGRADER_AUTH_MODE", "dev-open")
     with app_with_units.test_client() as client:
-        resp = client.get("/unit/unit1/q1/solution")
+        resp = client.get(course_path(client, "/unit/unit1/q1/solution"))
         assert resp.status_code == 200
         data = resp.get_json()
         assert data["solution"] == "<p>The answer is 4.</p>"
@@ -95,12 +97,12 @@ def test_solution_endpoint_returns_data_for_admin(app_with_units, monkeypatch):
 def test_solution_endpoint_returns_404_for_unknown_unit(app_with_units, monkeypatch):
     monkeypatch.setenv("LLMGRADER_AUTH_MODE", "dev-open")
     with app_with_units.test_client() as client:
-        resp = client.get("/unit/nonexistent/q1/solution")
+        resp = client.get(course_path(client, "/unit/nonexistent/q1/solution"))
         assert resp.status_code == 404
 
 
 def test_solution_endpoint_returns_404_for_unknown_qtag(app_with_units, monkeypatch):
     monkeypatch.setenv("LLMGRADER_AUTH_MODE", "dev-open")
     with app_with_units.test_client() as client:
-        resp = client.get("/unit/unit1/nonexistent/solution")
+        resp = client.get(course_path(client, "/unit/unit1/nonexistent/solution"))
         assert resp.status_code == 404

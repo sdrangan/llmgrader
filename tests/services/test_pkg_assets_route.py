@@ -5,6 +5,8 @@ from pathlib import Path
 
 import pytest
 
+from conftest import course_path
+
 from llmgrader.app import create_app
 
 
@@ -45,17 +47,17 @@ def flask_test_client(tmp_path: Path, pkg_dir: Path, monkeypatch):
 
 
 def test_pkg_assets_returns_image(flask_test_client, pkg_dir: Path) -> None:
-    resp = flask_test_client.get("/pkg_assets/unit1_good_images/circuit.png")
+    resp = flask_test_client.get(course_path(flask_test_client, "/pkg_assets/unit1_good_images/circuit.png"))
     assert resp.status_code == 200
     assert resp.data.startswith(b"\x89PNG")
 
 
 def test_pkg_assets_returns_404_for_missing_file(flask_test_client) -> None:
-    resp = flask_test_client.get("/pkg_assets/unit1_good_images/nonexistent.png")
+    resp = flask_test_client.get(course_path(flask_test_client, "/pkg_assets/unit1_good_images/nonexistent.png"))
     assert resp.status_code == 404
 
 
 def test_pkg_assets_blocks_directory_traversal(flask_test_client) -> None:
     # Flask's send_from_directory raises 404 (or 400) for path traversal
-    resp = flask_test_client.get("/pkg_assets/../../../etc/passwd")
+    resp = flask_test_client.get(course_path(flask_test_client, "/pkg_assets/../../../etc/passwd"))
     assert resp.status_code in (400, 404)

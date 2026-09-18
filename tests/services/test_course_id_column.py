@@ -419,6 +419,7 @@ def test_the_served_course_id_reaches_the_page(tmp_path: Path, monkeypatch) -> N
     app = create_app(scratch_dir=str(scratch), soln_pkg=str(LEGACY_PACKAGE))
     app.config["TESTING"] = True
 
-    html = app.test_client().get("/").get_data(as_text=True)
+    # "/" now redirects into the course rather than rendering it, so follow it.
+    html = app.test_client().get("/", follow_redirects=True).get_data(as_text=True)
 
     assert f'window.LLMGRADER_COURSE_ID = "{LEGACY_COURSE_ID}"' in html

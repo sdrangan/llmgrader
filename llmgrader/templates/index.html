@@ -61,6 +61,7 @@
                     <button class="menu-item" role="menuitem" type="button" data-view="analytics" id="switch-view-analytics-item">Analytics</button>
                 </div>
             </div>
+            <button class="menu-item" role="menuitem" type="button" id="select-course-menu-item">Select Course…</button>
             <button class="menu-item" role="menuitem" type="button" id="preferences-menu-item">Preferences…</button>
         </div>
     </div>
@@ -216,6 +217,21 @@
         <div class="modal-buttons">
             <button id="preferences-save-btn" class="modal-btn modal-btn-primary">Save</button>
             <button id="preferences-cancel-btn" class="modal-btn">Cancel</button>
+        </div>
+    </div>
+</div>
+
+<!-- Course picker.  Switching course is a navigation, not a setting: it goes
+     to /c/<id>/, so the URL is shareable and two tabs can hold two courses. -->
+<div id="select-course-modal" class="modal-overlay" style="display: none;">
+    <div class="modal-dialog">
+        <h2>Select Course</h2>
+        <div class="modal-content">
+            <div id="select-course-message" style="font-size:0.9em; opacity:0.8;">Loading courses…</div>
+            <div id="select-course-list" role="list"></div>
+        </div>
+        <div class="modal-buttons">
+            <button id="select-course-cancel-btn" class="modal-btn">Cancel</button>
         </div>
     </div>
 </div>

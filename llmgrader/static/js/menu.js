@@ -222,6 +222,93 @@ function initializeMenuSystem() {
         });
     })();
 
+    // ---------------------------------------------------------------
+    //  Course picker
+    // ---------------------------------------------------------------
+    //
+    // Switching course is a navigation, not a setting: it goes to /c/<id>/, so
+    // the URL is shareable and two tabs can hold two courses.  The list comes
+    // from /api/courses, which is portal-wide and therefore unprefixed.
+    var selectCourseMenuItem = document.getElementById('select-course-menu-item');
+    var selectCourseModal = document.getElementById('select-course-modal');
+    var selectCourseList = document.getElementById('select-course-list');
+    var selectCourseMessage = document.getElementById('select-course-message');
+    var selectCourseCancelBtn = document.getElementById('select-course-cancel-btn');
+
+    function renderCourseList(payload) {
+        var courses = (payload && payload.courses) || [];
+        selectCourseList.innerHTML = '';
+
+        if (!courses.length) {
+            selectCourseMessage.textContent = 'No courses are registered on this portal.';
+            return;
+        }
+
+        selectCourseMessage.textContent = courses.length === 1
+            ? 'This portal serves one course.'
+            : 'Choose a course. The page will reload into it.';
+
+        courses.forEach(function (course) {
+            var isCurrent = course.id === payload.current;
+            var button = document.createElement('button');
+            button.type = 'button';
+            button.className = 'menu-item';
+            button.setAttribute('role', 'listitem');
+            button.dataset.courseId = course.id;
+            button.style.display = 'block';
+            button.style.width = '100%';
+            button.style.textAlign = 'left';
+
+            var label = course.name || course.id;
+            if (course.semester) label += ' — ' + course.semester;
+            if (!course.loaded) label += '  (no package loaded)';
+            if (isCurrent) label = '✓ ' + label;
+            button.textContent = label;
+
+            if (isCurrent) {
+                button.disabled = true;
+                button.setAttribute('aria-current', 'true');
+            } else {
+                button.addEventListener('click', function () {
+                    // A full navigation, not a fetch: the course in the path is
+                    // what every subsequent request is scoped by, and the page
+                    // reads it back out of window.LLMGRADER_COURSE_ID.
+                    window.location.href = '/c/' + encodeURIComponent(course.id) + '/';
+                });
+            }
+            selectCourseList.appendChild(button);
+        });
+    }
+
+    function openCoursePicker() {
+        if (!selectCourseModal) return;
+        selectCourseList.innerHTML = '';
+        selectCourseMessage.textContent = 'Loading courses…';
+        selectCourseModal.style.display = 'flex';
+
+        fetch('/api/courses')
+            .then(function (resp) {
+                if (!resp.ok) throw new Error('GET /api/courses failed: ' + resp.status);
+                return resp.json();
+            })
+            .then(renderCourseList)
+            .catch(function (err) {
+                console.error('Could not load the course list:', err);
+                selectCourseMessage.textContent = 'Could not load the course list.';
+            });
+    }
+
+    if (selectCourseMenuItem) {
+        selectCourseMenuItem.addEventListener('click', function () {
+            openCoursePicker();
+        });
+    }
+    if (selectCourseCancelBtn) {
+        selectCourseCancelBtn.addEventListener('click', function () {
+            selectCourseModal.style.display = 'none';
+        });
+    }
+
     // Preferences modal functionality
     var preferencesMenuItem = document.getElementById('preferences-menu-item');
     var settingsGearBtn = document.getElementById('settings-gear-btn');

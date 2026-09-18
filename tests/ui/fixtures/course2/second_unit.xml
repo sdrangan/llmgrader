@@ -1,0 +1,52 @@
+<unit id="second_unit" title="Second Unit" version="1.0">
+  <question qtag="s1">
+    <question_text><![CDATA[
+    <p>What is the capital of France?</p>
+    ]]></question_text>
+    <solution><![CDATA[
+    <p>Paris.</p>
+    ]]></solution>
+    <grading_notes><![CDATA[
+    Accept Paris in any capitalisation.
+    ]]></grading_notes>
+    <required>true</required>
+    <partial_credit>false</partial_credit>
+    <rubrics>
+      <item id="names_paris" condition_type="positive" action="fail">
+        <display_text>Names Paris</display_text>
+        <condition>Student names Paris as the capital.</condition>
+      </item>
+    </rubrics>
+    <parts>
+      <part>
+        <part_label>all</part_label>
+        <points>1</points>
+      </part>
+    </parts>
+  </question>
+  <question qtag="s2">
+    <question_text><![CDATA[
+    <p>What is 10 divided by 2?</p>
+    ]]></question_text>
+    <solution><![CDATA[
+    <p>5.</p>
+    ]]></solution>
+    <grading_notes><![CDATA[
+    Accept the value 5.
+    ]]></grading_notes>
+    <required>true</required>
+    <partial_credit>false</partial_credit>
+    <rubrics>
+      <item id="correct_quotient" condition_type="positive" action="fail">
+        <display_text>Correct quotient</display_text>
+        <condition>Student gives 5.</condition>
+      </item>
+    </rubrics>
+    <parts>
+      <part>
+        <part_label>all</part_label>
+        <points>1</points>
+      </part>
+    </parts>
+  </question>
+</unit>

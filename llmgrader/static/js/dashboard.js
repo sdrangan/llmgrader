@@ -200,7 +200,7 @@ async function loadDashboardUnit(unitName) {
     if (!unitName) return;
 
     try {
-        const response = await fetch(`/unit/${unitName}`);
+        const response = await fetch(courseUrl(`/unit/${unitName}`));
         const data = await response.json();
 
         const tableBody = document.getElementById('dashboard-table-body');
@@ -362,7 +362,7 @@ async function downloadSubmission() {
     }
 
     try {
-        const response = await fetch(`/unit/${unitName}`);
+        const response = await fetch(courseUrl(`/unit/${unitName}`));
         const data = await response.json();
         if (!data.items) {
             alert('No question data found for this unit.');
@@ -386,7 +386,7 @@ async function downloadSubmission() {
         zip.file('results.txt', resultsTxt);
 
         if (data.digitalsign) {
-            const signResp = await fetch(`/api/sign/${unitName}`, {
+            const signResp = await fetch(courseUrl(`/api/sign/${unitName}`), {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ results_json: resultsJsonStr }),
