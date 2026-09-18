@@ -332,3 +332,24 @@ def test_grade_job_status_marks_stale_running_job_timed_out(app_factory, monkeyp
         assert "timed out" in status_payload["error"]
 
         release_job.set()
+
+
+def test_dev_open_mode_reports_admin_to_the_client(monkeypatch, app_factory):
+    """The client must not disable what the server will serve.
+
+    require_admin short-circuits on dev-open, so every /admin route is open in
+    that mode.  Reporting is_admin false anyway left the front end holding the
+    Admin menu aria-disabled -- and a dialog reachable only through that menu
+    unusable -- in the one mode that exists for working without OAuth.
+    """
+    monkeypatch.setenv("LLMGRADER_AUTH_MODE", "dev-open")
+    create, _db_path = app_factory
+    client = create().test_client()
+
+    status = client.get("/api/auth/session").get_json()
+
+    assert status["auth_mode"] == "dev-open"
+    assert status["is_admin"] is True
+    # Nobody is signed in: dev-open grants the capability, not an identity.
+    assert status["authenticated"] is False
+    assert status["user"] is None

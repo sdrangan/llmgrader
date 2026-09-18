@@ -293,9 +293,14 @@ class APIController:
     def get_auth_status(self) -> dict:
         user = self.current_user()
         oauth_ready = self.oauth_config() is not None
+        # dev-open means "no auth": require_admin lets every /admin route
+        # through regardless of who is asking.  Reporting is_admin false here
+        # anyway left the client disabling menu items the server would have
+        # served -- so the Admin menu, and everything only reachable through
+        # it, was unusable in the one mode meant for working without OAuth.
         return {
             "authenticated": user is not None,
-            "is_admin": bool(user and user.get("is_admin")),
+            "is_admin": bool(user and user.get("is_admin")) or self.is_dev_open_mode(),
             "user": {
                 "email": user.get("email"),
                 "name": user.get("name"),
