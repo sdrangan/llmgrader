@@ -25,3 +25,4 @@ Once you are ready to deploy the grader on a public render portal follow the fol
 
 - [Deploying on render](./render.md)
 - [Google sign-in and admin access](../setup/oauth.md)
+- [Serving several courses from one portal](./courses.md)

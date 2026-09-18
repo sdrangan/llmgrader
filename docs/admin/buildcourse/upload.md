@@ -60,16 +60,18 @@ Then, select **File->Admin->Load course package...**.
 
 Steps:
 
-1. Click **Choose File**  
-2. Select `soln_package.zip`  
-3. Click **Load**
+1. Choose the **course** to load into
+2. Click **Choose File**
+3. Select `soln_package.zip`
+4. Click **Load**
 
 The grader will:
 
-- delete the previous solution package directory  
-- extract the new ZIP  
-- load `llmgrader_config.xml`  
-- validate and load all units  
+- check that the package is for the course you chose
+- extract the new ZIP to a temporary directory
+- load `llmgrader_config.xml`
+- validate and load all units
+- replace the course's previous package, but only once the new one has loaded  
 - display a confirmation message
 
 If any XML is malformed or missing, the upload will fail with a descriptive error.
@@ -80,11 +82,40 @@ If any XML is malformed or missing, the upload will fail with a descriptive erro
 
 After a successful upload:
 
-- The package is extracted into the grader’s persistent storage  
-- Units are reloaded immediately  
-- The admin UI displays the course name and number of units  
+- The package is extracted into the grader’s persistent storage
+- Units are reloaded immediately
+- The admin UI displays the course name and number of units
 
 This means you can update course content at any time without redeploying the application.
+
+---
+
+## If the Upload Is Refused
+
+The grader refuses an upload rather than half-applying it, and in every case
+**the course keeps serving what it served before**.
+
+**"This package is for a different course."**  The package's
+[`<course_id>`](./pkgconfig.md#the-course-id) does not match the course you
+selected, and the message names both. Because `create_soln_pkg` names every
+archive `soln_package.zip`, an instructor running two courses has two
+identically named files — this check is what stops one course's content
+replacing another's. Either you picked the wrong file, or you picked the wrong
+target course, or the package belongs to a course that does not exist yet and
+should be created with **Add Course**.
+
+**A validation or extraction error.**  A corrupt ZIP, a missing file listed in
+the configuration, or a unit that fails schema validation. The package is
+parsed in a temporary directory before anything is replaced, so the error is
+reported and the live course is untouched. Fix the package and upload again.
+
+---
+
+## Serving More Than One Course
+
+One portal can host several courses, each with its own units, students' saved
+work and submissions. Creating, updating and archiving them is covered in
+[Serving several courses from one portal](../deploy/courses.md).
 
 
 

@@ -13,6 +13,37 @@ Before using the LLM grader, you will need to [register an OpenAI API key](./ope
 Your instructor should provide you with the URL where they have deployed the class. Typically, this website is on `render.com`. For example, the Introduction to Hardware Design class at NYU uses this [render web portal](https://llmgrader-e6o7.onrender.com/).
 
 
+## Selecting a Course
+
+One portal can serve more than one course.  The course you are working in is
+part of the web address, after `/c/`:
+
+```
+https://your-class.onrender.com/c/hwdesign/
+```
+
+If your instructor runs only one course on their portal, there is nothing to
+do here — opening the portal's address sends you straight to it, and you can
+skip to the next section.
+
+To move between courses, select **File → Select Course…**.  The course you are
+currently in is ticked and cannot be re-selected; choosing another one reloads
+the page into it.  If the menu lists only one course, you are already in it.
+
+Two things worth knowing:
+
+- **Your saved work is kept separately for each course.** Answers, grades and
+  feedback in one course are not visible from another, and switching between
+  them never mixes them up.  Saved work lives in your own browser — see
+  [Saving and Loading Your Work](#saving-and-loading-your-work).
+- **A bookmark to a question includes the course.**  Sharing that link with a
+  classmate sends them to the same course you were in.
+
+If you bookmarked the portal before your instructor added a second course, your
+old bookmark still works: it takes you to the portal, which forwards you to the
+course you were last using.
+
+
 ## Grade View
 Once you have set the OpenAI API key and a course URL, go to the **Grade View** where you'll spend most of your time.  To open it, select **File → Switch View → Grade**.  In this view, you can read the question, write your answer, and get instant feedback from the LLM grader.
 No mystery, no hidden steps — just a clean loop of *try → grade → improve*.
