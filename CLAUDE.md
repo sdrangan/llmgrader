@@ -67,6 +67,21 @@ path, and holds a `PortalStorage` on `self.storage`.
 for them. They are labelled as shims in the source; new code should use
 `grader.storage`.
 
+**`PortalStorage` must not import `CourseRegistry`.** It knows nothing about
+courses, which is what lets every course share one. The single place a course
+id appears is `backfill_course_id(course_id)`, and it appears as an argument:
+the registry calls down with the default it has settled on.
+
+**Schema changes are idempotent by shape; data migrations are not.**
+`init_db` and `temp_modify_db` are safe to re-run because every statement is
+`IF NOT EXISTS` or guarded by `PRAGMA table_info`. A data migration such as
+"stamp every NULL `course_id` with the default course" is right exactly once,
+so it is recorded in the `portal_migrations` table and skipped afterwards.
+`WHERE course_id IS NULL` alone would not do: a Grader built without a course
+(`llmgrader_test`, the replay tool) writes NULL deliberately, and a later boot
+must not adopt those rows. A database created fresh from `DB_SCHEMA` is marked
+as needing no backfill at creation, since no row in it can predate the column.
+
 Scratch ownership is decided in `claim_scratch_dir` (`grader.py`) and recorded
 on `Grader.owns_scratch`: the first Grader to claim a directory clears it, later
 ones sharing that path do not. Before the split, every `Grader.__init__`
@@ -74,6 +89,13 @@ rmtree'd unconditionally, so a second instance erased the first's staged
 package. That set is process-global, so it guards several Graders in one
 process and says nothing about a second gunicorn worker -- which is why the
 scratch path itself carries the pid, below.
+
+`submissions.course_id` is written by the grading path from `Grader.course_id`
+and is nullable. The Analytics default query (`static/js/analytics.js`) filters
+on it, reading the served course from `window.LLMGRADER_COURSE_ID`, which
+`index.html` emits from `banner_context()` -- the view builds its query as it
+opens and cannot wait on a round trip. `/admin/dbviewer/schema` reads columns
+live from the database, so it picked the new column up unchanged.
 
 ### Course registry
 

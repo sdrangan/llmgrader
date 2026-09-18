@@ -66,11 +66,18 @@ class APIController:
 
         Falls back to the built-in title when no package is loaded yet, so a
         fresh install still renders a sensible banner.
+
+        ``course_id`` rides along so index.html can hand the served course's id
+        to the front end without a second round trip; the Analytics view needs
+        it synchronously to build its default query.  It is not a course
+        *list* -- the picker in phase 5 builds its own payload from the
+        registry rather than stretching this helper.
         """
         course = getattr(self.grader, "course_info", None) or {}
         return {
             "title": (course.get("title") or "").strip() or "LLM Grader",
             "instructors": (course.get("instructors") or "").strip(),
+            "course_id": (getattr(self.grader, "course_id", None) or "").strip(),
         }
 
     def auth_mode(self) -> str:

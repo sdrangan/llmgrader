@@ -47,12 +47,7 @@ function initializeAnalyticsView() {
     }
 
     // First time only: set default query and run it
-    sqlInput.value = `
-SELECT id, timestamp, unit_name, qtag, result, model
-FROM submissions
-ORDER BY id DESC
-LIMIT 20
-`.trim();
+    sqlInput.value = defaultAnalyticsQuery();
 
     runAnalyticsQuery();
     analyticsState.initializedOnce = true;
@@ -107,6 +102,35 @@ function clearAnalyticsResults() {
     const table = document.getElementById("analytics-results-table");
     table.querySelector("thead").innerHTML = "";
     table.querySelector("tbody").innerHTML = "";
+}
+
+// The course id pattern from llmgrader_config.xsd, mirrored here.  The value
+// is interpolated into SQL text, so it is checked rather than trusted even
+// though the server minted it: anything that fails this is dropped and the
+// query simply spans every course.
+const COURSE_ID_PATTERN = /^[a-z0-9][a-z0-9_-]{0,63}$/;
+
+function currentCourseId() {
+    const id = (window.LLMGRADER_COURSE_ID || "").trim();
+    return COURSE_ID_PATTERN.test(id) ? id : "";
+}
+
+// The query the box opens with.  Scoped to the course being served, because
+// submissions from every course share one table -- an unscoped default would
+// quietly report another course's numbers once there is a second one.  Rows
+// that predate the column are stamped with the default course on boot, and a
+// row written outside a course keeps course_id NULL, so neither hides here by
+// accident.  The clause is plain SQL in an editable box: widen it to all
+// courses by deleting the WHERE line.
+function defaultAnalyticsQuery() {
+    const courseId = currentCourseId();
+    const where = courseId ? `\nWHERE course_id = '${courseId}'` : "";
+    return `
+SELECT id, timestamp, course_id, unit_name, qtag, result, model
+FROM submissions${where}
+ORDER BY id DESC
+LIMIT 20
+`.trim();
 }
 
 // --- Column reference -----------------------------------------------------

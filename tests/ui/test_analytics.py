@@ -45,6 +45,25 @@ def test_analytics_default_query_preloaded(page, live_server):
     )
 
 
+def test_analytics_default_query_is_scoped_to_the_course(page, live_server):
+    """The default query names course_id and filters by the course being served.
+
+    Submissions from every course share one table, so an unscoped default
+    would quietly report another course's numbers once there is a second one.
+    This exercises the whole chain: the served course's id reaches index.html,
+    analytics.js builds the WHERE clause from it, and the box opens with it.
+    The fixture package authors <course_id>ui_test_course</course_id>.
+    """
+    ap = AnalyticsPage(page)
+    ap.navigate(live_server)
+    sql = ap.sql_input.input_value()
+
+    assert "course_id" in sql, f"Expected course_id in the default query, got: {sql!r}"
+    assert "WHERE course_id = 'ui_test_course'" in sql, (
+        f"Expected the default query scoped to the served course, got: {sql!r}"
+    )
+
+
 def test_analytics_default_query_runs_without_error(page, live_server):
     """The default query completes without showing an error."""
     ap = AnalyticsPage(page)

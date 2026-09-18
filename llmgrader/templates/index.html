@@ -12,6 +12,13 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='css/analytics.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/admin.css') }}">
     <script>
+    // The course this page is serving.  Emitted server-side rather than
+    // fetched, because the Analytics view builds its default query the moment
+    // the view opens and cannot wait on a round trip.  Exactly one course
+    // exists today; phase 5 puts it in the URL instead.
+    window.LLMGRADER_COURSE_ID = {{ (banner.course_id if banner else '') | tojson }};
+    </script>
+    <script>
     window.MathJax = {
       tex: {
         inlineMath: [['\\(', '\\)']],
