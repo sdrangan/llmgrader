@@ -44,6 +44,7 @@ import json
 import os
 import re
 import shutil
+import sys
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, asdict
 from datetime import datetime, timezone
@@ -143,10 +144,49 @@ def resolve_course_id(course_block: dict) -> tuple[str, str]:
     return FALLBACK_COURSE_ID, ID_SOURCE_FALLBACK
 
 
+# Win32 constants for the liveness probe below.
+_WIN_ERROR_ACCESS_DENIED = 5
+_WIN_PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+
+
+def _pid_is_running_windows(pid: int) -> bool:
+    """Whether *pid* exists, via OpenProcess.
+
+    ``os.kill(pid, 0)`` is not a liveness probe on Windows.  For a pid that no
+    longer exists it raises ``OSError(WinError 87)`` rather than
+    ``ProcessLookupError``, so the POSIX branch below reads every dead process
+    as alive and nothing is ever pruned.  Worse, ``os.kill`` on Windows is
+    implemented with ``TerminateProcess``, so it is the wrong tool to reach for
+    here even when it appears to work.
+    """
+    import ctypes
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    handle = kernel32.OpenProcess(
+        _WIN_PROCESS_QUERY_LIMITED_INFORMATION, False, pid
+    )
+    if handle:
+        kernel32.CloseHandle(handle)
+        return True
+
+    # Access denied means the process exists and belongs to someone else --
+    # alive, and not ours to clean up after.  Anything else (87, "invalid
+    # parameter") means there is no such process.
+    return ctypes.get_last_error() == _WIN_ERROR_ACCESS_DENIED
+
+
 def _pid_is_running(pid: int) -> bool:
-    """Whether *pid* still exists, for pruning abandoned scratch trees."""
+    """Whether *pid* still exists, for pruning abandoned scratch trees.
+
+    Errs towards "alive" when it cannot tell: leaving a stale scratch tree
+    behind costs disk, deleting a live one corrupts a running worker.
+    """
     if pid <= 0:
         return False
+
+    if sys.platform == "win32":
+        return _pid_is_running_windows(pid)
+
     try:
         os.kill(pid, 0)
     except ProcessLookupError:

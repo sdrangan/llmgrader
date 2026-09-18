@@ -2,6 +2,8 @@
 
 from playwright.sync_api import Page
 
+from .view_ready import switch_to_view
+
 
 class AdminPage:
     def __init__(self, page: Page):
@@ -16,7 +18,7 @@ class AdminPage:
 
     def navigate(self, base_url: str, timeout: int = 8_000) -> None:
         self._page.goto(base_url)
-        self._page.evaluate("window.loadView('admin')")
+        switch_to_view(self._page, "admin", timeout=timeout)
         self.view.wait_for(state="visible", timeout=timeout)
 
     def wait_for_units_loaded(self, timeout: int = 10_000) -> None:

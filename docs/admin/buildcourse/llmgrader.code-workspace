@@ -1,0 +1,14 @@
+{
+	"folders": [
+		{
+			"path": "../../.."
+		},
+		{
+			"path": "../../../../hwdesign-soln"
+		},
+		{
+			"path": "../../../../hwdesign"
+		}
+	],
+	"settings": {}
+}

@@ -2,6 +2,8 @@
 
 from playwright.sync_api import Page
 
+from .view_ready import switch_to_view
+
 
 class DashboardPage:
     def __init__(self, page: Page):
@@ -14,5 +16,5 @@ class DashboardPage:
 
     def navigate(self, base_url: str, timeout: int = 8_000) -> None:
         self._page.goto(base_url)
-        self._page.evaluate("window.loadView('dashboard')")
+        switch_to_view(self._page, "dashboard", timeout=timeout)
         self.view.wait_for(state="visible", timeout=timeout)
