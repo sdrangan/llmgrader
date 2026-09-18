@@ -289,3 +289,44 @@ def test_analytics_still_loads_from_inside_a_course(page, live_server):
 
     sql = page.locator("#analytics-sql-input").input_value()
     assert f"WHERE course_id = '{COURSE2_ID}'" in sql
+
+
+def test_a_non_default_course_does_not_adopt_the_legacy_work(
+    page_with_legacy_state, live_server
+):
+    """The legacy key belongs to the course the portal used to serve, alone.
+
+    Before this check, any course adopted it: the key is only ever read when
+    the namespaced one is absent, and for a course added later that is always
+    true the first time a returning student opens it.  Because sessionState is
+    keyed by unit name and qtag, a unit name shared between two courses --
+    "Unit 1: Introduction" is not a stretch -- would then show that student
+    their *other* course's answer, pre-filled, with no way to tell where it
+    came from.
+
+    The two fixture courses use different unit names, so a regression here
+    would be inert in this suite's own UI -- which is why the assertion reads
+    the storage key directly rather than looking for the work on screen.
+    """
+    page = page_with_legacy_state
+    page.goto(f"{live_server}/c/{COURSE2_ID}/")
+    page.wait_for_selector('body[data-active-view="grade"]')
+
+    adopted = page.evaluate(
+        f"localStorage.getItem('llmgrader_session:{COURSE2_ID}')"
+    )
+    assert adopted is None, (
+        f"course2 adopted the default course's saved work: {adopted!r}"
+    )
+
+    # The legacy key itself is untouched, so the default course can still
+    # adopt it whenever that student goes back.
+    legacy = page.evaluate("localStorage.getItem('llmgrader_session')")
+    assert json.loads(legacy) == LEGACY_SESSION
+
+    page.goto(f"{live_server}/c/{COURSE1_ID}/")
+    page.wait_for_selector('body[data-active-view="grade"]')
+    default_key = page.evaluate(
+        f"localStorage.getItem('llmgrader_session:{COURSE1_ID}')"
+    )
+    assert default_key is not None, "the default course must still adopt it"

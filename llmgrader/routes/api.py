@@ -158,6 +158,14 @@ class APIController:
             "title": (course.get("title") or "").strip() or "LLM Grader",
             "instructors": (course.get("instructors") or "").strip(),
             "course_id": (getattr(self.grader, "course_id", None) or "").strip(),
+            # Whether this is the course a single-course portal was serving.
+            # The pre-namespacing localStorage key can only hold work for that
+            # course, so only that course may adopt it -- see
+            # migrateLegacyStorage in static/js/app.js.
+            "is_default_course": (
+                (getattr(self.grader, "course_id", None) or "")
+                == (self.registry.default_course_id or "")
+            ),
         }
 
     def auth_mode(self) -> str:

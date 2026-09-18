@@ -14,6 +14,7 @@ console.log("UI loaded.");
 // Portal-wide endpoints -- /api/models, /api/auth/session, /api/courses,
 // /admin/* -- stay unprefixed and are fetched as-is.
 const COURSE_ID = (window.LLMGRADER_COURSE_ID || "").trim();
+const IS_DEFAULT_COURSE = window.LLMGRADER_IS_DEFAULT_COURSE === true;
 
 function courseUrl(path) {
     if (!COURSE_ID) {
@@ -219,8 +220,16 @@ function selectedUnitKey() {
 //
 // Only ever runs when the namespaced key is absent, so it cannot overwrite
 // newer per-course work with a stale copy.
+//
+// And only for the DEFAULT course.  The legacy key was written when the portal
+// served exactly one course, so the work in it belongs to that course and no
+// other.  Without this check, a course added later (phase 6) would adopt the
+// first course's saved work the first time a returning student opened it --
+// and because sessionState is keyed by unit name and qtag, any unit whose name
+// appears in both courses ("Unit 1: Introduction") would show that student
+// their other course's answer.
 function migrateLegacyStorage(storage, legacyKey, scopedKey) {
-    if (!COURSE_ID || legacyKey === scopedKey) return;
+    if (!COURSE_ID || !IS_DEFAULT_COURSE || legacyKey === scopedKey) return;
     try {
         if (storage.getItem(scopedKey) !== null) return;
         const legacy = storage.getItem(legacyKey);
