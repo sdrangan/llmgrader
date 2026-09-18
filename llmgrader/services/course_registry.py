@@ -67,8 +67,18 @@ COURSE_ID_MAX_LEN = 64
 # did before this change.
 FALLBACK_COURSE_ID = "default"
 
+# One-time escape hatch for an existing portal being upgraded.  Its package
+# predates <course_id>, so without this the id is slugged from <name> and
+# <semester> -- and that slug is then permanent, in the URL, in
+# submissions.course_id and in every student's localStorage key.  Setting this
+# once at the upgrade deploy names the course properly instead.  It is read
+# only when a course is first registered; afterwards courses.json wins and the
+# variable can be removed.
+MIGRATE_COURSE_ID_ENV = "LLMGRADER_MIGRATE_COURSE_ID"
+
 # How the id in courses.json was arrived at.
 ID_SOURCE_AUTHORED = "authored"   # <course_id> in the package
+ID_SOURCE_ENV = "env"             # LLMGRADER_MIGRATE_COURSE_ID at first boot
 ID_SOURCE_DERIVED = "derived"     # slug of <name> + <semester>
 ID_SOURCE_FALLBACK = "fallback"   # no readable package at registration
 ID_SOURCE_RECOVERED = "recovered"  # read back off <storage>/courses/ after a lost registry
@@ -123,16 +133,44 @@ def read_course_block(soln_pkg_path: str) -> dict:
     }
 
 
+def course_id_from_env() -> str | None:
+    """A valid ``LLMGRADER_MIGRATE_COURSE_ID``, or None.
+
+    An invalid value is ignored with a warning rather than raising: this is
+    read on the boot path of a live portal, and a typo in an env var must not
+    be the reason a course fails to come back up.
+    """
+    value = (os.environ.get(MIGRATE_COURSE_ID_ENV) or "").strip()
+    if not value:
+        return None
+    if not COURSE_ID_PATTERN.match(value):
+        print(
+            f"[CourseRegistry] Ignoring {MIGRATE_COURSE_ID_ENV}={value!r}: "
+            f"must match {COURSE_ID_PATTERN.pattern}"
+        )
+        return None
+    return value
+
+
 def resolve_course_id(course_block: dict) -> tuple[str, str]:
     """Return ``(course_id, id_source)`` for a package's ``<course>`` block.
 
-    Authored ``<course_id>`` first, then a slug of ``<name>`` + ``<semester>``,
-    then the fallback id.  Callers use this exactly once per course -- at
-    registration -- and read ``courses.json`` afterwards.
+    Authored ``<course_id>`` first, then ``LLMGRADER_MIGRATE_COURSE_ID``, then
+    a slug of ``<name>`` + ``<semester>``, then the fallback id.  Callers use
+    this exactly once per course -- at registration -- and read
+    ``courses.json`` afterwards.
+
+    The env var sits *below* an authored id on purpose.  A package that names
+    itself is the authority (decision 3); the env var exists for the packages
+    that predate ``<course_id>`` and so have no way to say what they are.
     """
     authored = (course_block or {}).get("course_id", "").strip()
     if authored and COURSE_ID_PATTERN.match(authored):
         return authored, ID_SOURCE_AUTHORED
+
+    from_env = course_id_from_env()
+    if from_env:
+        return from_env, ID_SOURCE_ENV
 
     derived = slugify_course_id(
         (course_block or {}).get("name", ""),
@@ -449,12 +487,15 @@ class CourseRegistry:
 
         # Nothing to migrate, nothing to recover: a portal booting empty.  It
         # still gets one course, so that an upload has somewhere to land --
-        # exactly what <storage>/soln_pkg was before this change.
+        # exactly what <storage>/soln_pkg was before this change.  A fresh
+        # portal can name that course up front with the same env var an
+        # upgrading one uses, rather than living with "default" forever.
+        from_env = course_id_from_env()
         self.register(
-            course_id=FALLBACK_COURSE_ID,
+            course_id=from_env or FALLBACK_COURSE_ID,
             name="",
             semester="",
-            id_source=ID_SOURCE_FALLBACK,
+            id_source=ID_SOURCE_ENV if from_env else ID_SOURCE_FALLBACK,
             make_default=True,
         )
 
@@ -489,9 +530,12 @@ class CourseRegistry:
 
         The deployed portal has exactly this tree and must come back up with
         its course intact and no admin action.  Its package predates
-        ``<course_id>`` by definition, so the id is derived from ``<name>`` +
-        ``<semester>`` here and recorded -- after which it is never derived
-        again.
+        ``<course_id>`` by definition, so the id comes from
+        ``LLMGRADER_MIGRATE_COURSE_ID`` when it is set and otherwise from a
+        slug of ``<name>`` + ``<semester>`` -- and is then recorded, after
+        which it is never derived again.  This is the only moment at which
+        that env var has any effect, which is why an upgrade is the time to
+        set it.
 
         Returns the migrated entry, or None when there was nothing to migrate.
         """

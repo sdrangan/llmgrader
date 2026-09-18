@@ -21,7 +21,13 @@ from pathlib import Path
 
 import pytest
 
-from llmgrader.services.course_registry import ID_SOURCE_DERIVED, CourseRegistry
+from llmgrader.services.course_registry import (
+    ID_SOURCE_AUTHORED,
+    ID_SOURCE_DERIVED,
+    ID_SOURCE_ENV,
+    MIGRATE_COURSE_ID_ENV,
+    CourseRegistry,
+)
 from llmgrader.services.portal_storage import PortalStorage
 
 LEGACY_PACKAGE = Path(__file__).resolve().parents[2] / "soln_repos"
@@ -136,3 +142,69 @@ def test_a_stray_legacy_directory_never_overwrites_a_live_registry(
     assert registry.migrate_legacy_layout() is None
     assert (legacy_storage / "soln_pkg" / "llmgrader_config.xml").exists()
     assert registry.default_grader().units
+
+
+# ---------------------------------------------------------------------------
+# LLMGRADER_MIGRATE_COURSE_ID -- naming the course at the upgrade deploy
+# ---------------------------------------------------------------------------
+#
+# Without it the live portal's id is slugged from display text, and that slug
+# is permanent: it goes into the URL, into submissions.course_id and into every
+# student's localStorage key, and changing it later is a three-store migration.
+# The deployed package cannot author a <course_id> -- it predates the field --
+# so the upgrade deploy is the only chance to name the course properly.
+
+
+def test_env_var_names_the_migrated_course(legacy_storage: Path, monkeypatch) -> None:
+    monkeypatch.setenv(MIGRATE_COURSE_ID_ENV, "hwdesign")
+
+    registry = CourseRegistry()
+
+    assert registry.default_course_id == "hwdesign"
+    assert registry.get("hwdesign").id_source == ID_SOURCE_ENV
+    # The display name still comes from the package; only the id is overridden.
+    assert registry.get("hwdesign").name == "Demo Class"
+    assert (legacy_storage / "courses" / "hwdesign" / "soln_pkg").is_dir()
+    assert not (legacy_storage / "courses" / LEGACY_COURSE_ID).exists()
+
+
+def test_env_var_is_read_once_and_then_ignored(legacy_storage: Path, monkeypatch) -> None:
+    """Once recorded, courses.json wins -- so the var can be left set or removed."""
+    monkeypatch.setenv(MIGRATE_COURSE_ID_ENV, "hwdesign")
+    CourseRegistry()
+
+    monkeypatch.setenv(MIGRATE_COURSE_ID_ENV, "something_else_entirely")
+    registry = CourseRegistry()
+
+    assert registry.default_course_id == "hwdesign"
+    assert not (legacy_storage / "courses" / "something_else_entirely").exists()
+
+
+def test_an_authored_course_id_beats_the_env_var(legacy_storage: Path, monkeypatch) -> None:
+    """A package that names itself is the authority; the var is for ones that cannot."""
+    config = legacy_storage / "soln_pkg" / "llmgrader_config.xml"
+    config.write_text(
+        config.read_text(encoding="utf-8").replace(
+            "<course>", "<course>\n    <course_id>authored_id</course_id>", 1
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv(MIGRATE_COURSE_ID_ENV, "hwdesign")
+
+    registry = CourseRegistry()
+
+    assert registry.default_course_id == "authored_id"
+    assert registry.get("authored_id").id_source == ID_SOURCE_AUTHORED
+
+
+def test_an_invalid_env_var_is_ignored_rather_than_fatal(
+    legacy_storage: Path, monkeypatch, capsys
+) -> None:
+    """A typo in an env var must not stop a live portal coming back up."""
+    monkeypatch.setenv(MIGRATE_COURSE_ID_ENV, "Not A Valid Id")
+
+    registry = CourseRegistry()
+
+    assert registry.default_course_id == LEGACY_COURSE_ID
+    assert registry.get(LEGACY_COURSE_ID).id_source == ID_SOURCE_DERIVED
+    assert MIGRATE_COURSE_ID_ENV in capsys.readouterr().out

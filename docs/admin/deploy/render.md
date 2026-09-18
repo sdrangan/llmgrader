@@ -111,6 +111,7 @@ Add these variables:
 | `PYTHON_VERSION` | `3.12.3` | Update with python version |
 | `LLMGRADER_STORAGE_PATH` | /var/data/| Root for persistent storage |  
 | `LLMGRADER_PRIVATE_KEY` | (generated value) | Optional — required only if using [submission signing](../setup/gskeys.md) |
+| `LLMGRADER_MIGRATE_COURSE_ID` | `hwdesign` | Optional — names the course on the **first** boot after upgrading an existing portal; see below |
 
 Example values for a Render deployment might look like this:
 
@@ -170,7 +171,7 @@ Uploads and course content remain intact because they live on the persistent dis
 If you ever need to reset the grader:
 
 - SSH into the instance (Render Shell)  
-- Remove the contents of `/var/data/soln_repo`  
+- Remove the contents of `/var/data/soln_pkg`  
 - Or delete and recreate the disk from the dashboard  
 
 This does **not** affect your code deployment.
@@ -180,3 +181,34 @@ Once you are deployed, you can [upload the course package](../buildcourse/upload
 ---
 
 Go to [Google sign-in and admin access](../setup/oauth.md)
+
+---
+
+## 🆔 Naming your course on an upgrade
+
+A portal deployed before multi-course support stores its package at
+`/var/data/soln_pkg`, with no course id anywhere. The first boot after the
+upgrade moves that package to `/var/data/courses/<course_id>/soln_pkg` and
+records the id, once.
+
+If you do nothing, the id is built from your `<name>` and `<semester>` — so
+a course named `ECE-GY 9483 Hardware Design` for `Spring 2026` becomes
+`ece-gy-9483-hardware-design-spring-2026`. That id is then permanent: it
+appears in the course's URL, in every stored submission and in each student's
+saved work in their browser, and changing it later means migrating all three.
+
+To choose it instead, set this **before the upgrade deploy**:
+
+```text
+LLMGRADER_MIGRATE_COURSE_ID = hwdesign
+```
+
+It must be lowercase letters, digits, `_` or `-`, up to 64 characters. An
+invalid value is ignored with a message in the deploy log rather than failing
+the boot.
+
+The variable is read only when a course is first registered. Once
+`/var/data/courses/courses.json` exists it is ignored entirely, so you can
+safely leave it set or delete it afterwards. A package that declares its own
+`<course_id>` always wins over it — see
+[the package configuration file](../buildcourse/pkgconfig.md).
