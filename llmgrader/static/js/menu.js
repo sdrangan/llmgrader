@@ -564,6 +564,175 @@ function initializeMenuSystem() {
     window.refreshAuthState = refreshAuthState;
     refreshAuthState();
 
+    // ---------------------------------------------------------------
+    //  Manage Courses
+    // ---------------------------------------------------------------
+    //
+    // Add is an upload: the server reads <course> out of the package and mints
+    // the id from it, so an admin never types a name that could disagree with
+    // the XML (plans/multicourse.md, decision 10).  Delete archives -- the
+    // package and every grade stay -- because grades are the one thing on this
+    // portal that cannot be reconstructed.
+    var manageCoursesMenuItem = document.getElementById('manage-courses-menu-item');
+    var manageCoursesModal = document.getElementById('manage-courses-modal');
+    var manageCoursesBody = document.getElementById('manage-courses-body');
+    var manageCoursesMessage = document.getElementById('manage-courses-message');
+    var manageCoursesError = document.getElementById('manage-courses-error');
+    var manageCoursesCloseBtn = document.getElementById('manage-courses-close-btn');
+    var addCourseFile = document.getElementById('add-course-file');
+    var addCourseBtn = document.getElementById('add-course-btn');
+
+    function showManageCoursesError(message) {
+        if (!manageCoursesError) return;
+        manageCoursesError.textContent = message || '';
+        manageCoursesError.style.display = message ? 'block' : 'none';
+    }
+
+    function courseRowLabel(course) {
+        var label = course.name || course.id;
+        if (course.semester) label += ' \u2014 ' + course.semester;
+        label += ' (' + course.id + ')';
+        if (course.is_default) label += '  \u2605 default';
+        if (!course.loaded && !course.deleted_at) label += '  \u2014 no package loaded';
+        if (course.deleted_at) label += '  \u2014 archived';
+        return label;
+    }
+
+    function renderManageCourses(payload) {
+        var courses = (payload && payload.courses) || [];
+        manageCoursesBody.innerHTML = '';
+        manageCoursesMessage.textContent = courses.length
+            ? 'Archiving a course stops serving it. Its package and its grades are kept.'
+            : 'No courses are registered on this portal.';
+
+        var liveCount = courses.filter(function (c) { return !c.deleted_at; }).length;
+
+        courses.forEach(function (course) {
+            var row = document.createElement('tr');
+            row.dataset.courseId = course.id;
+
+            var label = document.createElement('td');
+            label.textContent = courseRowLabel(course);
+            label.style.padding = '4px 8px 4px 0';
+            if (course.deleted_at) label.style.opacity = '0.6';
+            row.appendChild(label);
+
+            var count = document.createElement('td');
+            count.textContent = course.submissions + ' graded';
+            count.style.padding = '4px 8px';
+            count.style.whiteSpace = 'nowrap';
+            count.style.opacity = '0.8';
+            row.appendChild(count);
+
+            var actions = document.createElement('td');
+            actions.style.textAlign = 'right';
+            if (!course.deleted_at) {
+                var archiveBtn = document.createElement('button');
+                archiveBtn.type = 'button';
+                archiveBtn.className = 'modal-btn';
+                archiveBtn.textContent = 'Archive';
+                archiveBtn.dataset.archiveCourseId = course.id;
+                // The last live course cannot be archived: there would be no
+                // default left, and every student would meet a 404 at "/".
+                archiveBtn.disabled = liveCount <= 1;
+                archiveBtn.addEventListener('click', function () {
+                    archiveCourse(course);
+                });
+                actions.appendChild(archiveBtn);
+            }
+            row.appendChild(actions);
+
+            manageCoursesBody.appendChild(row);
+        });
+    }
+
+    async function refreshManageCourses() {
+        if (!manageCoursesBody) return;
+        manageCoursesBody.innerHTML = '';
+        manageCoursesMessage.textContent = 'Loading courses...';
+        try {
+            var resp = await fetch('/api/admin/courses');
+            if (!resp.ok) throw new Error('GET /api/admin/courses failed: ' + resp.status);
+            renderManageCourses(await resp.json());
+        } catch (err) {
+            console.error('Could not load the course list:', err);
+            manageCoursesMessage.textContent = 'Could not load the course list.';
+        }
+    }
+
+    async function archiveCourse(course) {
+        var name = course.name || course.id;
+        var confirmed = window.confirm(
+            'Archive ' + name + '?'
+            + '\n\nIt stops being served and leaves the course picker. '
+            + 'Its package and its ' + course.submissions + ' graded submission(s) are kept, '
+            + 'so this can be undone by hand.'
+        );
+        if (!confirmed) return;
+
+        showManageCoursesError('');
+        try {
+            var resp = await fetch('/api/admin/courses/' + encodeURIComponent(course.id), {
+                method: 'DELETE'
+            });
+            if (!resp.ok) {
+                var err = await resp.json().catch(function () { return {}; });
+                throw new Error(err.error || 'Archiving failed');
+            }
+            await refreshManageCourses();
+        } catch (err) {
+            showManageCoursesError(err.message);
+        }
+    }
+
+    if (manageCoursesMenuItem) {
+        manageCoursesMenuItem.addEventListener('click', function () {
+            if (!manageCoursesModal) return;
+            showManageCoursesError('');
+            if (addCourseFile) addCourseFile.value = '';
+            manageCoursesModal.style.display = 'flex';
+            closeMenus();
+            refreshManageCourses();
+        });
+    }
+
+    if (addCourseBtn) {
+        addCourseBtn.addEventListener('click', async function () {
+            var file = addCourseFile && addCourseFile.files[0];
+            if (!file) {
+                showManageCoursesError('Choose a course package (.zip) to add.');
+                return;
+            }
+
+            var formData = new FormData();
+            formData.append('file', file);
+
+            showManageCoursesError('');
+            addCourseBtn.disabled = true;
+            addCourseBtn.textContent = 'Adding...';
+            try {
+                var resp = await fetch('/api/admin/courses', { method: 'POST', body: formData });
+                if (!resp.ok) {
+                    var err = await resp.json().catch(function () { return {}; });
+                    throw new Error(err.error || 'Could not add the course');
+                }
+                addCourseFile.value = '';
+                await refreshManageCourses();
+            } catch (err) {
+                showManageCoursesError(err.message);
+            } finally {
+                addCourseBtn.disabled = false;
+                addCourseBtn.textContent = 'Add Course';
+            }
+        });
+    }
+
+    if (manageCoursesCloseBtn) {
+        manageCoursesCloseBtn.addEventListener('click', function () {
+            manageCoursesModal.style.display = 'none';
+        });
+    }
+
     // Load Course Package modal and upload workflow added
     var loadCourseMenuItem = document.getElementById('load-course-menu-item');
     var loadCourseModal = document.getElementById('load-course-modal');
@@ -571,11 +740,51 @@ function initializeMenuSystem() {
     var loadCourseBtn = document.getElementById('load-course-btn');
     var loadCourseCancelBtn = document.getElementById('load-course-cancel-btn');
 
+    var loadCourseTarget = document.getElementById('load-course-target');
+    var loadCourseError = document.getElementById('load-course-error');
+
+    function showLoadCourseError(message) {
+        if (!loadCourseError) return;
+        loadCourseError.textContent = message || '';
+        loadCourseError.style.display = message ? 'block' : 'none';
+    }
+
+    // Filled from the admin course list, which unlike /api/courses also
+    // reports archived courses -- filtered out here, since a package cannot be
+    // loaded into a course that is no longer served.
+    async function populateLoadCourseTarget() {
+        if (!loadCourseTarget) return;
+        loadCourseTarget.innerHTML = '';
+        try {
+            var resp = await fetch('/api/admin/courses');
+            if (!resp.ok) throw new Error('GET /api/admin/courses failed: ' + resp.status);
+            var data = await resp.json();
+            (data.courses || [])
+                .filter(function (course) { return !course.deleted_at; })
+                .forEach(function (course) {
+                    var option = document.createElement('option');
+                    option.value = course.id;
+                    option.textContent = (course.name || course.id)
+                        + (course.semester ? ' \u2014 ' + course.semester : '')
+                        + ' (' + course.id + ')';
+                    if (course.id === (window.LLMGRADER_COURSE_ID || '')) {
+                        option.selected = true;
+                    }
+                    loadCourseTarget.appendChild(option);
+                });
+        } catch (err) {
+            console.error('Could not load the course list:', err);
+            showLoadCourseError('Could not load the course list.');
+        }
+    }
+
     function openLoadCourseModal() {
         if (!loadCourseModal || !coursePackageFileInput) {
             return;
         }
         coursePackageFileInput.value = '';
+        showLoadCourseError('');
+        populateLoadCourseTarget();
         loadCourseModal.style.display = 'flex';
         closeMenus();
     }
@@ -607,10 +816,14 @@ function initializeMenuSystem() {
 
             var formData = new FormData();
             formData.append('file', file);
+            if (loadCourseTarget && loadCourseTarget.value) {
+                formData.append('course_id', loadCourseTarget.value);
+            }
 
             try {
                 loadCourseBtn.disabled = true;
                 loadCourseBtn.textContent = 'Loading...';
+                showLoadCourseError('');
 
                 var response = await fetch('/admin/upload', {
                     method: 'POST',
@@ -622,14 +835,22 @@ function initializeMenuSystem() {
                     throw new Error(errorData.error || 'Upload failed');
                 }
 
+                var loaded = await response.json();
                 closeLoadCourseModal();
                 
-                // Refresh the unit list by calling the existing loadUnits function
-                if (typeof loadUnits === 'function') {
+                // Loading into the course being viewed refreshes the unit list;
+                // loading into another one changes nothing on screen.
+                if (loaded.course_id && loaded.course_id !== (window.LLMGRADER_COURSE_ID || '')) {
+                    alert('Package loaded into ' + loaded.course_id
+                          + '. Switch to that course to see it.');
+                } else if (typeof loadUnits === 'function') {
                     await loadUnits();
                 }
             } catch (error) {
-                alert('Error uploading course package: ' + error.message);
+                // Inline rather than an alert: a refused upload names two
+                // courses and says nothing was changed, which is more than a
+                // dialog box should be asked to carry.
+                showLoadCourseError(error.message);
             } finally {
                 loadCourseBtn.disabled = false;
                 loadCourseBtn.textContent = 'Load';

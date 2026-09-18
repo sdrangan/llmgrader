@@ -136,6 +136,43 @@ definition, which is exactly why the slug fallback exists.
 course, uses the scratch directory it is given verbatim, and writes no registry
 file.
 
+### Course management
+
+Admin course routes are portal-wide and unprefixed: `GET/POST /api/admin/courses`
+and `DELETE /api/admin/courses/<id>`, plus `/admin/upload` which now takes a
+`course_id` form field naming the target.
+
+**Add Course is an upload, never a form.** The server reads `<course>` out of
+the archive and mints the id from it, so an admin never types an identity that
+could disagree with the XML. A minted id that already belongs to a course is
+refused, naming that course.
+
+**Delete archives.** `deleted_at` on the registry entry; the package and every
+submission row stay. `CourseRegistry.get()` hides archived courses by default,
+which is what makes them stop routing. The last live course cannot be archived
+-- there would be no default left. Hard deletion does not exist.
+
+**Two independent guards on Load Course Package**, because they catch different
+mistakes: the target selector catches the wrong course, and the id check in
+`Grader.save_uploaded_file` catches the wrong *file* for the right course --
+likelier, since every archive is called `soln_package.zip`. On mismatch the
+upload is refused outright; renaming a course is a three-store migration
+(`submissions.course_id`, the storage directory, `llmgrader_session:<id>` in
+every student's browser) and is deliberately not built.
+
+**Uploads validate before they swap.** `save_uploaded_file` extracts to a
+staging directory and parses it there, then renames the live package aside and
+moves the new one in. A corrupt archive, or one that unzips but will not parse,
+leaves the course serving what it was already serving.
+
+**A placeholder course adopts its first package's id.** A portal that boots
+empty registers a course with id `default` and `id_source="fallback"` so an
+upload has somewhere to land. Since ids are never re-derived, that placeholder
+would otherwise be permanent. `CourseRegistry.adopt_authored_id` re-registers it
+under the package's own id and moves the directory -- safe because a portal with
+no package cannot have graded anything, which is checked against
+`count_submissions_for_course` rather than assumed.
+
 ### Course URLs
 
 Course content is served only under `/c/<course_id>/` -- `/units`,
@@ -178,7 +215,9 @@ Tiers (`simple`, `standard`, `complex`) name the **difficulty of the graded prob
 
 `llmgrader/services/gradetests.py` is the single place the grading-test logic lives: parsing `<unit_test>` files, checking them against a unit, and running them through the real `Grader`. The `llmgrader_test` console script and both pytest suites (`tests/services/test_gradetests_static.py`, `tests/live/test_course_cases.py`) sit on it and add nothing of their own.
 
-`run --gradescope` also lives there: it writes the submission zip a student would have downloaded, built from the graded cases instead of a portal session, so an uploaded autograder can be tested without answering questions by hand. The layout mirrors `downloadSubmission` in `llmgrader/static/js/dashboard.js` entry for entry — the autograder verifies its signature over the exact `results.json` bytes, so both text files are written as bytes rather than in text mode. Everything the submission can be refused for (an ambiguous qtag, a missing `LLMGRADER_PRIVATE_KEY`, an unsafe target directory) is resolved in `plan_gradescope_submission` before any grading call.
+`run --gradescope` also lives there: it writes the submission zip a student would have downloaded, built from the graded cases instead of a portal session, so an uploaded autograder can be tested without answering questions by hand. The layout mirrors `downloadSubmission` in `llmgrader/static/js/dashboard.js` entry for entry — the autograder verifies its signature over the exact `results.json` bytes, so both text files are written as bytes rather than in text mode.
+
+`results.json` carries `course_id` between `output` and `tests`. Key order is part of the signed bytes, so `submission_results_json` and `buildResultsJson` have to agree character for character; a test reads the key order back out of `dashboard.js` to keep them in step. The runner has no registry to ask, so it reads the id out of the package's `<course>` block — which is also why `_synthesize_package` carries the real course's identity into the stand-in package it builds around a loose unit file, rather than leaving a placeholder there. `gradescope/autograde.py` compares it against an optional `expected_course.txt` that `build_autograder --course-id` embeds; a submission with no `course_id` is accepted with a warning for one release. Everything the submission can be refused for (an ambiguous qtag, a missing `LLMGRADER_PRIVATE_KEY`, an unsafe target directory) is resolved in `plan_gradescope_submission` before any grading call.
 
 Which assertion elements a case may carry depends on the question's `<partial_credit>` mode, which lives in a different file, so `unit_test.xsd` is deliberately permissive and `check` carries roughly half the validation. The runner redirects `LLMGRADER_STORAGE_PATH` to a temp tree -- `Grader.__init__` clears the scratch dir it owns and writes a submission row per grade -- and looks token counts up by the synthetic `session_id` it passes, never by newest row. See `docs/admin/buildcourse/gradetests.md` for the instructor-facing contract.
 

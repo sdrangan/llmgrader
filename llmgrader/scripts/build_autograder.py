@@ -26,6 +26,16 @@ def main():
         default=None,
         help='Path to the XML schema file (e.g., unit1_basic_logic.xml). If not specified, searches for an XML file in the current directory.'
     )
+    parser.add_argument(
+        '--course-id',
+        type=str,
+        default=None,
+        help=(
+            "Course id this assignment grades. Embedded in the autograder so it can "
+            "reject a submission built against a different course on the same portal. "
+            "Defaults to $LLMGRADER_COURSE_ID; omit both and no course check is made."
+        ),
+    )
     args = parser.parse_args()
 
     cwd = Path.cwd()
@@ -95,6 +105,21 @@ def main():
 
     if digitalsign:
         (out_dir / "signing_public_key.txt").write_text(public_key_b64, encoding="utf-8")
+
+    # Optional, and off unless asked for: with no expected course the
+    # autograder accepts any submission, exactly as it did before. Given one,
+    # it refuses a submission that names a different course -- the mistake a
+    # student with two courses on one portal makes when every download is
+    # called submission.zip.
+    course_id = (args.course_id or os.environ.get("LLMGRADER_COURSE_ID") or "").strip()
+    if course_id:
+        (out_dir / "expected_course.txt").write_text(course_id, encoding="utf-8")
+        print(f"Course check enabled: this autograder grades '{course_id}'.")
+    else:
+        print(
+            "No course id given (--course-id or $LLMGRADER_COURSE_ID); this autograder "
+            "will accept a submission from any course on the portal."
+        )
 
     zip_path = cwd / "autograder.zip"
     if zip_path.exists():

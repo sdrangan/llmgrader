@@ -17,6 +17,9 @@ import io
 from datetime import datetime, timezone
 import requests
 
+import shutil
+
+from llmgrader.services.course_registry import CoursePackageError, ID_SOURCE_FALLBACK
 from llmgrader.services.grader import preferred_model_for
 from llmgrader.services.models import (
     DEFAULT_MODEL_COMPLEX,
@@ -1082,19 +1085,143 @@ class APIController:
         def admin_page():
             return render_template("index.html", banner=self.banner_context())
 
+        def _admin_course_payload(entry) -> dict:
+            grader = None
+            if not entry.deleted:
+                grader = self.registry.grader_for(entry.id)
+            return {
+                "id": entry.id,
+                "name": entry.name or entry.id,
+                "semester": entry.semester or "",
+                "id_source": entry.id_source,
+                "created_at": entry.created_at,
+                "deleted_at": entry.deleted_at,
+                "is_default": entry.id == self.registry.default_course_id,
+                "loaded": bool(getattr(grader, "units", None)) if grader else False,
+                "submissions": self.registry.storage.count_submissions_for_course(entry.id),
+            }
+
+        @app.get("/api/admin/courses")
+        @self.require_admin
+        def admin_list_courses():
+            """Every course including archived ones, for Manage Courses.
+
+            The student-facing /api/courses deliberately omits archived courses;
+            this one shows them, with their submission counts, because the
+            point of archiving rather than deleting is that the grades are
+            still there.
+            """
+            return jsonify({
+                "courses": [
+                    _admin_course_payload(entry)
+                    for entry in self.registry.courses(include_deleted=True)
+                ],
+                "default": self.registry.default_course_id,
+            })
+
+        @app.post("/api/admin/courses")
+        @self.require_admin
+        def admin_add_course():
+            """Add Course: upload a package, the server reads its identity.
+
+            No name is typed anywhere.  The package carries <name>, <semester>
+            and usually <course_id>, so there is only ever one candidate
+            identity for the course being created (plans/multicourse.md,
+            decisions 3 and 10).
+            """
+            if "file" not in request.files:
+                return jsonify({"error": "no file"}), 400
+
+            uploaded = request.files["file"]
+            staging_root = self.registry.staging_dir("archive")
+            archive_path = os.path.join(
+                staging_root, os.path.basename(uploaded.filename or "soln_package.zip")
+            )
+            uploaded.save(archive_path)
+
+            try:
+                entry = self.registry.add_course_from_archive(archive_path)
+            except CoursePackageError as exc:
+                return jsonify(exc.payload()), exc.status
+            finally:
+                shutil.rmtree(staging_root, ignore_errors=True)
+
+            return jsonify({"status": "ok", "course": _admin_course_payload(entry)}), 201
+
+        @app.delete("/api/admin/courses/<course_id>")
+        @self.require_admin
+        def admin_archive_course(course_id):
+            """Archive a course.  Its files and every grade stay where they are.
+
+            Not a hard delete, and not a switch that can become one: grades are
+            the one thing on this portal that cannot be reconstructed, so
+            removing them is a separate, explicitly-worded action that does not
+            exist yet.
+            """
+            try:
+                entry = self.registry.archive_course(course_id)
+            except CoursePackageError as exc:
+                return jsonify(exc.payload()), exc.status
+
+            return jsonify({
+                "status": "ok",
+                "course": _admin_course_payload(entry),
+                "default": self.registry.default_course_id,
+            })
+
         @app.route("/admin/upload", methods=["POST"])
         @self.require_admin
         def upload():
+            """Load Course Package, into a course the admin selects.
+
+            Two independent guards, because they catch different mistakes
+            (decision 10): the selector catches the admin who picked the wrong
+            course, and the id check inside save_uploaded_file catches the one
+            who picked the wrong *file* for the right course -- the likelier
+            slip, since every archive on disk is called soln_package.zip.
+            """
             if "file" not in request.files:
                 return {"error": "no file"}, 400
 
             f = request.files["file"]
-            result = self.grader.save_uploaded_file(f)
+
+            requested = (request.form.get("course_id") or "").strip()
+            target_id = requested or self.registry.default_course_id
+            entry = self.registry.get(target_id) if target_id else None
+            if target_id and entry is None:
+                return jsonify({"error": f"Unknown course '{target_id}'."}), 404
+
+            # A placeholder course has never served a package, so its fallback
+            # id is not yet load-bearing.  Adopting the package's own id here
+            # is what stops "default" from becoming permanent for the first
+            # real course on a fresh portal.
+            if entry is not None and entry.id_source == ID_SOURCE_FALLBACK:
+                staging_root = self.registry.staging_dir("adopt")
+                archive_path = os.path.join(
+                    staging_root, os.path.basename(f.filename or "soln_package.zip")
+                )
+                f.save(archive_path)
+                f.stream.seek(0)
+                try:
+                    adopted = self.registry.adopt_authored_id(entry.id, archive_path)
+                except CoursePackageError as exc:
+                    return jsonify(exc.payload()), exc.status
+                finally:
+                    shutil.rmtree(staging_root, ignore_errors=True)
+                if adopted is not None:
+                    entry = adopted
+                    target_id = adopted.id
+
+            grader = self.registry.grader_for(target_id) if target_id else self.grader
+            result = grader.save_uploaded_file(f, expected_course_id=target_id)
 
             if isinstance(result, tuple):
                 payload, status_code = result
                 return jsonify(payload), status_code
 
+            if isinstance(result, dict):
+                result = dict(result)
+                result["course_id"] = target_id
             return jsonify(result)
         
         @app.route("/admin/dbviewer", methods=["POST"])

@@ -1212,6 +1212,40 @@ def find_course_config(unit_path: str) -> str | None:
     return None
 
 
+def _synthesized_course_block(config_path: str | None) -> str:
+    """The ``<course>`` body for a synthesized package.
+
+    Carried over from the real course config when one was found above the
+    unit file, for the same reason its ``<assets>`` entries are (see
+    _synthesize_package): the synthesized package stands in for the real
+    one, and its identity is part of what it stands in for.
+
+    That identity becomes the ``course_id`` of a ``--gradescope``
+    submission.  Left as a placeholder, the tool would produce a zip that
+    names a course nobody runs -- and an autograder configured for the real
+    course would refuse it, which is the opposite of what uploading a test
+    submission is for.
+
+    With no config to read -- a genuinely loose unit file -- the placeholder
+    stays and the submission names no course.
+    """
+    block = {}
+    if config_path:
+        from llmgrader.services.course_registry import read_course_block
+
+        block = read_course_block(os.path.dirname(config_path)) or {}
+
+    lines = []
+    course_id = (block.get("course_id") or "").strip()
+    if course_id:
+        lines.append(f"    <course_id>{_xml_escape(course_id)}</course_id>\n")
+    name = block.get("name") or "Grading tests"
+    semester = block.get("semester") or "n/a"
+    lines.append(f"    <name>{_xml_escape(name)}</name>\n")
+    lines.append(f"    <semester>{_xml_escape(semester)}</semester>\n")
+    return "".join(lines)
+
+
 def _xml_escape(text: str) -> str:
     return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
@@ -1287,8 +1321,7 @@ def synthesize_package(unit_path: str, dest_dir: str) -> tuple[str, str]:
     config = (
         "<llmgrader>\n"
         "  <course>\n"
-        "    <name>Grading tests</name>\n"
-        "    <semester>n/a</semester>\n"
+        f"{_synthesized_course_block(config_path)}"
         "  </course>\n"
         "  <units>\n"
         "    <unit>\n"
@@ -2181,6 +2214,11 @@ class SubmissionPlan:
     question_dicts: dict
     chosen: dict
     optional_case_ids: list[str] = field(default_factory=list)
+    #: The course the grader is serving, written into results.json so an
+    #: autograder set up for one course can tell a submission from another.
+    #: "" when there is no course, matching what the portal writes rather than
+    #: emitting null -- these bytes are signed, and the two writers must agree.
+    course_id: str = ""
 
 
 @dataclass
@@ -2326,6 +2364,7 @@ def plan_gradescope_submission(planned: list, options: RunOptions) -> Submission
 
     return SubmissionPlan(
         unit_name=unit_name,
+        course_id=_submission_course_id(grader),
         directory=directory,
         zip_path=directory + ".zip",
         digitalsign=digitalsign,
@@ -2335,6 +2374,42 @@ def plan_gradescope_submission(planned: list, options: RunOptions) -> Submission
         chosen=chosen,
         optional_case_ids=optional_case_ids,
     )
+
+
+def _submission_course_id(grader) -> str:
+    """The course id the portal would have written into this submission.
+
+    The portal reads it off the registry, which recorded it when the course was
+    created.  There is no registry here -- the runner grades a package straight
+    off disk -- so it is read back out of that package's <course> block by the
+    same rules the registry used: the authored <course_id>, else a slug of
+    <name> and <semester>.
+
+    Deliberately not resolve_course_id(): that one also consults
+    LLMGRADER_MIGRATE_COURSE_ID and falls back to the "default" placeholder,
+    neither of which describes a package. A package that names nothing gets no
+    course id, and the autograder treats that the same as a submission from
+    before the field existed.
+    """
+    from llmgrader.services.course_registry import (
+        COURSE_ID_PATTERN,
+        read_course_block,
+        slugify_course_id,
+    )
+
+    explicit = getattr(grader, "course_id", None)
+    if explicit:
+        return explicit
+
+    package_dir = getattr(grader, "soln_pkg", None)
+    if not package_dir:
+        return ""
+
+    block = read_course_block(package_dir)
+    authored = (block.get("course_id") or "").strip()
+    if authored and COURSE_ID_PATTERN.match(authored):
+        return authored
+    return slugify_course_id(block.get("name", ""), block.get("semester", ""))
 
 
 def _submission_questions(plan: SubmissionPlan) -> list[SubmissionQuestion]:
@@ -2394,11 +2469,18 @@ def _submission_questions(plan: SubmissionPlan) -> list[SubmissionQuestion]:
     return questions
 
 
-def submission_results_json(questions: list[SubmissionQuestion]) -> str:
-    """``results.json`` exactly as ``buildResultsJson`` would have written it."""
+def submission_results_json(questions: list[SubmissionQuestion], course_id: str = "") -> str:
+    """``results.json`` exactly as ``buildResultsJson`` would have written it.
+
+    ``course_id`` sits between ``output`` and ``tests`` because that is where
+    buildResultsJson puts it.  Key order is not cosmetic here: the autograder
+    verifies an Ed25519 signature over these exact bytes, so a key in a
+    different place is a submission that will not verify.
+    """
     payload = {
         "score": _json_number(sum(question.score for question in questions)),
         "output": SUBMISSION_OUTPUT_SUMMARY,
+        "course_id": course_id,
         "tests": [
             {
                 "name": question.qtag,
@@ -2459,7 +2541,7 @@ def _write_submission_images(directory: str, questions: list[SubmissionQuestion]
 def write_gradescope_submission(plan: SubmissionPlan) -> SubmissionResult:
     """Write the submission folder, and the zip of it beside it."""
     questions = _submission_questions(plan)
-    results_json = submission_results_json(questions)
+    results_json = submission_results_json(questions, plan.course_id)
 
     if os.path.isdir(plan.directory):
         shutil.rmtree(plan.directory)

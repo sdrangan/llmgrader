@@ -627,54 +627,142 @@ class Grader:
         prune_uploads(self.uploads_dir)
         return save_path
 
-    def save_uploaded_file(self, file_storage):
-        """
-        Save an uploaded solution package ZIP, extract it into self.soln_pkg,
-        and reload units.
-        """
+    @staticmethod
+    def _remove_tree(path: str) -> None:
+        def remove_readonly(func, target, excinfo):
+            os.chmod(target, 0o666)
+            func(target)
 
-        # ---------------------------------------------------------
-        # 1. Save the uploaded ZIP (under the course if it has an uploads dir)
-        # ---------------------------------------------------------
+        shutil.rmtree(path, onexc=remove_readonly)
+
+    def _stage_uploaded_package(self, archive_path: str):
+        """Extract *archive_path* somewhere harmless and check it parses.
+
+        Returns ``(staging_dir, None)`` when the package is usable, or
+        ``(None, (payload, status))`` when it is not.  The live package is
+        never touched here -- that is the whole point.
+        """
+        staging = os.path.join(
+            self.scratch_dir,
+            f"upload-staging-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S%f')}",
+        )
+        os.makedirs(staging, exist_ok=True)
+
+        try:
+            with zipfile.ZipFile(archive_path, "r") as archive:
+                archive.extractall(staging)
+        except zipfile.BadZipFile:
+            self._remove_tree(staging)
+            print("[Upload] Invalid ZIP file")
+            return None, ({"error": "Uploaded file is not a valid zip file."}, 400)
+        except Exception as exc:  # noqa: BLE001 -- reported, not raised into a route
+            self._remove_tree(staging)
+            print(f"[Upload] Unexpected error while extracting ZIP: {exc}")
+            return None, ({"error": "Failed to extract ZIP file."}, 500)
+
+        # Parse the staged copy with the same parser that will serve it.  An
+        # archive that unzips but does not load is just as fatal to a course as
+        # one that does not unzip, so both have to be caught before the swap.
+        try:
+            parsed = UnitParser(
+                scratch_dir=self.scratch_dir,
+                soln_pkg=staging,
+                supported_tools=self.SUPPORTED_TOOLS,
+                course_id=self.course_id,
+            ).parse()
+        except Exception as exc:  # noqa: BLE001
+            self._remove_tree(staging)
+            print(f"[Upload] Staged package failed to parse: {exc}")
+            return None, ({"error": f"Failed to load units: {exc}"}, 400)
+
+        if parsed is None or not parsed.units:
+            alert = getattr(parsed, "validation_alert", None) if parsed else None
+            self._remove_tree(staging)
+            print("[Upload] No units found in the staged package")
+            return None, (
+                {"error": alert or "No valid units found. Check llmgrader_config.xml."},
+                400,
+            )
+
+        return staging, None
+
+    def _swap_in_package(self, staging: str, soln_pkg_path: str) -> None:
+        """Replace the live package with the staged one, keeping a way back.
+
+        The old package is renamed aside first and only removed once the new
+        one is in place, so a failure mid-swap restores what was being served
+        rather than leaving the course with no package at all.
+        """
+        parent = os.path.dirname(os.path.abspath(soln_pkg_path)) or "."
+        os.makedirs(parent, exist_ok=True)
+
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S%f")
+        previous = os.path.join(parent, f".{os.path.basename(soln_pkg_path)}.previous-{stamp}")
+
+        had_previous = os.path.isdir(soln_pkg_path)
+        if had_previous:
+            os.rename(soln_pkg_path, previous)
+
+        try:
+            shutil.move(staging, soln_pkg_path)
+        except Exception:
+            if had_previous:
+                if os.path.isdir(soln_pkg_path):
+                    self._remove_tree(soln_pkg_path)
+                os.rename(previous, soln_pkg_path)
+            raise
+
+        if had_previous:
+            try:
+                self._remove_tree(previous)
+            except OSError as exc:
+                # The new package is already serving; a leftover directory is
+                # untidy, not broken.
+                print(f"[Upload] Could not remove the previous package at {previous}: {exc}")
+
+    def save_uploaded_file(self, file_storage, *, expected_course_id: str | None = None):
+        """Load an uploaded solution package ZIP into this course.
+
+        Validate, then swap.  This used to rmtree the live package and extract
+        over it, so a corrupt archive or a package that would not parse took
+        the course down with it and there was nothing to put back
+        (plans/multicourse.md, decision 10).  Now the archive is extracted to a
+        staging directory and parsed there, and the live package is replaced
+        only once the staged one is known to load.
+
+        *expected_course_id* is the course the admin chose to load into.  When
+        it is given and the archive names a different course, the upload is
+        refused: every archive on disk is called ``soln_package.zip``, so
+        picking the wrong file for the right course is the likelier mistake and
+        the selector alone does not catch it.  Renaming a course to match the
+        archive is deliberately not offered -- the id is a key in three
+        independent stores, and that migration is not this function's to make.
+        """
         save_path = self._save_uploaded_archive(file_storage)
         print(f"[Upload] Saved uploaded file to {save_path}")
 
-        # ---------------------------------------------------------
-        # 2. Resolve solution package directory
-        # ---------------------------------------------------------
         soln_pkg_path = self.soln_pkg
         if soln_pkg_path is None:
             return {"error": "Internal error: soln_pkg_path not set"}, 500
 
         print(f"[Upload] Using solution package path: {soln_pkg_path}")
 
-        # ---------------------------------------------------------
-        # 3. Clear existing package directory
-        # ---------------------------------------------------------
-        def remove_readonly(func, path, excinfo):
-            os.chmod(path, 0o666)
-            func(path)
+        staging, failure = self._stage_uploaded_package(save_path)
+        if failure is not None:
+            return failure
 
-        shutil.rmtree(soln_pkg_path, onexc=remove_readonly)
-        os.makedirs(soln_pkg_path, exist_ok=True)
-
-        # ---------------------------------------------------------
-        # 4. Extract ZIP into soln_pkg_path
-        # ---------------------------------------------------------
         try:
-            with zipfile.ZipFile(save_path, "r") as z:
-                z.extractall(soln_pkg_path)
-            print(f"[Upload] Extracted ZIP into {soln_pkg_path}")
-        except zipfile.BadZipFile:
-            print("[Upload] Invalid ZIP file")
-            return {"error": "Uploaded file is not a valid zip file."}, 400
-        except Exception as e:
-            print(f"[Upload] Unexpected error while extracting ZIP: {e}")
-            return {"error": "Failed to extract ZIP file."}, 500
+            if expected_course_id:
+                mismatch = self._course_mismatch(staging, expected_course_id)
+                if mismatch is not None:
+                    return mismatch
 
-        # ---------------------------------------------------------
-        # 5. Reload units from the extracted package
-        # ---------------------------------------------------------
+            self._swap_in_package(staging, soln_pkg_path)
+            staging = None
+        finally:
+            if staging and os.path.isdir(staging):
+                self._remove_tree(staging)
+
         try:
             self.load_unit_pkg()
             print("[Upload] Unit package loaded successfully")
@@ -682,9 +770,6 @@ class Grader:
             print(f"[Upload] Failed to load unit package: {e}")
             return {"error": f"Failed to load units: {e}"}, 400
 
-        # ---------------------------------------------------------
-        # 6. Verify units loaded
-        # ---------------------------------------------------------
         if not self.units:
             print("[Upload] No units found after loading")
             error_message = self.unit_validation_alert or "No valid units found. Check llmgrader_config.xml."
@@ -696,6 +781,35 @@ class Grader:
             "status": "ok",
             "validation_alert": self.unit_validation_alert,
         }
+
+    def _course_mismatch(self, staging: str, expected_course_id: str):
+        """``(payload, 409)`` when the staged package is a different course."""
+        from llmgrader.services.course_registry import identify_package
+
+        archive_course_id, _source, block = identify_package(staging)
+        if archive_course_id == expected_course_id:
+            return None
+
+        archive_name = (block.get("name") or archive_course_id).strip()
+        if block.get("semester"):
+            archive_name = f"{archive_name}, {block['semester']}"
+
+        print(
+            f"[Upload] Refused: archive is '{archive_course_id}' but the target "
+            f"course is '{expected_course_id}'"
+        )
+        return (
+            {
+                "error": (
+                    f"This package is for {archive_name} ({archive_course_id}), but you "
+                    f"chose to load it into '{expected_course_id}'. Nothing was changed. "
+                    "Pick the right archive, or add it as a new course."
+                ),
+                "archive_course_id": archive_course_id,
+                "target_course_id": expected_course_id,
+            },
+            409,
+        )
 
     def load_unit_pkg(self):
         parser = UnitParser(

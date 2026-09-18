@@ -444,6 +444,28 @@ class PortalStorage:
             )
         return updated
 
+    def count_submissions_for_course(self, course_id: str) -> int:
+        """How many submission rows are filed under *course_id*.
+
+        Used before anything reassigns a course's id: rows carry the id as a
+        value, so moving a course that has graded work would orphan its grades
+        with nothing to report it.  Like backfill_course_id, the id arrives as
+        an argument -- this module knows nothing about courses.
+        """
+        if not course_id:
+            return 0
+        conn = sqlite3.connect(self.db_path)
+        try:
+            row = conn.execute(
+                "SELECT COUNT(*) FROM submissions WHERE course_id = ?", (course_id,)
+            ).fetchone()
+            return int(row[0]) if row else 0
+        except sqlite3.OperationalError:
+            # No submissions table yet: nothing is filed anywhere.
+            return 0
+        finally:
+            conn.close()
+
     # ------------------------------------------------------------------
     # Display formatting for the submission detail view
     # ------------------------------------------------------------------
