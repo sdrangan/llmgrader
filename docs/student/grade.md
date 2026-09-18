@@ -15,34 +15,28 @@ Your instructor should provide you with the URL where they have deployed the cla
 
 ## Selecting a Course
 
-One portal can serve more than one course.  The course you are working in is
-part of the web address, after `/c/`:
+One portal can serve more than one course, so start by making sure you are in
+the right one.
 
-```
-https://your-class.onrender.com/c/hwdesign/
-```
+1. Go to the address your instructor gave you, for example
+   `https://your-class.onrender.com`
+2. Select **File → Select Course…**
+3. Choose the course your instructor named.
 
-If your instructor runs only one course on their portal, there is nothing to
-do here — opening the portal's address sends you straight to it, and you can
-skip to the next section.
+The course you are already in is ticked.  If the menu lists only one course,
+you are in it and there is nothing to do.
 
-To move between courses, select **File → Select Course…**.  The course you are
-currently in is ticked and cannot be re-selected; choosing another one reloads
-the page into it.  If the menu lists only one course, you are already in it.
+You can come back to **File → Select Course…** at any time to switch.
 
-Two things worth knowing:
+**Your saved work is kept separately for each course.**  Answers, grades and
+feedback in one course are never visible from — or mixed up with — another.
+Saved work lives in your own browser; see
+[Saving and Loading Your Work](#saving-and-loading-your-work).
 
-- **Your saved work is kept separately for each course.** Answers, grades and
-  feedback in one course are not visible from another, and switching between
-  them never mixes them up.  Saved work lives in your own browser — see
-  [Saving and Loading Your Work](#saving-and-loading-your-work).
-- **A bookmark to a question includes the course.**  Sharing that link with a
-  classmate sends them to the same course you were in.
-
-If you bookmarked the portal before your instructor added a second course, your
-old bookmark still works: it takes you to the portal, which forwards you to the
-course you were last using.
-
+One small thing you may notice: once you are in a course, its short name
+appears in the address bar.  You never need to type it — but it does mean that
+if you bookmark the page, the bookmark takes you straight back to that course,
+and a link you send a classmate opens the course you were in.
 
 ## Grade View
 Once you have set the OpenAI API key and a course URL, go to the **Grade View** where you'll spend most of your time.  To open it, select **File → Switch View → Grade**.  In this view, you can read the question, write your answer, and get instant feedback from the LLM grader.
