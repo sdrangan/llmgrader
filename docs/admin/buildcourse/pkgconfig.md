@@ -210,6 +210,41 @@ paths containing `..` are rejected during validation.
 
 ---
 
+## The Course Id
+
+`<course>` takes an optional `<course_id>`: a short, stable, machine-facing
+identifier for the course, distinct from the human-facing `<name>`.
+
+```xml
+<course>
+  <course_id>hardware_design</course_id>
+  <name>ECE-GY 9463:  Introduction to Hardware Design</name>
+  <term>Spring 2026</term>
+</course>
+```
+
+The portal keys a course's storage -- and, later, its submissions and its URL --
+by this id.  It is recorded the first time the package is loaded and read back
+from then on, so re-uploading a corrected package lands on the same course.
+
+Rules, enforced by the schema so the authoring tools catch a bad one:
+lowercase letters, digits, `_` and `-` only, starting with a letter or digit,
+64 characters at most.  No dots or slashes, because the id becomes a directory
+name and a URL path segment.
+
+Leave the term out of it.  `hardware_design`, not `hardware_design_s26`: the
+common operation is re-uploading a corrected package mid-semester, which must
+land on the same course.  When you do want next semester to be a genuinely
+separate course, with its own submissions, author a different id for it.
+
+`<course_id>` is **optional**.  A package without one still loads: the portal
+derives an id from `<name>` and `<term>` instead, once, and records that.
+Authoring the id is nevertheless recommended, because a derived id is a
+function of your display text -- editing `<name>` later would otherwise rename
+the course out from under everything keyed to it.
+
+---
+
 ## The Page Banner
 
 The `<course>` block also drives the banner across the top of the portal.  Two
