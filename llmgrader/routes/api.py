@@ -47,6 +47,12 @@ class APIController:
     GRADE_JOB_RETENTION_SECONDS = 3600.0
     ACTIVE_GRADE_JOB_STATES = {"queued", "running"}
 
+    # A request with no session cookie cannot be told apart from any other, so
+    # those share a single slot -- the conservative choice.  In practice
+    # unreachable: ensure_session_id is a before_request on every blueprint
+    # that owns a /grade route.
+    ANONYMOUS_SESSION_KEY = "__no_session__"
+
     def __init__(self, registry):
         """
         Parameters
@@ -59,7 +65,34 @@ class APIController:
         self.registry = registry
         self.grade_job_lock = threading.Lock()
         self.grade_jobs = {}
-        self.active_grade_job_id = None
+        # session key -> job_id of that session's in-flight grading job.
+        #
+        # This was a single active_grade_job_id for the whole app instance, so
+        # one student grading blocked every other student with a 409.  That was
+        # already tight for one course and is the binding constraint once a
+        # portal serves several (plans/multicourse.md, phase 4).  One slot per
+        # session keeps the property that actually matters -- a student cannot
+        # start two jobs at once, so a double-click or an impatient retry does
+        # not pay for two gradings -- and drops the one that never did.
+        self.active_job_by_session = {}
+
+    @classmethod
+    def grade_job_session_key(cls, session_id) -> str:
+        return session_id or cls.ANONYMOUS_SESSION_KEY
+
+    def release_active_job_locked(self, job: dict) -> None:
+        """Free the slot *job* holds for its session, if it still holds it.
+
+        Guarded on the job id because a session whose job timed out may already
+        have started another one; releasing then would hand that session a
+        second concurrent slot.
+        """
+        key = self.grade_job_session_key(job.get("session_id"))
+        if self.active_job_by_session.get(key) == job["job_id"]:
+            del self.active_job_by_session[key]
+
+    def active_job_ids_locked(self) -> set:
+        return set(self.active_job_by_session.values())
 
     @property
     def grader(self):
@@ -367,31 +400,33 @@ class APIController:
         job["error"] = message
         job["finished_at"] = self.utc_now()
         job["finished_at_ts"] = time.time()
-        if self.active_grade_job_id == job["job_id"]:
-            self.active_grade_job_id = None
+        self.release_active_job_locked(job)
 
-    def expire_active_job_if_stale_locked(self) -> None:
-        if not self.active_grade_job_id:
-            return
+    def expire_stale_active_jobs_locked(self) -> None:
+        """Time out every session's active job that has blown its deadline.
 
-        job = self.grade_jobs.get(self.active_grade_job_id)
-        if not job:
-            self.active_grade_job_id = None
-            return
+        A sweep rather than a single check, because there is no longer one
+        "the" active job.  A student who closes the tab mid-grade must not hold
+        their own slot for good, and a slot pointing at a job that finished or
+        was pruned away is simply dropped.  The dict holds one entry per
+        currently-grading student, so this stays cheap.
+        """
+        for key, job_id in list(self.active_job_by_session.items()):
+            job = self.grade_jobs.get(job_id)
+            if job is None or job["status"] not in self.ACTIVE_GRADE_JOB_STATES:
+                self.active_job_by_session.pop(key, None)
+                continue
 
-        if job["status"] not in self.ACTIVE_GRADE_JOB_STATES:
-            self.active_grade_job_id = None
-            return
-
-        deadline_ts = job.get("deadline_ts")
-        if deadline_ts is not None and time.time() > deadline_ts:
-            self.mark_job_timed_out_locked(job, message="Grading job timed out before completion.")
+            deadline_ts = job.get("deadline_ts")
+            if deadline_ts is not None and time.time() > deadline_ts:
+                self.mark_job_timed_out_locked(job, message="Grading job timed out before completion.")
 
     def prune_old_grade_jobs_locked(self) -> None:
         cutoff_ts = time.time() - self.GRADE_JOB_RETENTION_SECONDS
+        active_job_ids = self.active_job_ids_locked()
         removable_job_ids = []
         for job_id, job in self.grade_jobs.items():
-            if job_id == self.active_grade_job_id:
+            if job_id in active_job_ids:
                 continue
             if job["status"] in self.ACTIVE_GRADE_JOB_STATES:
                 continue
@@ -449,8 +484,7 @@ class APIController:
                 current["error"] = str(exc)
                 current["finished_at"] = self.utc_now()
                 current["finished_at_ts"] = time.time()
-                if self.active_grade_job_id == job_id:
-                    self.active_grade_job_id = None
+                self.release_active_job_locked(current)
             return
 
         with self.grade_job_lock:
@@ -467,8 +501,7 @@ class APIController:
             current["result"] = grade_result
             current["finished_at"] = self.utc_now()
             current["finished_at_ts"] = time.time()
-            if self.active_grade_job_id == job_id:
-                self.active_grade_job_id = None
+            self.release_active_job_locked(current)
 
     def require_authenticated_user(self, f):
         @wraps(f)
@@ -821,15 +854,19 @@ class APIController:
             # An explicitly chosen model always wins; preferred_model only sets
             # the default for a client that sent none.
             model = requested_model or preferred_model_for(qdata, qtag) or DEFAULT_MODEL_SIMPLE
+            session_key = self.grade_job_session_key(session_id)
             with self.grade_job_lock:
-                self.expire_active_job_if_stale_locked()
+                self.expire_stale_active_jobs_locked()
                 self.prune_old_grade_jobs_locked()
 
-                active_job = self.grade_jobs.get(self.active_grade_job_id) if self.active_grade_job_id else None
+                # Scoped to this session: another student grading at the same
+                # moment is none of this request's business.
+                active_job_id = self.active_job_by_session.get(session_key)
+                active_job = self.grade_jobs.get(active_job_id) if active_job_id else None
                 if active_job and active_job["status"] in self.ACTIVE_GRADE_JOB_STATES:
                     payload = self.serialize_grade_job(active_job, include_result=False)
                     payload["status"] = "already_running"
-                    payload["message"] = "A grading job is already in progress for this app instance."
+                    payload["message"] = "A grading job is already in progress for this session."
                     return jsonify(payload), 409
 
                 now_ts = time.time()
@@ -861,7 +898,7 @@ class APIController:
                     "tools": tools,
                 }
                 self.grade_jobs[job_id] = job
-                self.active_grade_job_id = job_id
+                self.active_job_by_session[session_key] = job_id
 
             worker = threading.Thread(target=self.run_grade_job, args=(job_id,), daemon=True)
             worker.start()
@@ -871,7 +908,7 @@ class APIController:
         @course_bp.get("/grade/jobs/<job_id>")
         def grade_job_status(job_id):
             with self.grade_job_lock:
-                self.expire_active_job_if_stale_locked()
+                self.expire_stale_active_jobs_locked()
                 self.prune_old_grade_jobs_locked()
                 job = self.grade_jobs.get(job_id)
                 if not job:

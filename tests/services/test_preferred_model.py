@@ -228,7 +228,7 @@ def _model_used(client, monkeypatch, qtag, **overrides):
         job = self.grade_jobs[job_id]
         job["status"] = "completed"
         job["result"] = {"result": "pass"}
-        self.active_grade_job_id = None
+        self.release_active_job_locked(job)
 
     monkeypatch.setattr(api_module.APIController, "run_grade_job", fake_run)
     try:
