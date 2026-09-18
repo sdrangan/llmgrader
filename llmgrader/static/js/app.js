@@ -629,12 +629,37 @@ function renderMarkdown(markdownText) {
     return safeMarkdown.replace(/\n/g, "<br>");
 }
 
+// Typeset math, if MathJax actually loaded.
+//
+// index.html sets window.MathJax to a *configuration object* before the CDN
+// script runs, which is how MathJax is meant to be configured -- but it means
+// `if (window.MathJax)` is true even when cdn.jsdelivr.net never answered.
+// The object is there; the library is not.  Calling typesetPromise then throws
+// a TypeError synchronously, and in the grading path that unwinds into the
+// catch around the whole request: the server graded the answer, and the
+// student sees an error string instead of their result (and the grade is not
+// saved to session state, because that happens after this call).
+//
+// So guard on the method, the way the marked check above guards on
+// marked.parse.  Never throws and never rejects: math that does not typeset is
+// a cosmetic problem, and nothing here is worth failing a grade over.
+function typesetMath(elements) {
+    const mathjax = window.MathJax;
+    if (!mathjax || typeof mathjax.typesetPromise !== "function") {
+        return Promise.resolve();
+    }
+    try {
+        return Promise.resolve(mathjax.typesetPromise(elements)).catch(() => {});
+    } catch (err) {
+        console.warn("MathJax typesetting failed:", err);
+        return Promise.resolve();
+    }
+}
+
 function renderMarkdownInto(element, markdownText) {
     if (!element) return;
     element.innerHTML = renderMarkdown(markdownText);
-    if (window.MathJax) {
-        MathJax.typesetPromise([element]).catch(() => {});
-    }
+    typesetMath([element]);
 }
 
 // Append the token counts as a footer *node* inside the feedback box rather
@@ -1072,7 +1097,7 @@ function displayAdminQuestion(unit, qtag) {
             if (mn) mn.innerHTML = gradingNotesHtml;
         }
 
-        if (window.MathJax) MathJax.typesetPromise();
+        typesetMath();
     });
 }
 
@@ -1283,10 +1308,8 @@ function displayQuestion(qtag) {
     // Update question text
     questionBox.innerHTML = qdata.question_text || "";
     
-    // Trigger MathJax rendering if available
-    if (window.MathJax) {
-        MathJax.typesetPromise();
-    }
+    // Trigger MathJax rendering if it actually loaded
+    typesetMath();
 
     // Restore session state for this question
     const sessionData = getSessionData(currentUnitName, qtag);
