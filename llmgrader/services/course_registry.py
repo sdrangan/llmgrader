@@ -306,6 +306,15 @@ class CourseRegistry:
 
         self._load()
 
+        # Submission rows written before submissions.course_id existed belong
+        # to whichever single course this portal was serving, which is the one
+        # _load has just settled on.  PortalStorage cannot work that out for
+        # itself -- it knows nothing about courses, deliberately -- so the id
+        # is handed down from here.  The call is a no-op on every boot after
+        # the first; see PortalStorage.backfill_course_id.
+        if self._default_id:
+            self.storage.backfill_course_id(self._default_id)
+
     # ------------------------------------------------------------------
     # Paths
     # ------------------------------------------------------------------

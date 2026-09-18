@@ -1573,6 +1573,9 @@ class Grader:
         self.storage.insert_submission(
             timestamp=datetime.now(timezone.utc).isoformat(),
             client_id=session_id,
+            # None for a Grader built without a course (llmgrader_test, the
+            # replay tool); the column is nullable and stays NULL.
+            course_id=self.course_id,
             question_text=question_text,
             ref_soln=solution,
             grading_notes=grading_notes,

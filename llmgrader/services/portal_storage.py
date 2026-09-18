@@ -17,12 +17,19 @@ per course.
 see the "compatibility shims" block in ``grader.py``.  Call sites outside that
 file still reach through the grader; moving them onto the storage object
 directly is a later commit.
+
+The one place a course *id* appears here is
+:meth:`PortalStorage.backfill_course_id`, and it appears as an argument.  This
+module must not import :mod:`llmgrader.services.course_registry`: the registry
+knows which courses exist and which is the default, and it calls down with the
+id it has decided on.  Importing upwards would also be a cycle, since the
+registry constructs a ``PortalStorage``.
 """
 
 import os
 import sqlite3
 import textwrap
-from datetime import datetime
+from datetime import datetime, timezone
 
 from markupsafe import Markup
 
@@ -40,6 +47,11 @@ class PortalStorage:
     DB_SCHEMA = {
         "timestamp": "TEXT NOT NULL",
         "client_id": "TEXT",
+        # Which course this submission was graded against.  Nullable on
+        # purpose: a Grader built without a course -- llmgrader_test, the
+        # replay tool -- writes NULL rather than guessing, and rows that
+        # predate the column are stamped once by backfill_course_id.
+        "course_id": "TEXT",
         "unit_name": "TEXT",
         "qtag": "TEXT",
         "part_label": "TEXT",
@@ -69,6 +81,9 @@ class PortalStorage:
         "solution_image_paths_json": "TEXT",
     }
 
+    # Name recorded in portal_migrations once the course_id backfill has run.
+    MIGRATION_COURSE_ID_BACKFILL = "course_id_backfill"
+
     # Formats for displaying DB fields.
     # Fields not listed here default to "wrap" format,
     # meaning they will be wrapped in the UI.
@@ -76,6 +91,7 @@ class PortalStorage:
         "timestamp": "short_datetime",
         "question_text": "html",
         "ref_soln": "html",
+        "course_id": "text",
         "unit_name": "text",
         "qtag": "text",
         "required": "bool",
@@ -187,6 +203,7 @@ class PortalStorage:
             "points": "REAL",
             "max_points": "REAL",
             "client_id": "TEXT",
+            "course_id": "TEXT",
         }
 
         # Add each column if missing
@@ -201,6 +218,14 @@ class PortalStorage:
         if "user_email" in columns:
             cursor.execute("UPDATE submissions SET user_email = NULL WHERE user_email IS NOT NULL;")
             conn.commit()
+
+        # Every course-scoped read filters on course_id, so index it.  This
+        # runs after the loop above, which is what guarantees the column
+        # exists on a database that predates it.
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_submissions_course ON submissions(course_id);"
+        )
+        conn.commit()
 
         conn.close()
 
@@ -217,6 +242,11 @@ class PortalStorage:
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
 
+        cursor.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'submissions'"
+        )
+        table_existed = cursor.fetchone() is not None
+
         # Build column definitions from DB_SCHEMA
         column_defs = ["id INTEGER PRIMARY KEY AUTOINCREMENT"]
         for col_name, col_type in self.DB_SCHEMA.items():
@@ -231,6 +261,26 @@ class PortalStorage:
         '''
 
         cursor.execute(create_table_sql)
+
+        if not table_existed:
+            # A table built from DB_SCHEMA has course_id from the outset, so no
+            # row in it can predate the column and there is nothing to backfill
+            # -- ever.  Recording that here, at creation, is what keeps a
+            # deliberately course-less row (llmgrader_test, the replay tool)
+            # safe from the *first* registry boot as well as every later one.
+            # The backfill exists for databases that predate the column; this
+            # one does not.
+            self._ensure_migrations_table(cursor)
+            cursor.execute(
+                "INSERT OR IGNORE INTO portal_migrations (name, applied_at, detail) "
+                "VALUES (?, ?, ?)",
+                (
+                    self.MIGRATION_COURSE_ID_BACKFILL,
+                    datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                    "new database; no rows predate course_id",
+                ),
+            )
+
         conn.commit()
         conn.close()
 
@@ -279,6 +329,120 @@ class PortalStorage:
         cursor.execute(insert_sql, record)
         conn.commit()
         conn.close()
+
+    # ------------------------------------------------------------------
+    # One-shot data migrations
+    # ------------------------------------------------------------------
+
+    def _ensure_migrations_table(self, cursor) -> None:
+        """Create the ledger of data migrations already applied to this file.
+
+        Schema changes are idempotent by shape -- ``CREATE TABLE IF NOT
+        EXISTS``, ``ALTER TABLE`` guarded by ``PRAGMA table_info`` -- but a
+        data migration is not.  "Stamp every NULL course_id with the default
+        course" is right exactly once, on the boot that introduces the column;
+        run again later it would capture rows that are deliberately NULL.  So
+        this file records which ones have run.
+        """
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS portal_migrations (
+                name TEXT PRIMARY KEY,
+                applied_at TEXT NOT NULL,
+                detail TEXT
+            )
+            """
+        )
+
+    def migration_applied(self, name: str) -> bool:
+        """Whether the one-shot migration *name* has already run on this database."""
+        conn = sqlite3.connect(self.db_path)
+        try:
+            cursor = conn.cursor()
+            self._ensure_migrations_table(cursor)
+            conn.commit()
+            cursor.execute("SELECT 1 FROM portal_migrations WHERE name = ?", (name,))
+            return cursor.fetchone() is not None
+        finally:
+            conn.close()
+
+    def backfill_course_id(self, course_id: str) -> int:
+        """Stamp *course_id* onto submission rows that predate the column.
+
+        Rows written before ``submissions.course_id`` existed all belong to the
+        one course the portal was deployed with, so the caller -- the course
+        registry, once it knows its default -- passes that id down here.  This
+        module deliberately has no way to work the id out for itself; see the
+        module docstring.
+
+        Runs **at most once per database, ever**, recorded in
+        ``portal_migrations``.  That is stronger than ``WHERE course_id IS
+        NULL`` alone, and the difference matters: a Grader constructed without
+        a course writes NULL on purpose (``llmgrader_test``, the replay tool),
+        and a backfill on some later boot must not adopt those rows into a
+        course they were never graded against.
+
+        The check, the UPDATE and the marker are one ``BEGIN IMMEDIATE``
+        transaction.  That makes it safe for two gunicorn workers booting at
+        once: the second blocks at ``BEGIN`` rather than reading a stale "not
+        applied yet", and then finds the marker and does nothing.  It also
+        means a crash part-way leaves the migration neither applied nor marked,
+        so the next boot retries it.
+
+        Returns the number of rows stamped (0 when it has already run, or when
+        there was nothing to stamp).
+        """
+        if not course_id:
+            # No default course to attribute rows to.  Leave the marker unset
+            # so a later boot that does have one still gets its chance.
+            return 0
+
+        conn = sqlite3.connect(self.db_path)
+        # Explicit transaction control: the default isolation level would
+        # commit the DDL below out from under us and start the read outside
+        # the write lock, which is exactly the race this avoids.
+        conn.isolation_level = None
+        try:
+            cursor = conn.cursor()
+            cursor.execute("BEGIN IMMEDIATE")
+            try:
+                self._ensure_migrations_table(cursor)
+
+                cursor.execute(
+                    "SELECT 1 FROM portal_migrations WHERE name = ?",
+                    (self.MIGRATION_COURSE_ID_BACKFILL,),
+                )
+                if cursor.fetchone() is not None:
+                    cursor.execute("COMMIT")
+                    return 0
+
+                cursor.execute(
+                    "UPDATE submissions SET course_id = ? WHERE course_id IS NULL",
+                    (course_id,),
+                )
+                updated = cursor.rowcount or 0
+                cursor.execute(
+                    "INSERT INTO portal_migrations (name, applied_at, detail) "
+                    "VALUES (?, ?, ?)",
+                    (
+                        self.MIGRATION_COURSE_ID_BACKFILL,
+                        datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                        f"{updated} row(s) stamped with course_id={course_id!r}",
+                    ),
+                )
+                cursor.execute("COMMIT")
+            except Exception:
+                cursor.execute("ROLLBACK")
+                raise
+        finally:
+            conn.close()
+
+        if updated:
+            print(
+                f"[PortalStorage] Backfilled course_id={course_id!r} onto "
+                f"{updated} submission row(s) that predate the column."
+            )
+        return updated
 
     # ------------------------------------------------------------------
     # Display formatting for the submission detail view
