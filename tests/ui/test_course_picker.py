@@ -112,7 +112,9 @@ def test_the_picker_shows_names_not_ids(page, live_server):
     text = " ".join(row["text"] for row in course_buttons(page))
     assert "UI Test Course" in text
     assert "Second Test Course" in text
-    assert "Fall 2026" in text
+    # The semester is deliberately not repeated here: it is on the banner and
+    # in the admin dialog, and in a chooser it only made every row longer.
+    assert "Fall 2026" not in text
 
 
 def test_choosing_a_course_navigates_into_it(page, live_server):
@@ -330,3 +332,25 @@ def test_a_non_default_course_does_not_adopt_the_legacy_work(
         f"localStorage.getItem('llmgrader_session:{COURSE1_ID}')"
     )
     assert default_key is not None, "the default course must still adopt it"
+
+
+def test_the_picker_marks_the_served_course_from_a_non_default_course(page, live_server):
+    """Switching back to the default course must stay possible.
+
+    /api/courses is a portal route with no <course_id> in its path, so the
+    `current` it reported was the registry default -- which meant the default
+    course was ticked and disabled wherever you actually were, and once you
+    left it you could not get back through the picker.  The page knows which
+    course it is; the list is built from that.
+
+    The sibling test above starts at the default course, where the bug is
+    invisible because the two answers agree.
+    """
+    page.goto(f"{live_server}/c/{COURSE2_ID}/")
+    page.wait_for_selector('body[data-active-view="grade"]')
+    open_course_picker(page)
+
+    rows = {row["id"]: row for row in course_buttons(page)}
+    assert rows[COURSE2_ID]["disabled"] is True, "the course being served is the current one"
+    assert rows[COURSE1_ID]["disabled"] is False, "the default course must be selectable from here"
+    assert rows[COURSE2_ID]["text"].startswith("✓")

@@ -248,8 +248,16 @@ function initializeMenuSystem() {
             ? 'This portal serves one course.'
             : 'Choose a course. The page will reload into it.';
 
+        // Which course this page is, from the page itself.  /api/courses is a
+        // portal route with no <course_id> in its path, so the server has no
+        // request-bound course to report and its `current` is the registry
+        // default -- which marked the default course as current wherever you
+        // actually were, and left it permanently disabled in the list, so you
+        // could never switch back to it.
+        var currentId = (window.LLMGRADER_COURSE_ID || '').trim();
+
         courses.forEach(function (course) {
-            var isCurrent = course.id === payload.current;
+            var isCurrent = course.id === currentId;
             var button = document.createElement('button');
             button.type = 'button';
             button.className = 'menu-item';
@@ -260,7 +268,6 @@ function initializeMenuSystem() {
             button.style.textAlign = 'left';
 
             var label = course.name || course.id;
-            if (course.semester) label += ' — ' + course.semester;
             if (!course.loaded) label += '  (no package loaded)';
             if (isCurrent) label = '✓ ' + label;
             button.textContent = label;
