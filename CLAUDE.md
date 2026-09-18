@@ -71,7 +71,48 @@ Scratch ownership is decided in `claim_scratch_dir` (`grader.py`) and recorded
 on `Grader.owns_scratch`: the first Grader to claim a directory clears it, later
 ones sharing that path do not. Before the split, every `Grader.__init__`
 rmtree'd unconditionally, so a second instance erased the first's staged
-package. See `plans/multicourse.md` for where this is going.
+package. That set is process-global, so it guards several Graders in one
+process and says nothing about a second gunicorn worker -- which is why the
+scratch path itself carries the pid, below.
+
+### Course registry
+
+`llmgrader/services/course_registry.py` holds `CourseRegistry`: which courses
+this portal serves, where each one's files live, and one `Grader` per course --
+all sharing the single `PortalStorage`, so the database is opened and migrated
+once per process. Exactly one course is registered today; the registry is what
+lets a second one arrive later without another storage-layout migration.
+
+```
+<storage>/
+  db/ pref/ soln_images/      # global, PortalStorage's
+  courses/
+    courses.json              # the registry file
+    <course_id>/
+      soln_pkg/               # the extracted package that is served
+      uploads/                # archives as uploaded, newest three kept
+      scratch/pid-<pid>/      # per course *and* per process
+```
+
+**A course id is resolved once and then read.** `<course>` in
+`llmgrader_config.xml` gains an optional `<course_id>`, pattern-constrained in
+`llmgrader_config.xsd` because it becomes a directory name and later a URL path
+segment. When it is absent the id comes from
+`LLMGRADER_MIGRATE_COURSE_ID` if that is set, and otherwise is slugged from
+`<name>` + `<semester>`. Either way it is written to `courses.json` at
+registration with an `id_source` of `authored`, `env` or `derived`, and every
+later boot reads it from there -- so an
+instructor's typo fix in `<name>` cannot silently rename the course out from
+under its submissions, its storage directory and its saved student state.
+
+**Booting a pre-registry portal migrates it.** `<storage>/soln_pkg` with no
+`courses.json` is moved under `courses/<id>/soln_pkg` and registered as the
+default, with no admin action. That package predates `<course_id>` by
+definition, which is exactly why the slug fallback exists.
+
+`run.py --soln_pkg <dir>` is unchanged: it registers that directory as the sole
+course, uses the scratch directory it is given verbatim, and writes no registry
+file.
 
 ### Model registry
 

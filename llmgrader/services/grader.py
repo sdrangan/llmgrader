@@ -100,10 +100,15 @@ def claim_scratch_dir(path: str) -> bool:
     destructive the moment there are two: constructing the second course's
     Grader would wipe the first course's staged package out from under it.
 
-    Until scratch becomes per-course (``plans/multicourse.md``, phase 2), the
-    first claimant owns the directory and any later Grader pointed at the same
-    path shares it without clearing.  Claims are never released; a Grader lives
-    for the life of the process.
+    The first claimant owns the directory and any later Grader pointed at the
+    same path shares it without clearing.  Claims are never released; a Grader
+    lives for the life of the process.
+
+    This is an *in-process* guard and nothing more -- the set is module level,
+    so it says nothing about a second gunicorn worker pointed at the same path.
+    That is why CourseRegistry (phase 2) puts both the course id and the pid in
+    the scratch path: the claim keeps two Graders in one process off each
+    other, and disjoint paths keep two workers off each other.
     """
     resolved = os.path.abspath(path)
     with _claimed_scratch_lock:
@@ -111,6 +116,41 @@ def claim_scratch_dir(path: str) -> bool:
             return False
         _claimed_scratch_dirs.add(resolved)
         return True
+
+
+# Uploaded archives retained per course by prune_uploads.  Three is enough to
+# roll back a bad upload and cheap enough not to think about.
+UPLOAD_RETENTION = 3
+
+
+def prune_uploads(uploads_dir: str, keep: int = UPLOAD_RETENTION) -> list[str]:
+    """Keep the newest *keep* archives in *uploads_dir*, delete the rest.
+
+    Newest by modification time, with the name as a tiebreak so the order is
+    stable for two files written in the same second.
+    """
+    try:
+        names = [
+            name for name in os.listdir(uploads_dir)
+            if os.path.isfile(os.path.join(uploads_dir, name))
+        ]
+    except FileNotFoundError:
+        return []
+
+    names.sort(
+        key=lambda name: (os.path.getmtime(os.path.join(uploads_dir, name)), name),
+        reverse=True,
+    )
+
+    removed = []
+    for name in names[keep:]:
+        path = os.path.join(uploads_dir, name)
+        try:
+            os.remove(path)
+            removed.append(path)
+        except OSError as exc:
+            print(f"[Upload] Could not prune old archive {path}: {exc}")
+    return removed
 
 
 def log_error(msg: str):
@@ -422,6 +462,8 @@ class Grader:
                  soln_pkg : str | None = None,
                  storage : PortalStorage | None = None,
                  owns_scratch : bool | None = None,
+                 course_id : str | None = None,
+                 uploads_dir : str | None = None,
                  ):
         """
         Main Grader service class.
@@ -446,9 +488,20 @@ class Grader:
             Whether this instance may clear *scratch_dir* on construction.
             None -- the default -- means "own it if no live Grader already
             does"; see claim_scratch_dir.
+        course_id: str | None
+            The course this Grader serves, used to resolve its package under
+            <storage>/courses/<id>/soln_pkg when *soln_pkg* is not given.
+            None keeps the pre-registry <storage>/soln_pkg layout.
+        uploads_dir: str | None
+            Where save_uploaded_file keeps the archive as uploaded, newest
+            UPLOAD_RETENTION retained.  None -- what every caller outside the
+            registry passes -- keeps today's behaviour: the archive is written
+            to scratch and forgotten.
         """
         self.scratch_dir = scratch_dir
         self.soln_pkg = soln_pkg
+        self.course_id = course_id
+        self.uploads_dir = uploads_dir
 
         # Opening and migrating the database happens here, inside PortalStorage.
         self.storage = PortalStorage() if storage is None else storage
@@ -545,6 +598,35 @@ class Grader:
         """
         return PortalStorage.initialize_field_format()
 
+    def _save_uploaded_archive(self, file_storage) -> str:
+        """Write the uploaded archive to disk and return where it landed.
+
+        With an uploads_dir (a registered course) the archive is kept under the
+        course, timestamped, and the oldest beyond UPLOAD_RETENTION are pruned.
+        Today the archive is written to scratch and dropped once extracted, so
+        a bad upload is unrecoverable without the instructor's own copy --
+        keeping the last few costs a few megabytes and buys re-extraction
+        without re-upload (plans/multicourse.md, decision 4).
+
+        Without one -- every caller outside the registry -- the old scratch
+        path is used unchanged.
+        """
+        name = os.path.basename(file_storage.filename or "soln_package.zip")
+
+        if self.uploads_dir is None:
+            save_path = os.path.join(self.scratch_dir, name)
+            file_storage.save(save_path)
+            return save_path
+
+        os.makedirs(self.uploads_dir, exist_ok=True)
+        # Milliseconds, so that two uploads in the same second are two files
+        # rather than one overwriting the other.
+        stamp = datetime.now().strftime("%Y%m%dT%H%M%S.%f")[:-3]
+        save_path = os.path.join(self.uploads_dir, f"{stamp}_{name}")
+        file_storage.save(save_path)
+        prune_uploads(self.uploads_dir)
+        return save_path
+
     def save_uploaded_file(self, file_storage):
         """
         Save an uploaded solution package ZIP, extract it into self.soln_pkg,
@@ -552,10 +634,9 @@ class Grader:
         """
 
         # ---------------------------------------------------------
-        # 1. Save uploaded ZIP into scratch
+        # 1. Save the uploaded ZIP (under the course if it has an uploads dir)
         # ---------------------------------------------------------
-        save_path = os.path.join(self.scratch_dir, file_storage.filename)
-        file_storage.save(save_path)
+        save_path = self._save_uploaded_archive(file_storage)
         print(f"[Upload] Saved uploaded file to {save_path}")
 
         # ---------------------------------------------------------
@@ -621,6 +702,7 @@ class Grader:
             scratch_dir=self.scratch_dir,
             soln_pkg=self.soln_pkg,
             supported_tools=self.SUPPORTED_TOOLS,
+            course_id=self.course_id,
         )
         unit_package = parser.parse()
 

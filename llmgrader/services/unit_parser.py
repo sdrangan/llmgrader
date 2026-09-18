@@ -56,10 +56,15 @@ class UnitParser:
         scratch_dir: str,
         soln_pkg: str | None = None,
         supported_tools: list[str] | None = None,
+        course_id: str | None = None,
     ):
         self.scratch_dir = scratch_dir
         self.soln_pkg = soln_pkg
         self.supported_tools = supported_tools or []
+        # Which course's package to resolve under <storage>/courses/ when no
+        # explicit soln_pkg is given.  None keeps the pre-registry layout,
+        # <storage>/soln_pkg (plans/multicourse.md, phase 2).
+        self.course_id = course_id
 
     def _empty_package(self, soln_pkg_path: str) -> UnitPackageData:
         return UnitPackageData(
@@ -89,6 +94,11 @@ class UnitParser:
 
         name = text("name")
         return {
+            # Optional machine-facing id (plans/multicourse.md, decision 3).
+            # The registry resolves an id once, at registration, and reads it
+            # from courses.json afterwards -- so this is the *authored* value,
+            # not necessarily the id the course is registered under.
+            "course_id": text("course_id"),
             "name": name,
             "semester": text("semester") or text("term"),
             "title": text("title") or name,
@@ -687,17 +697,29 @@ class UnitParser:
         return collected_errors
 
     def _resolve_solution_package_path(self) -> str:
+        """Where this parser's package lives.
+
+        An explicit soln_pkg wins.  Otherwise the path is derived from the
+        storage root, and *course_id* decides the layout: with one, the
+        per-course <storage>/courses/<id>/soln_pkg that CourseRegistry owns;
+        without one, the single-course <storage>/soln_pkg this portal used
+        before the registry existed.
+        """
         if self.soln_pkg is not None:
             soln_pkg_path = self.soln_pkg
         else:
             storage_root = os.environ.get("LLMGRADER_STORAGE_PATH")
 
             if storage_root:
-                soln_pkg_path = os.path.join(storage_root, "soln_pkg")
+                root = storage_root
             else:
-                local_root = os.path.join(os.getcwd(), "local_data")
-                os.makedirs(local_root, exist_ok=True)
-                soln_pkg_path = os.path.join(local_root, "soln_pkg")
+                root = os.path.join(os.getcwd(), "local_data")
+                os.makedirs(root, exist_ok=True)
+
+            if self.course_id:
+                soln_pkg_path = os.path.join(root, "courses", self.course_id, "soln_pkg")
+            else:
+                soln_pkg_path = os.path.join(root, "soln_pkg")
 
         soln_pkg_path = os.path.abspath(soln_pkg_path)
         os.makedirs(soln_pkg_path, exist_ok=True)
