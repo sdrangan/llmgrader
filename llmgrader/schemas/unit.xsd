@@ -56,6 +56,21 @@
     <xs:attribute name="condition_type" type="conditionTypeEnum" use="optional"/>
     <xs:attribute name="action" type="actionTypeEnum" use="optional"/>
     <xs:attribute name="point_adjustment" type="xs:decimal" use="optional"/>
+    <!-- The skill this item assesses: an id declared in the course's
+         skills.xml.  Optional, and nothing consumes it yet.  Tagged on the
+         item rather than the question because the grader already decides
+         each item separately (rubric_eval), so a tagged item can say which
+         skill a student missed, not only which skills a problem touches.
+
+         rubric_eval is returned with every grade but is not yet stored in
+         the submissions table, so no skill-level evidence accumulates until
+         it is.  See plans/course_mcp.md, decision 8.
+
+         The common wrong answers behind an item belong in its <notes> as
+         prose, not in a structured field.  There is also deliberately no
+         unit-level list of skills taught: a skill exists only if some
+         problem assesses it, so the tags are the whole record. -->
+    <xs:attribute name="skill" type="xs:token" use="optional"/>
   </xs:complexType>
 
   <xs:complexType name="rubricGroupType">
@@ -75,6 +90,15 @@
       <xs:element name="rubric_total" type="rubricTotalEnum" minOccurs="0"/>
       <xs:element name="points" type="xs:decimal" minOccurs="0"/>
       <xs:element name="tool" type="xs:string" minOccurs="0" maxOccurs="1"/>
+      <!-- What an agent may safely change when generating practice variants
+           of this question, and what it must hold fixed because the rubric
+           keys on it.  Returned by the MCP get_question tool and ignored by
+           the grader.  This is the cheapest possible stand-in for a
+           PrairieLearn generator: the variants live in the student's
+           conversation and are never written back, which is what keeps the
+           question bank small enough to hand over whole.  See
+           plans/course_mcp.md, decision 11. -->
+      <xs:element name="variation_guidance" type="xs:string" minOccurs="0"/>
       <xs:element name="parts" minOccurs="1">
         <xs:complexType>
           <xs:sequence>

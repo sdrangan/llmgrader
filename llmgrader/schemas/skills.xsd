@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" elementFormDefault="qualified">
+
+  <!-- The course's skill vocabulary, a sibling of llmgrader_config.xml.  See
+       plans/course_mcp.md, decisions 7 and 8.
+
+       Deliberately minimal, on the pattern of an agent SKILL.md: an id, a
+       name, a prose description, and the one relation that cannot be
+       computed, the prerequisite edge.  Everything else is either derived
+       from the unit files or kept as prose next to the rubric item it
+       concerns:
+
+         derived   whether a skill is in use (some rubric item tags it),
+                   where it is first taught (the earliest unit, in
+                   llmgrader_config.xml order, holding a tagged item), and
+                   how many units exercise it
+         in prose  the common wrong answers and misconceptions, in the rubric
+                   item's <notes> and the question's <grading_notes>
+
+       A skill's examples are the solved problems whose rubric items tag it.
+       They are found through the tags, not listed here.
+
+       A skill exists only if some problem assesses it.  One taught only in
+       lecture or a demo is left out; adding it back when a problem arrives
+       costs nothing. -->
+
+  <xs:simpleType name="skillIdType">
+    <!-- Referenced from rubric items' skill= attribute.  Same pattern as
+         course_id, since it has to survive being a path segment, a filename
+         fragment and a URL parameter without quoting.  Renaming a skill is a
+         find-and-replace across skills.xml and the unit files: per-item
+         grading results are keyed by rubric item id, not skill id, so the
+         join to skills happens when the results are read. -->
+    <xs:restriction base="xs:token">
+      <xs:pattern value="[a-z0-9][a-z0-9_-]{0,63}"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:simpleType name="prereqStrengthEnum">
+    <!-- A required gap means stop and remediate; a helpful one means mention
+         in passing.  Authored only where the distinction is real. -->
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="required"/>
+      <xs:enumeration value="helpful"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:complexType name="prereqType">
+    <xs:attribute name="ref" type="skillIdType" use="required"/>
+    <xs:attribute name="strength" type="prereqStrengthEnum" use="optional"/>
+  </xs:complexType>
+
+  <xs:complexType name="outcomeRefType">
+    <xs:attribute name="ref" type="skillIdType" use="required"/>
+  </xs:complexType>
+
+  <xs:complexType name="skillType">
+    <xs:sequence>
+      <xs:element name="name" type="xs:token"/>
+      <!-- Two parts, following the SKILL.md convention: what the student can
+           do, then "Use when ..." naming the problems it applies to.  An
+           agent reads this both to decide which skill a student's confusion
+           falls under and to propose tags for new rubric items, and the
+           "when" clause serves both. -->
+      <xs:element name="description" type="xs:string"/>
+      <!-- A choice rather than a sequence, as in rubricItemType: these are
+           hand-edited, and an author should not have to remember that
+           outcomes come after prereqs. -->
+      <xs:choice minOccurs="0" maxOccurs="unbounded">
+        <xs:element name="prereq" type="prereqType"/>
+        <xs:element name="outcome" type="outcomeRefType"/>
+      </xs:choice>
+    </xs:sequence>
+    <xs:attribute name="id" type="skillIdType" use="required"/>
+  </xs:complexType>
+
+  <xs:complexType name="outcomeType" mixed="true">
+    <!-- The ABET / program-outcome tier: unit00's objectives are these, not
+         unit skills.  Optional, but it is what turns outcome reporting into a
+         query once rubric items carry skills and skills carry outcomes. -->
+    <xs:attribute name="id" type="skillIdType" use="required"/>
+  </xs:complexType>
+
+  <xs:element name="skills">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element name="outcomes" minOccurs="0">
+          <xs:complexType>
+            <xs:sequence>
+              <xs:element name="outcome" type="outcomeType" minOccurs="0" maxOccurs="unbounded"/>
+            </xs:sequence>
+          </xs:complexType>
+        </xs:element>
+        <xs:element name="skill" type="skillType" minOccurs="1" maxOccurs="unbounded"/>
+      </xs:sequence>
+      <xs:attribute name="course_id" type="skillIdType" use="optional"/>
+      <xs:attribute name="version" type="xs:token" use="optional"/>
+    </xs:complexType>
+  </xs:element>
+
+</xs:schema>
