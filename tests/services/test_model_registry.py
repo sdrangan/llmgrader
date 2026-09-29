@@ -74,7 +74,9 @@ def test_long_context_rates_are_consistent(model_id: str) -> None:
 
 
 def test_sorted_specs_ramps_simple_to_complex() -> None:
-    assert [spec.tier for spec in sorted_specs()] == ["simple", "standard", "complex"]
+    """A tier may hold several models; the ramp is by tier, never interleaved."""
+    tiers = [spec.tier for spec in sorted_specs()]
+    assert tiers == sorted(tiers, key=TIERS.index)
     assert {spec.id for spec in sorted_specs()} == set(MODEL_REGISTRY)
 
 

@@ -282,6 +282,10 @@ A concrete model id (`gpt-5.6-terra`) is also accepted, and is the right
 choice only when you have a specific reason to pin one exact model — it will
 go stale when the slate changes.
 
+The newer `gpt-6-luna` (tier `simple`) and `gpt-6-sol` (tier `standard`) are
+offered too, but as options only: no tier resolves to them yet. Note that
+`gpt-6-sol` is the GPT-6 counterpart of Terra, not of `gpt-5.6-sol`.
+
 The live list of models, their tiers and the current defaults is served by
 `GET /api/models`.
 

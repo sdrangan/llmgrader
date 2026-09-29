@@ -32,14 +32,28 @@ where you can pick the model. Most of the time you should not have to: your
 instructor can pin the right model to each question, and the dialog is there
 for the exceptions.
 
-There are three models, one generation of the same family, named for how hard
-the problem is rather than for what they cost:
+The three GPT-5.6 models are the defaults, named for how hard the problem is
+rather than for what they cost:
 
 | Model | Use it for | Cost per 1,000 graded questions | Typical response |
 |---|---|---|---|
 | **GPT-5.6 Luna** *(default)* | Routine short answers and single derivations | $0.30 | ~2 s |
 | **GPT-5.6 Terra** | Multi-part derivations, proofs, short code | $2.84 | ~2 s |
 | **GPT-5.6 Sol** | Projects, reports, anything needing long context or web search | $5.35 | ~3 s |
+
+Two newer models from the GPT-6 family are also offered, as options you can
+try rather than defaults:
+
+| Model | Comparable to | List price vs. that model |
+|---|---|---|
+| **GPT-6 Luna** | GPT-5.6 Luna | About half |
+| **GPT-6 Sol** | GPT-5.6 Terra | Slightly less |
+
+Watch the generation number: **GPT-6 Sol is not an upgrade of GPT-5.6 Sol.**
+The GPT-6 names moved down a slot, and GPT-6 Sol is priced, and meant to be
+used, like GPT-5.6 Terra. Neither GPT-6 model has been measured on real grading
+yet, so the costs above are list prices rather than measured ones, and they may
+not be available on your course's shared key.
 
 Worked examples:
 
@@ -57,7 +71,8 @@ when a problem has several dependent steps, not as a general upgrade.
 
 ### What this costs you
 
-All three prices above are measured on real grading requests, not list prices.
+The three GPT-5.6 prices above are measured on real grading requests, not list
+prices.
 A single routine question on Luna costs about **three hundredths of a cent**;
 you would have to grade several thousand questions to spend a dollar. A project
 outline on Sol with a web search is the expensive case at roughly **2 cents per

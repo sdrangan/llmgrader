@@ -50,9 +50,13 @@ anywhere else.
 
 2. **Add the `ModelSpec`** to `MODEL_REGISTRY` in `llmgrader/services/models.py`.
    Fill in `notes`: it is shown to students, and a blank one ships a bare model
-   id to somebody choosing between three options. If the new model is taking
-   over a tier, move `tier_default=True` onto it and off the incumbent — two
-   defaults in one tier is an import-time error, which is the point.
+   id to somebody choosing between several options. A tier may hold more than
+   one model: add a newcomer alongside the incumbent with `tier_default=False`
+   and `offer_free=False`, and it is selectable without changing any grade or
+   the shared key. If the new model is taking over a tier, move
+   `tier_default=True` onto it and off the incumbent — two defaults in one tier
+   is an import-time error, which is the point. Take that step only after
+   [validating the default change](#validating-a-default-change).
 
 3. **Run the offline suite.** It checks the structural invariants: unique ids,
    every tier populated with exactly one default, every provider present in

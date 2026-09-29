@@ -11,6 +11,7 @@ from llmgrader.services.models import (
     DEFAULT_MODEL_STANDARD,
     DEPRECATED_MODEL_ALIASES,
     MODEL_REGISTRY,
+    TIERS,
 )
 
 
@@ -65,7 +66,9 @@ def test_reports_the_defaults(flask_test_client) -> None:
 def test_options_are_ordered_simple_to_complex(flask_test_client) -> None:
     payload = flask_test_client.get("/api/models").get_json()
 
-    assert [m["tier"] for m in payload["models"]] == ["simple", "standard", "complex"]
+    tiers = [m["tier"] for m in payload["models"]]
+    assert tiers == sorted(tiers, key=TIERS.index)
+    assert set(tiers) == set(TIERS)
 
 
 def test_every_entry_carries_guidance(flask_test_client) -> None:
