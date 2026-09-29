@@ -23,6 +23,7 @@ import argparse
 import os
 import sys
 
+from llmgrader.scripts._columns import column_widths, pad
 from llmgrader.services.gradetests import (
     DEFAULT_REPORT_PATH,
     DEFAULT_TIMEOUT,
@@ -329,6 +330,9 @@ def _print_check_result(result: CheckResult, *, verbose: bool) -> None:
     print()
 
     if verbose and result.test_file is not None and result.unit is not None:
+        case_w, qtag_w, mode_w = column_widths(
+            ((case.case_id, case.qtag) for case in result.test_file.cases), (32, 26, 9)
+        )
         for case in result.test_file.cases:
             question = result.unit.questions.get(case.qtag)
             mode = "?" if question is None else ("partial" if question.partial_credit else "binary")
@@ -342,7 +346,10 @@ def _print_check_result(result: CheckResult, *, verbose: bool) -> None:
                     claims.append(f"{expectation.item_id}={expectation.expect}")
                 else:
                     claims.append(f"{expectation.item_id}=[{expectation.min}, {expectation.max}]")
-            print(f"  {case.case_id:<32}{case.qtag:<26}{mode:<9}{'; '.join(claims) or '(no assertions)'}")
+            print(
+                f"  {pad(case.case_id, case_w)}{pad(case.qtag, qtag_w)}{pad(mode, mode_w)}"
+                f"{'; '.join(claims) or '(no assertions)'}"
+            )
         print()
 
     for finding in result.findings:
@@ -413,10 +420,15 @@ def command_run(args) -> int:
         print("error: --repeat must be at least 1.", file=sys.stderr)
         return EXIT_USAGE
 
-    progress = _stream_case if (args.verbose and not args.quiet) else None
+    progress = _CasePrinter() if (args.verbose and not args.quiet) else None
 
     try:
-        report = run_test_files(args.test_files, options, progress=progress)
+        report = run_test_files(
+            args.test_files,
+            options,
+            progress=progress,
+            on_plan=progress.plan if progress is not None else None,
+        )
     except GradeTestError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return EXIT_USAGE
@@ -439,8 +451,9 @@ def _print_dry_run(report, options: RunOptions) -> None:
         f"dry run: {report.planned_calls} call{plural} across {len(report.cases)} cases"
         + (f", {options.repeat} repeats each" if options.repeat > 1 else "")
     )
+    (model_width,) = column_widths(((model_id,) for model_id in report.planned_by_model), [24])
     for model_id, count in sorted(report.planned_by_model.items()):
-        print(f"  {model_id:<24}{count:>6}")
+        print(f"  {pad(model_id, model_width)}{count:>6}")
 
     # The plan already resolved the submission, so a dry run is where an
     # ambiguous qtag or a missing signing key shows up -- before the money.
@@ -449,8 +462,9 @@ def _print_dry_run(report, options: RunOptions) -> None:
         answered = {qtag: item.case.case_id for qtag, item in plan.chosen.items()}
         print()
         print(f"gradescope submission would be written to {plan.zip_path}")
+        (qtag_width,) = column_widths(((qtag,) for qtag in plan.qtags), [29])
         for qtag in plan.qtags:
-            print(f"  {qtag:<28} {answered.get(qtag, '(unanswered, scores 0)')}")
+            print(f"  {pad(qtag, qtag_width)}{answered.get(qtag, '(unanswered, scores 0)')}")
         if plan.digitalsign:
             print("  signed with LLMGRADER_PRIVATE_KEY")
         if plan.optional_case_ids:
@@ -505,10 +519,50 @@ def _margin_column(case) -> str:
     return f"margin {min(margins):g}"
 
 
-def _print_case_line(case) -> None:
+#: Minimum widths of the verdict, case id, qtag, score and margin columns.  The
+#: verdict column fits the longest verdict, FLAKY or ERROR, plus the gap.
+_CASE_COLUMNS = (7, 28, 26, 22, 16)
+
+
+def _case_widths(cases) -> list[int]:
+    """Widths for case lines, sized to every case id and qtag in ``cases``.
+
+    Graded cases also size the score and margin columns.  A planned case has
+    no score yet, so a streamed line keeps their minimums, and :func:`pad`
+    keeps a long score clear of the next column.
+    """
+
+    def row(case):
+        graded = bool(getattr(case, "attempts", None))
+        score = _score_column(case) if graded else ""
+        margin = _margin_column(case) if graded else ""
+        return ("", case.case_id, case.qtag, score, margin)
+
+    return column_widths((row(case) for case in cases), _CASE_COLUMNS)
+
+
+class _CasePrinter:
+    """Prints case lines in columns sized to the whole run.
+
+    Streamed lines go out before the run is over, so the widths are taken
+    from the plan, which ``run_test_files`` hands over through ``on_plan``.
+    """
+
+    def __init__(self) -> None:
+        self.widths = list(_CASE_COLUMNS)
+
+    def plan(self, planned) -> None:
+        self.widths = _case_widths(item.case for item in planned)
+
+    def __call__(self, case) -> None:
+        _print_case_line(case, self.widths)
+
+
+def _print_case_line(case, widths=_CASE_COLUMNS) -> None:
+    verdict_w, case_w, qtag_w, score_w, margin_w = widths
     print(
-        f"  {case.verdict:<6}{case.case_id:<28}{case.qtag:<26}"
-        f"{_score_column(case):<22}{_margin_column(case):<16}{case.model}"
+        f"  {pad(case.verdict, verdict_w)}{pad(case.case_id, case_w)}{pad(case.qtag, qtag_w)}"
+        f"{pad(_score_column(case), score_w)}{pad(_margin_column(case), margin_w)}{case.model}"
     )
     if case.verdict == VERDICT_WARN:
         print("        on the band edge; widen the band or accept flakiness")
@@ -525,10 +579,6 @@ def _print_case_line(case) -> None:
             break  # the first attempt's failures are enough to locate the problem
 
 
-def _stream_case(case) -> None:
-    _print_case_line(case)
-
-
 def _print_run_report(report, options: RunOptions, *, streamed: bool) -> None:
     if streamed:
         return
@@ -536,8 +586,9 @@ def _print_run_report(report, options: RunOptions, *, streamed: bool) -> None:
         print()
         print(f"{file_run.path}  (unit: {file_run.unit_file}, {len(file_run.cases)} cases)")
         print()
+        widths = _case_widths(file_run.cases)
         for case in file_run.cases:
-            _print_case_line(case)
+            _print_case_line(case, widths)
 
 
 def _print_run_summary(report, options: RunOptions) -> None:
@@ -608,10 +659,11 @@ def _print_submission(report) -> None:
         f"gradescope submission: {_num(submission.score)}/{_num(submission.max_score)}"
         + ("  (signed)" if submission.signed else "")
     )
+    (qtag_width,) = column_widths(((question.qtag,) for question in submission.questions), [29])
     for question in submission.questions:
         answer = f"case {question.case_id}" if question.answered else "unanswered"
         print(
-            f"  {question.qtag:<28} {_num(question.score):>4}/{_num(question.max_score):<4} {answer}"
+            f"  {pad(question.qtag, qtag_width)}{_num(question.score):>4}/{_num(question.max_score):<4} {answer}"
         )
     if submission.zip_path:
         print(f"  folder: {submission.directory}")

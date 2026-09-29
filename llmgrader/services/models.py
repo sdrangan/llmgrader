@@ -112,6 +112,17 @@ _GPT56_CONTEXT_TOKENS = 1_050_000
 _LONG_CONTEXT_THRESHOLD = 128_000
 
 
+# The GPT-6 family (launched 2026-09-23) has the same window as GPT-5.6 but
+# bills long-context rates only above 272K input tokens, at 2x input and 1.5x
+# output.  Its names moved down a slot: GPT-6 Astra is the flagship, and
+# GPT-6 Sol is priced like GPT-5.6 Terra rather than GPT-5.6 Sol -- which is
+# why the labels must always carry the generation.  `temperature` is accepted
+# only at reasoning effort `none`; the grader leaves effort at its default, so
+# the flag is False, as for GPT-5.6.
+_GPT6_CONTEXT_TOKENS = 1_050_000
+_GPT6_LONG_CONTEXT_THRESHOLD = 272_000
+
+
 MODEL_REGISTRY: dict[str, ModelSpec] = {
     "gpt-5.6-luna": ModelSpec(
         id="gpt-5.6-luna",
@@ -137,6 +148,27 @@ MODEL_REGISTRY: dict[str, ModelSpec] = {
         # admin into by editing a registry.
         offer_free=True,
     ),
+    # Opt-in until a replay eval says otherwise: neither GPT-6 model is a tier
+    # default or on the shared community key, so adding them changes no grade.
+    "gpt-6-luna": ModelSpec(
+        id="gpt-6-luna",
+        provider="openai",
+        label="GPT-6 Luna",
+        tier="simple",
+        context_tokens=_GPT6_CONTEXT_TOKENS,
+        long_context_threshold=_GPT6_LONG_CONTEXT_THRESHOLD,
+        usd_per_mtok_in=0.10,
+        usd_per_mtok_out=0.50,
+        usd_per_mtok_in_long=0.20,
+        usd_per_mtok_out_long=0.75,
+        supports_temperature=False,
+        supports_web_search=True,
+        supports_images=True,
+        notes=(
+            "Newer, for routine short-answer questions — about half the list "
+            "price of GPT-5.6 Luna; not yet measured on real grading."
+        ),
+    ),
     "gpt-5.6-terra": ModelSpec(
         id="gpt-5.6-terra",
         provider="openai",
@@ -156,6 +188,27 @@ MODEL_REGISTRY: dict[str, ModelSpec] = {
             "fastest at ~2.2 s, about $2.21 per 1,000 graded questions."
         ),
         tier_default=True,
+    ),
+    # Standard, not complex: it is priced in GPT-5.6 Terra's slot.  Whether it
+    # grades complex problems as well as GPT-5.6 Sol is what the eval decides.
+    "gpt-6-sol": ModelSpec(
+        id="gpt-6-sol",
+        provider="openai",
+        label="GPT-6 Sol",
+        tier="standard",
+        context_tokens=_GPT6_CONTEXT_TOKENS,
+        long_context_threshold=_GPT6_LONG_CONTEXT_THRESHOLD,
+        usd_per_mtok_in=2.00,
+        usd_per_mtok_out=10.00,
+        usd_per_mtok_in_long=4.00,
+        usd_per_mtok_out_long=15.00,
+        supports_temperature=False,
+        supports_web_search=True,
+        supports_images=True,
+        notes=(
+            "Newer, for multi-part derivations, proofs and short code — list "
+            "price just under GPT-5.6 Terra; not yet measured on real grading."
+        ),
     ),
     "gpt-5.6-sol": ModelSpec(
         id="gpt-5.6-sol",

@@ -2579,12 +2579,18 @@ def write_gradescope_submission(plan: SubmissionPlan) -> SubmissionResult:
     )
 
 
-def run_test_files(paths, options: RunOptions | None = None, *, progress=None) -> RunReport:
+def run_test_files(
+    paths, options: RunOptions | None = None, *, progress=None, on_plan=None
+) -> RunReport:
     """Grade every case in `paths` and compare the results to its expectations.
 
     Everything expensive happens here, so everything cheap happens first: the
     files are validated, every case is resolved to a question and a model, and
     the call budget is checked before a single request goes out.
+
+    `on_plan` is called once with the planned cases, just before the first
+    call, so a caller streaming `progress` lines can size its columns to every
+    case id and qtag it is about to print.
     """
     options = options or RunOptions()
     resolved_paths = expand_paths(list(paths))
@@ -2641,6 +2647,8 @@ def run_test_files(paths, options: RunOptions | None = None, *, progress=None) -
             )
 
         if not options.dry_run:
+            if on_plan is not None:
+                on_plan(planned)
             _execute_run(planned, options, env, progress)
 
         report.elapsed_seconds = time.time() - started

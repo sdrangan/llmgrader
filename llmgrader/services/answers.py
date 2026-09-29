@@ -944,12 +944,17 @@ def run_answers(
     *,
     caller_factory=None,
     progress=None,
+    on_plan=None,
 ) -> AnswerReport:
     """Answer every question in ``unit_paths`` and write the ``<unit_test>`` files.
 
     Everything expensive happens last: the units are resolved, every question
     is planned to a model, and ``--dry-run`` returns before a single request
     goes out.
+
+    ``on_plan`` is called once with the planned units, just before the first
+    call, so a caller streaming ``progress`` lines can size its columns to
+    every case id and qtag it is about to print.
     """
     options = options or AnswerOptions()
     resolved_paths = expand_paths(list(unit_paths))
@@ -1012,6 +1017,8 @@ def run_answers(
             report.elapsed_seconds = time.time() - started
             return report
 
+        if on_plan is not None:
+            on_plan(units)
         execute_answers(units, options, caller_factory=caller_factory, progress=progress)
 
         for unit in units:
