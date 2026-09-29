@@ -39,6 +39,7 @@ from llmgrader.services.answers import (
     run_answers,
 )
 from llmgrader.services.gradetests import LONG_CONTEXT_CAVEAT, GradeTestError
+from llmgrader.scripts._columns import column_widths, pad
 
 
 EXIT_OK = 0
@@ -182,16 +183,17 @@ def _print_dry_run(report, options: AnswerOptions) -> None:
         f"dry run: {report.planned_calls} call{plural} across {questions} questions"
         + (f", {options.repeat} repeats each" if options.repeat > 1 else "")
     )
+    (model_width,) = column_widths(((model_id,) for model_id in report.planned_by_model), [24])
     for model_id, count in sorted(report.planned_by_model.items()):
-        print(f"  {model_id:<24}{count:>6}")
+        print(f"  {pad(model_id, model_width)}{count:>6}")
 
     for unit in report.units:
         print()
         print(f"{unit.unit_path}  ->  {unit.out_path}")
-        for item in unit.planned:
-            if item.repeat_index != 1:
-                continue
-            print(f"  {item.qtag:<28}{item.model}")
+        firsts = [item for item in unit.planned if item.repeat_index == 1]
+        (qtag_width,) = column_widths(((item.qtag,) for item in firsts), [28])
+        for item in firsts:
+            print(f"  {pad(item.qtag, qtag_width)}{item.model}")
 
     _print_image_warning(report)
 
@@ -253,11 +255,34 @@ def _print_image_warning(report) -> None:
     print("  Build a solution package and pass --pkg to fix this.")
 
 
-def _print_answer(result) -> None:
-    status = "error" if result.error else ("empty" if result.is_empty else ("refused" if result.is_refusal else "ok"))
-    print(f"  {status:<8}{result.case_id:<34}{result.qtag:<28}{result.model}")
-    if result.error:
-        print(f"        {result.error}")
+#: Minimum widths of the status, case id and qtag columns of an answer line.
+_ANSWER_COLUMNS = (8, 34, 28)
+
+
+def _answer_widths(entries) -> list[int]:
+    """Column widths for answer lines, from anything with ``case_id`` and ``qtag``."""
+    return column_widths((("", entry.case_id, entry.qtag) for entry in entries), _ANSWER_COLUMNS)
+
+
+class _AnswerPrinter:
+    """Prints one answer line per result, in columns sized to the whole run.
+
+    Streamed lines go out before the run is over, so the widths are taken
+    from the plan, which ``run_answers`` hands over through ``on_plan``.
+    """
+
+    def __init__(self) -> None:
+        self.widths = list(_ANSWER_COLUMNS)
+
+    def plan(self, units) -> None:
+        self.widths = _answer_widths(item for unit in units for item in unit.planned)
+
+    def __call__(self, result) -> None:
+        status = "error" if result.error else ("empty" if result.is_empty else ("refused" if result.is_refusal else "ok"))
+        status_w, case_w, qtag_w = self.widths
+        print(f"  {pad(status, status_w)}{pad(result.case_id, case_w)}{pad(result.qtag, qtag_w)}{result.model}")
+        if result.error:
+            print(f"        {result.error}")
 
 
 def _print_report(report, *, verbose: bool, streamed: bool) -> None:
@@ -268,8 +293,10 @@ def _print_report(report, *, verbose: bool, streamed: bool) -> None:
         print(f"{unit.unit_path}  ({len(unit.results)} answers)")
         if verbose:
             print()
+            printer = _AnswerPrinter()
+            printer.widths = _answer_widths(unit.results)
             for result in unit.results:
-                _print_answer(result)
+                printer(result)
 
 
 def _print_summary(report, options: AnswerOptions) -> None:
@@ -346,7 +373,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         return EXIT_USAGE
 
-    progress = _print_answer if (args.verbose and not args.quiet) else None
+    progress = _AnswerPrinter() if (args.verbose and not args.quiet) else None
 
     try:
         report = run_answers(
@@ -354,6 +381,7 @@ def main(argv: list[str] | None = None) -> int:
             options,
             caller_factory=_caller_factory(),
             progress=progress,
+            on_plan=progress.plan if progress is not None else None,
         )
     except GradeTestError as exc:  # AnswerError is one of these
         print(f"error: {exc}", file=sys.stderr)
