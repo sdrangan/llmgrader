@@ -93,6 +93,11 @@ class CourseMCPRunner:
     def __init__(self, registry: CourseRegistry):
         self.registry = registry
         self.token = configured_token()
+        # The portal's public address, for links a student can open (a
+        # slide's image).  LLMGRADER_PUBLIC_URL if set; otherwise taken from
+        # each request -- behind Render's proxy, X-Forwarded-Proto says https.
+        self.public_url_override = os.environ.get("LLMGRADER_PUBLIC_URL", "").rstrip("/") or None
+        self.public_url: str | None = self.public_url_override
         if self.token and len(self.token) < MIN_TOKEN_CHARS:
             print(f"[CourseMCP] Warning: {TOKEN_ENV} is under {MIN_TOKEN_CHARS} "
                   "characters; use a long random value.")
@@ -109,7 +114,8 @@ class CourseMCPRunner:
         )
 
     def _start(self) -> None:
-        mcp = build_course_mcp(self.registry, content=self.token is not None)
+        mcp = build_course_mcp(self.registry, content=self.token is not None,
+                               public_url=lambda: self.public_url)
         asgi_app = mcp.streamable_http_app(  # creates mcp.session_manager
             # Mounted at /mcp by the dispatcher, so the app serves its root.
             streamable_http_path="/",
@@ -166,6 +172,10 @@ class CourseMCPRunner:
         if not environ.get("PATH_INFO"):
             environ["PATH_INFO"] = "/"
         token_in_path = self._take_path_token(environ)
+        if not self.public_url_override and environ.get("HTTP_HOST"):
+            scheme = (environ.get("HTTP_X_FORWARDED_PROTO") or environ.get("wsgi.url_scheme")
+                      or "https").split(",")[0].strip()
+            self.public_url = f"{scheme}://{environ['HTTP_HOST']}"
         # Only POST reaches the MCP app.  A GET is a request for a standing
         # server-to-client event stream, which mcp 2 opens and never closes
         # for any client accepting */* -- so a browser, or a crawler, visiting

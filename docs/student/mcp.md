@@ -50,6 +50,10 @@ Once connected, your assistant can:
 - **find where a topic is taught in the lecture slides**, and look at a slide
   -- its image, its text and the instructor's speaker notes.
 
+When your assistant looks at a slide, it sees the image but cannot paste it
+into the chat. Ask it to **"give me the link to that slide"**: each slide has a
+link that opens its image in your browser.
+
 It is set up to help you study rather than hand you answers: it will usually
 start with a hint and show the full solution only if you ask for it. To get the
 most from it, try asking things like:

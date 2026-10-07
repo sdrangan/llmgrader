@@ -111,9 +111,26 @@ def read_config(config_path: str | Path, root_overrides: dict[str, str] | None =
 # ---------------------------------------------------------------------------
 
 
+# PP_PLACEHOLDER: DATE 16, FOOTER 15, SLIDE_NUMBER 13.  Their text is the
+# deck's chrome ("35", "Fall 2026"), not the slide's content: left in, a
+# figure-only slide looks as if it had text.
+_CHROME_PLACEHOLDERS = {13, 15, 16}
+
+
+def _is_chrome(shape) -> bool:
+    if not getattr(shape, "is_placeholder", False):
+        return False
+    try:
+        return int(shape.placeholder_format.type) in _CHROME_PLACEHOLDERS
+    except (AttributeError, ValueError, TypeError):
+        return False
+
+
 def _shape_texts(shape) -> list[str]:
     """Every piece of text in *shape*: text frames, tables, grouped shapes."""
     texts = []
+    if _is_chrome(shape):
+        return texts
     if getattr(shape, "shape_type", None) == 6:  # MSO_SHAPE_TYPE.GROUP
         for child in shape.shapes:
             texts.extend(_shape_texts(child))
@@ -263,6 +280,23 @@ LEGACY_DESCRIPTIONS_FILE = "llmgrader_mcp_descriptions.json"
 EST_TOKENS_IN = 1500
 EST_TOKENS_OUT = 200
 TEXT_ONLY = "TEXT ONLY"
+# Below this much text, a slide is never let off with TEXT ONLY: whatever it
+# says is in its figure.  (A figure-only slide was being skipped.)
+MIN_TEXT_FOR_TEXT_ONLY = 120
+
+_TEXT_ONLY_RULE = (
+    "Only if the slide has no figure, diagram, waveform, table, code, equation "
+    "or image of any kind -- nothing but the text below -- reply with exactly: "
+    + TEXT_ONLY
+)
+_DESCRIBE_ALWAYS = (
+    "The slide has little text, so its content is in what it shows: always "
+    "describe it."
+)
+
+
+def text_only_rule(slide_text: str) -> str:
+    return _TEXT_ONLY_RULE if len(slide_text.strip()) >= MIN_TEXT_FOR_TEXT_ONLY else _DESCRIBE_ALWAYS
 
 DESCRIBE_PROMPT = """\
 This is slide {n} of the lecture deck "{title}", from the course unit "{unit}".
@@ -274,8 +308,7 @@ diagrams, timing waveforms, state diagrams, plots, equations, code and tables
 technical terms a student would search for (for example "Moore machine",
 "handshake", "two's complement").  2 to 5 sentences of plain text, no preamble.
 
-If the slide has no figure and its text says everything, reply with exactly:
-{text_only}
+{text_only_rule}
 
 Slide text:
 {text}
@@ -386,13 +419,15 @@ class DescribePlan:
 
 
 def plan_descriptions(specs: list[DeckSpec], cache: dict, work_dir: Path,
-                      *, force: bool = False) -> DescribePlan:
+                      *, force: bool = False, redo_empty: bool = False) -> DescribePlan:
     """Render every deck into *work_dir* and work out which slides need a call.
 
     A slide is sent when its image is not in *cache* -- which is how an edited
     slide gets a new description and an unchanged one does not -- or always,
     with *force*, to redo descriptions (a better model, a poor result).
-    Identical images are sent once: they share a cache entry.
+    *redo_empty* re-sends only the slides whose description is empty -- the
+    model judged them text-only -- which is what to rerun after the rule for
+    that judgment changes.  Identical images are sent once.
     """
     build_materials(specs, work_dir, log=lambda *_: None, descriptions=cache)
     todo, cached, text_only, replacing = [], 0, [], 0
@@ -413,7 +448,8 @@ def plan_descriptions(specs: list[DeckSpec], cache: dict, work_dir: Path,
             decks[meta["id"]].append((slide["n"], slide["title"], key))
             if key in queued:
                 continue
-            if key in cache and not force:
+            redo = force or (redo_empty and key in cache and not cache[key].get("description"))
+            if key in cache and not redo:
                 cached += 1
                 continue
             replacing += key in cache
@@ -468,7 +504,7 @@ def describe_slides(plan: DescribePlan, directory: Path, *, model_spec, api_key:
         meta, slide, data, key = item
         prompt = DESCRIBE_PROMPT.format(
             n=slide["n"], title=meta["title"], unit=meta["unit"],
-            text=slide["text"] or "(none)", text_only=TEXT_ONLY)
+            text=slide["text"] or "(none)", text_only_rule=text_only_rule(slide["text"]))
         uri = "data:image/jpeg;base64," + base64.b64encode(data).decode("ascii")
         call = make_openai_answer_caller(model=model_spec.id, api_key=api_key,
                                          prompt=prompt, timeout=timeout, images=[uri])

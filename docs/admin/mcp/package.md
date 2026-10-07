@@ -198,6 +198,14 @@ llmgrader_mcp_build --describe --deck fsm --force
 
 Deleting a deck's file and running `--describe` does the same for that deck.
 
+**Slides with an empty description.** The model leaves a description empty
+when it judges a slide to be text only. If some figure slides came back empty,
+redo just those -- it costs a few cents:
+
+```bash
+llmgrader_mcp_build --describe --redo-empty
+```
+
 The folder's location can be changed in `llmgrader_mcp_config.xml`, as the
 first element: `<descriptions path="some/other/folder"/>`, relative to the
 config file.

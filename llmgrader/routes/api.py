@@ -964,6 +964,29 @@ class APIController:
                 return jsonify({"error": "No solution package has been loaded"}), 404
             return send_from_directory(soln_pkg, filename)
 
+        @course_bp.get("/slides/<deck>/<int:number>")
+        def slide_image(deck, number):
+            """One lecture slide's image, for the link the course MCP's
+            get_slide hands a student's assistant.
+
+            An image an MCP tool returns goes to the model, not into the
+            student's chat, so the assistant can describe a slide but not show
+            it; a link the student opens can.  Slides are lecture material, as
+            public as the course's own repository.
+            """
+            from llmgrader.coursemcp.materials import load_materials
+
+            materials = load_materials(self.grader.soln_pkg)
+            found = materials.deck(deck) if materials else None
+            if found is None or not 1 <= number <= len(found["slides"]):
+                return jsonify({"error": "No such slide"}), 404
+            image = found["slides"][number - 1].get("image")
+            path = materials.image_path(deck, image) if image else None
+            if path is None:
+                return jsonify({"error": "This slide has no image"}), 404
+            return send_from_directory(path.parent, path.name, mimetype="image/jpeg",
+                                       max_age=3600)
+
         @bp.get("/api/admin/preferences")
         @self.require_admin
         def get_admin_preferences():

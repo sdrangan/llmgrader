@@ -74,14 +74,15 @@ def run_describe(args, specs) -> int:
     with tempfile.TemporaryDirectory() as work:
         print("Rendering slides to find the ones not yet described...")
         cache = load_descriptions(directory)
-        plan = plan_descriptions(specs, cache, work, force=args.force)
+        plan = plan_descriptions(specs, cache, work, force=args.force,
+                                 redo_empty=args.redo_empty)
         for deck_id in plan.text_only_decks:
             print(f"  [{deck_id}] skipped: no usable PDF, so no images to describe")
         cost = estimate_cost(model, len(plan.todo))
         print(f"\n{len(plan.todo)} slide(s) to describe, {plan.cached} already described "
               f"in {directory.name}/.")
         if plan.replacing:
-            print(f"--force: {plan.replacing} of them already have a description, "
+            print(f"{plan.replacing} of them already have a description, "
                   "which will be replaced.")
         print(f"Model {model.id}: estimated ${cost:.2f} "
               f"(~{len(plan.todo)} calls; the estimate assumes a typical slide).")
@@ -127,14 +128,17 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--force", action="store_true",
                         help="with --describe, redo slides that already have a description "
                              "(not needed after editing slides: changed slides are redone anyway)")
+    parser.add_argument("--redo-empty", action="store_true",
+                        help="with --describe, redo only slides whose description is empty "
+                             "(judged text-only)")
     parser.add_argument("--deck", action="append", default=[], metavar="ID",
                         help="with --describe, only these decks (by id); may be repeated")
     args = parser.parse_args(argv)
 
     try:
         specs = read_config(args.config, parse_roots(args.root))
-        if (args.deck or args.force) and not args.describe:
-            raise MaterialsError("--deck and --force go with --describe")
+        if (args.deck or args.force or args.redo_empty) and not args.describe:
+            raise MaterialsError("--deck, --force and --redo-empty go with --describe")
         if args.deck:
             known = {spec.id for spec in specs}
             unknown = [d for d in args.deck if d not in known]

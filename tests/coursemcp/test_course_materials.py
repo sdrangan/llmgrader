@@ -492,3 +492,76 @@ def test_descriptions_path_can_be_set_in_the_config(tmp_path) -> None:
 </llmgrader_mcp>""", encoding="utf-8")
     assert materials.descriptions_dir(config) == (tmp_path / "notes" / "slide_descriptions").resolve()
     read_config(config)  # and the schema accepts it
+
+
+# ---------------------------------------------------------------------------
+# Showing a slide to the student, and describing the right slides
+# ---------------------------------------------------------------------------
+
+
+def test_get_slide_gives_a_link_the_student_can_open(client) -> None:
+    """A tool's image reaches the model only; the student needs a link."""
+    body = payload(call(client, "get_slide", {"course_id": "alpha", "deck": "fsm", "slide": 1}))
+    assert body["view_url"] == "http://localhost/c/alpha/slides/fsm/1"
+    image = client.get("/c/alpha/slides/fsm/1")
+    assert image.status_code == 200
+    assert image.mimetype == "image/jpeg" and image.data == JPEG
+
+
+def test_search_hits_carry_the_link(client) -> None:
+    hits = items(call(client, "search_slides", {"course_id": "alpha", "query": "mealy"}))
+    assert hits[0]["view_url"] == "http://localhost/c/alpha/slides/fsm/1"
+
+
+def test_no_link_without_an_image(client) -> None:
+    body = payload(call(client, "get_slide", {"course_id": "alpha", "deck": "fifo", "slide": 1}))
+    assert "view_url" not in body
+    assert client.get("/c/alpha/slides/fifo/1").status_code == 404
+
+
+@pytest.mark.parametrize("path", ["/c/alpha/slides/fsm/2", "/c/alpha/slides/fsm/9",
+                                  "/c/alpha/slides/nope/1"])
+def test_slide_route_refuses_what_it_should(client, path) -> None:
+    # fsm/2's image path climbs out of the deck; 9 is out of range.
+    assert client.get(path).status_code == 404
+
+
+def test_slide_number_and_footer_boxes_are_not_slide_text() -> None:
+    """A figure-only slide's "text" was its slide number, "35"."""
+    from types import SimpleNamespace
+
+    from llmgrader.coursemcp.materials import _shape_texts
+
+    def box(text, placeholder_type=None):
+        return SimpleNamespace(
+            shape_type=1, has_text_frame=True, has_table=False,
+            text_frame=SimpleNamespace(text=text),
+            is_placeholder=placeholder_type is not None,
+            placeholder_format=SimpleNamespace(type=placeholder_type))
+
+    assert _shape_texts(box("35", 13)) == []          # slide number
+    assert _shape_texts(box("Fall 2026", 16)) == []   # date
+    assert _shape_texts(box("NYU", 15)) == []         # footer
+    assert _shape_texts(box("Real content", 2)) == ["Real content"]
+    assert _shape_texts(box("Free text box")) == ["Free text box"]
+
+
+def test_a_slide_with_little_text_is_always_described() -> None:
+    from llmgrader.coursemcp.materials import TEXT_ONLY, text_only_rule
+
+    assert TEXT_ONLY not in text_only_rule("")
+    assert TEXT_ONLY not in text_only_rule("A short caption")
+    assert TEXT_ONLY in text_only_rule("A long paragraph of slide text. " * 10)
+
+
+def test_redo_empty_requeues_only_empty_descriptions(tmp_path, monkeypatch) -> None:
+    materials, specs, directory, model, _ = described_deck(tmp_path, monkeypatch, {
+        1: "A real description.", 2: "TEXT ONLY"})
+    plan = materials.plan_descriptions(specs, {}, tmp_path / "w1")
+    materials.describe_slides(plan, directory, model_spec=model, api_key="k", log=lambda *_: None)
+
+    cache = materials.load_descriptions(directory)
+    plain = materials.plan_descriptions(specs, cache, tmp_path / "w2")
+    redo = materials.plan_descriptions(specs, cache, tmp_path / "w3", redo_empty=True)
+    assert len(plain.todo) == 0
+    assert [slide["n"] for _, slide, _, _ in redo.todo] == [2]

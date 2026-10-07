@@ -53,11 +53,13 @@ def log_call(tool: str, **ids) -> None:
     print(f"[CourseMCP] {tool} {detail}".rstrip())
 
 
-def build_course_mcp(registry: CourseRegistry, *, content: bool = False) -> MCPServer:
+def build_course_mcp(registry: CourseRegistry, *, content: bool = False,
+                     public_url=lambda: None) -> MCPServer:
     """An MCP server whose tools read the courses *registry* serves.
 
     *content* adds the question, rubric and solution tools; ``mount.py``
-    passes it only when a course token is configured.
+    passes it only when a course token is configured.  *public_url* returns
+    the portal's public address, for links a student can open, or None.
 
     Only the tools are defined here.  How it is served over HTTP is
     ``mount.py``'s business: in mcp 2 those settings belong to the app, not
@@ -114,7 +116,7 @@ def build_course_mcp(registry: CourseRegistry, *, content: bool = False) -> MCPS
         return items
 
     if content:
-        _add_content_tools(mcp, require_course)
+        _add_content_tools(mcp, require_course, public_url)
 
     return mcp
 
@@ -137,7 +139,14 @@ def _with_figures(payload: dict, figures: list) -> list:
     return blocks
 
 
-def _add_content_tools(mcp: MCPServer, require_course) -> None:
+def _add_content_tools(mcp: MCPServer, require_course, public_url) -> None:
+
+    def slide_url(course_id: str, deck: str, number: int) -> str | None:
+        # The portal's /c/<course>/slides/<deck>/<n> route.  None until a
+        # request has shown the server its own address.
+        base = public_url()
+        return f"{base}/c/{course_id}/slides/{deck}/{number}" if base else None
+
 
     @mcp.tool()
     def list_questions(course_id: str, unit: str | None = None) -> list[dict]:
@@ -302,10 +311,20 @@ def _add_content_tools(mcp: MCPServer, require_course) -> None:
         best match first.  It matches words, not meanings, so if the first
         search misses, try the course's own terms and synonyms (e.g. "FSM",
         "state machine", "next-state logic"), or browse get_outline.
+
+        A hit on a slide with an image carries view_url, a link the student
+        can open to see it.
         """
         log_call("search_slides", course=course_id, unit=unit)  # not the query: student words
         materials = require_materials(require_course(course_id))
-        return materials.search(query, unit=unit)
+        hits = materials.search(query, unit=unit)
+        for hit in hits:
+            deck = materials.deck(hit["deck"])
+            if deck and deck["slides"][hit["slide"] - 1].get("image"):
+                url = slide_url(course_id, hit["deck"], hit["slide"])
+                if url:
+                    hit["view_url"] = url
+        return hits
 
     @mcp.tool()
     def get_slide(course_id: str, deck: str, slide: int):
@@ -314,6 +333,10 @@ def _add_content_tools(mcp: MCPServer, require_course) -> None:
         deck comes from list_materials or search_slides, and slide is its
         number in the deck.  Look at the image: diagrams, waveforms and
         equations are usually only there.
+
+        The image comes to you, not into the student's chat: they cannot see
+        it.  To show them the slide, give them view_url, a link that opens
+        the slide's image in their browser.
         """
         log_call("get_slide", course=course_id, deck=deck, slide=slide)
         materials = require_materials(require_course(course_id))
@@ -331,6 +354,10 @@ def _add_content_tools(mcp: MCPServer, require_course) -> None:
         image = materials.image_path(found["id"], entry["image"]) if entry.get("image") else None
         if image is None:
             payload["image"] = "not available: this deck is served as text only"
+        else:
+            url = slide_url(course_id, found["id"], entry["n"])
+            if url:
+                payload["view_url"] = url
         blocks.append(json.dumps(payload, indent=2, ensure_ascii=False))
         if image is not None:
             blocks.append(Image(data=image.read_bytes(), format="jpeg"))
