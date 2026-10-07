@@ -166,6 +166,67 @@ def test_a_forked_process_starts_its_own_mcp(client, monkeypatch) -> None:
     assert runner._pid == real_pid + 1
 
 
+def within(seconds: float, fn):
+    """Run *fn* in a thread and fail if it has not returned in *seconds*.
+
+    The failures guarded below are hangs, and a hang must fail the suite
+    rather than stall it.
+    """
+    import threading
+
+    box = {}
+    thread = threading.Thread(target=lambda: box.setdefault("result", fn()), daemon=True)
+    thread.start()
+    thread.join(seconds)
+    assert not thread.is_alive(), f"request still open after {seconds}s"
+    return box["result"]
+
+
+MODERN_META = {
+    "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+    "io.modelcontextprotocol/clientCapabilities": {},
+}
+
+
+def modern_rpc(client, method: str, params: dict, extra_headers: dict | None = None):
+    """A request in the 2026-07-28 protocol, which clients are moving to."""
+    headers = {**HEADERS, "MCP-Protocol-Version": "2026-07-28", "Mcp-Method": method,
+               **(extra_headers or {})}
+    body = {"jsonrpc": "2.0", "id": 1, "method": method,
+            "params": {**params, "_meta": MODERN_META}}
+    return client.post("/mcp", json=body, headers=headers)
+
+
+@pytest.mark.parametrize("accept", ["text/html,*/*;q=0.8", "text/event-stream"])
+def test_get_is_refused_at_once_with_a_readable_message(client, accept) -> None:
+    """A GET asks for a standing event stream, which mcp 2 never closes.
+
+    A browser or crawler visiting /mcp would hold gunicorn's only sync worker,
+    and the portal with it.  It must get a 405 instead -- which is also what a
+    person checking the address in a browser reads.
+    """
+    response = within(5, lambda: client.get("/mcp", headers={"Accept": accept}))
+    assert response.status_code == 405
+    assert response.headers["Allow"] == "POST"
+    assert b"course MCP server, and it is running" in response.data
+
+
+def test_subscriptions_listen_is_refused_at_once(client) -> None:
+    """subscriptions/listen is a POST held open for notifications: same hazard."""
+    response = within(5, lambda: modern_rpc(
+        client, "subscriptions/listen", {"notifications": {"toolsListChanged": True}}))
+    assert response.get_json()["error"]["code"] == -32601  # method not found
+
+
+def test_modern_protocol_tool_call(client) -> None:
+    response = within(5, lambda: modern_rpc(
+        client, "tools/call", {"name": "list_courses", "arguments": {}},
+        {"Mcp-Name": "list_courses"}))
+    assert response.status_code == 200
+    courses = response.get_json()["result"]["structuredContent"]["result"]
+    assert {c["course_id"] for c in courses} == {"alpha", "beta"}
+
+
 def test_portal_routes_still_served_beside_mcp(client) -> None:
     assert client.get("/c/alpha/units").status_code == 200
 
@@ -180,7 +241,7 @@ def test_tools_are_listed(client) -> None:
 def test_public_host_header_is_accepted(client) -> None:
     """On Render the Host is the service's own domain, not localhost.
 
-    FastMCP's default DNS-rebinding protection answers that with a 421, which
+    The MCP library's default DNS-rebinding protection answers that with a 421, which
     would leave the endpoint unreachable from every AI client while every
     local test passed.
     """

@@ -58,3 +58,20 @@ def test_server_wrappers_expose_question_examples() -> None:
     assert example["qtag"] == "Exponential graphing"
     assert "<question qtag=\"Exponential graphing\"" in example["question_xml"]
     assert "<solution><![CDATA[" in example["question_xml"]
+
+def test_unknown_example_message_reaches_the_model() -> None:
+    """Through the server, the helper's ValueError must arrive as its message.
+
+    Since mcp 2, an exception other than ToolError reaches the model only as
+    "Error executing tool <name>"; the server's tool decorator translates.
+    """
+    import asyncio
+
+    from mcp.server.mcpserver.exceptions import ToolError, UnexpectedToolError
+
+    from llmgrader.mcp.server import mcp
+
+    with pytest.raises(ToolError, match="Unknown question example id") as excinfo:
+        asyncio.run(mcp.call_tool("llmgrader_get_question_example",
+                                  {"example_id": "missing_example"}))
+    assert not isinstance(excinfo.value, UnexpectedToolError)

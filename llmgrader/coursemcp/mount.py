@@ -4,7 +4,7 @@ The portal is a WSGI app run by ``gunicorn run:app``; the MCP library is ASGI.
 Rather than move the portal onto an ASGI server, the MCP app is wrapped as WSGI
 (a2wsgi) and dispatched by path, so Flask and its start command are unchanged.
 
-FastMCP's HTTP transport needs its session manager running inside an event
+The MCP server's HTTP transport needs its session manager running inside an event
 loop before it can answer.  a2wsgi does not run ASGI lifespan events, so that
 loop runs in a daemon thread started here, and a2wsgi is handed the same loop
 to run requests on.
@@ -18,7 +18,7 @@ happened on Render with the loop started at app creation.  Building everything
 on the first request, and rebuilding if the pid has changed since, makes it
 impossible for a forked process to inherit a running server.  (The session
 manager can only be ``run()`` once per instance, so a rebuild means a new
-FastMCP, not just a new thread.)
+MCPServer, not just a new thread.)
 """
 
 from __future__ import annotations
@@ -29,6 +29,7 @@ import threading
 
 from a2wsgi import ASGIMiddleware
 from flask import Flask
+from mcp.server.transport_security import TransportSecuritySettings
 from werkzeug.middleware.dispatcher import DispatcherMiddleware
 
 from llmgrader.coursemcp.server import build_course_mcp
@@ -36,6 +37,14 @@ from llmgrader.services.course_registry import CourseRegistry
 
 MOUNT_PATH = "/mcp"
 START_TIMEOUT_S = 10
+
+# What a browser shows at /mcp.  Worded for the person checking the address,
+# since that is who sends a GET.
+NOT_POST_MESSAGE = (
+    b"This is the course MCP server, and it is running.\n\n"
+    b"It is not a web page: add this address to an AI assistant as a "
+    b"connector (MCP server) instead of opening it in a browser.\n"
+)
 
 
 class CourseMCPRunner:
@@ -57,7 +66,23 @@ class CourseMCPRunner:
 
     def _start(self) -> None:
         mcp = build_course_mcp(self.registry)
-        asgi_app = mcp.streamable_http_app()  # creates mcp.session_manager
+        asgi_app = mcp.streamable_http_app(  # creates mcp.session_manager
+            # Mounted at /mcp by the dispatcher, so the app serves its root.
+            streamable_http_path="/",
+            # No per-client session on the server: each POST is answered on
+            # its own, so any gunicorn worker can take any request.
+            stateless_http=True,
+            # A plain JSON body rather than an event stream, which is all a
+            # read-only tool needs and passes through WSGI unbuffered or not.
+            json_response=True,
+            # DNS-rebinding protection is switched on whenever the host is
+            # localhost, which is the default.  It then allows only localhost
+            # Host headers, so on Render every request would be refused.  It
+            # guards servers on a user's own machine; this one is public.
+            transport_security=TransportSecuritySettings(
+                enable_dns_rebinding_protection=False
+            ),
+        )
 
         loop = asyncio.new_event_loop()
         started = threading.Event()
@@ -96,6 +121,19 @@ class CourseMCPRunner:
         # redirected POST is not something to depend on.
         if not environ.get("PATH_INFO"):
             environ["PATH_INFO"] = "/"
+        # Only POST reaches the MCP app.  A GET is a request for a standing
+        # server-to-client event stream, which mcp 2 opens and never closes
+        # for any client accepting */* -- so a browser, or a crawler, visiting
+        # /mcp would hold gunicorn's only sync worker, and the portal with it.
+        # This server sends nothing unprompted, and the MCP spec has a server
+        # without that stream answer GET with 405.  That is also the clearest
+        # thing a person checking the address in a browser can be shown.
+        if environ.get("REQUEST_METHOD") != "POST":
+            start_response("405 Method Not Allowed", [
+                ("Allow", "POST"),
+                ("Content-Type", "text/plain; charset=utf-8"),
+            ])
+            return [NOT_POST_MESSAGE]
         try:
             mcp_wsgi = self.wsgi()
         except Exception as exc:
