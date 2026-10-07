@@ -143,10 +143,10 @@ search can find them, and an assistant knows what a figure shows before it
 opens it.
 
 It is the one step that **costs money**, so it is separate and never runs on its
-own. It costs very little -- about **$0.15 for 275 slides** with the default
-model -- and you pay **once per slide**: results are saved in
-`llmgrader_mcp_descriptions.json` beside your config and reused by every later
-build.
+own. It costs very little -- about **$0.27 for 500 slides** with the default
+model -- and you pay **once per slide**: results are saved in a
+`llmgrader_mcp_descriptions/` folder beside your config, one file per deck, and
+reused by every later build.
 
 1. **Make sure the PDFs are up to date** (step 2). Only slides with an image
    can be described; text-only decks are skipped.
@@ -176,15 +176,31 @@ build.
    interrupted, or some calls fail, run it again: what was already described
    is saved, and only the rest is sent.
 
-5. **Spot-check a few descriptions** in `llmgrader_mcp_descriptions.json`
-   against the slides. They are written by a model; an occasional detail may
-   be wrong.
-6. **Commit `llmgrader_mcp_descriptions.json`** with your course files, so the
-   next build -- on any machine -- reuses it.
+5. **Spot-check a few descriptions** against the slides. Each deck has its own
+   file -- `llmgrader_mcp_descriptions/fsm.json` and so on -- listing its
+   slides in order with their number, title and description. They are written
+   by a model; an occasional detail may be wrong.
+6. **Commit the `llmgrader_mcp_descriptions/` folder** with your course files,
+   so the next build -- on any machine -- reuses it. It is the only copy of
+   what you paid for.
 
 **When you change slides:** re-export the PDF and run `--describe` again. Each
-description is keyed by the slide's image, so only slides that actually look
-different are sent; unchanged slides, even renumbered ones, cost nothing.
+description is matched to its slide by the slide's image, so only slides that
+actually look different are sent; unchanged slides, even renumbered ones, cost
+nothing, and their files are renumbered to match.
+
+**To redo descriptions** -- with a stronger model, or because a deck's came out
+poorly -- use `--force`, optionally limited with `--deck`:
+
+```bash
+llmgrader_mcp_build --describe --deck fsm --force
+```
+
+Deleting a deck's file and running `--describe` does the same for that deck.
+
+The folder's location can be changed in `llmgrader_mcp_config.xml`, as the
+first element: `<descriptions path="some/other/folder"/>`, relative to the
+config file.
 
 To use a stronger model, pass `--model standard` (about ten times the cost).
 `--model` accepts a tier name or a model id from the

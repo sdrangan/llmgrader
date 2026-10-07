@@ -255,7 +255,9 @@ def build_materials(specs: list[DeckSpec], package_dir: str | Path, *, log=print
 # Describe (the one step that costs money)
 # ---------------------------------------------------------------------------
 
-DESCRIPTIONS_FILE = "llmgrader_mcp_descriptions.json"
+DESCRIPTIONS_DIR = "llmgrader_mcp_descriptions"
+# The single-file format of the first release; split per deck on first use.
+LEGACY_DESCRIPTIONS_FILE = "llmgrader_mcp_descriptions.json"
 # Rough per-slide token use, for the estimate --dry-run prints before anything
 # is spent: a 1280-px slide image plus its text in, a few sentences out.
 EST_TOKENS_IN = 1500
@@ -280,27 +282,66 @@ Slide text:
 """
 
 
-def descriptions_path(config_path: str | Path) -> Path:
-    """The description cache: beside the MCP config, and meant to be committed."""
-    return Path(config_path).resolve().parent / DESCRIPTIONS_FILE
+def descriptions_dir(config_path: str | Path) -> Path:
+    """Where the descriptions live: ``<descriptions path>`` in the config, or
+    ``llmgrader_mcp_descriptions/`` beside it.  Meant to be committed.
 
+    One JSON file per deck, entries in slide order, so a lecture's
+    descriptions can be read top to bottom, a diff shows one lecture, and
+    deleting a deck's file redoes just that lecture.
+    """
+    import xml.etree.ElementTree as ET
 
-def load_descriptions(path: str | Path) -> dict:
+    config_path = Path(config_path).resolve()
     try:
-        return json.loads(Path(path).read_text(encoding="utf-8")).get("slides", {})
+        elem = ET.parse(config_path).getroot().find("descriptions")
+    except (OSError, ET.ParseError):
+        elem = None
+    relative = elem.get("path") if elem is not None and elem.get("path") else DESCRIPTIONS_DIR
+    return (config_path.parent / relative).resolve()
+
+
+def _legacy_file(directory: Path) -> Path:
+    return Path(directory).parent / LEGACY_DESCRIPTIONS_FILE
+
+
+def load_descriptions(directory: str | Path) -> dict:
+    """Every description, keyed by ``image_key``: the deck files in
+    *directory*, over the legacy single file if one is still beside it.
+
+    Matching is by the slide image, not by deck and number, so a renumbered
+    slide keeps its description and an edited one is described afresh; an
+    identical image in two decks is described once.
+    """
+    directory = Path(directory)
+    cache: dict = {}
+    try:
+        legacy = json.loads(_legacy_file(directory).read_text(encoding="utf-8"))
+        cache.update(legacy.get("slides", {}))
     except (OSError, ValueError):
-        return {}
+        pass
+    for path in sorted(directory.glob("*.json")) if directory.is_dir() else []:
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        for entry in data.get("slides", []):
+            cache[entry["image_sha256"]] = {
+                "description": entry.get("description", ""), "model": entry.get("model", ""),
+                "deck": data.get("deck", path.stem), "slide": entry.get("slide"),
+            }
+    return cache
 
 
-def _save_descriptions(path: Path, slides: dict) -> None:
+def _replace(tmp: Path, path: Path) -> None:
+    """``tmp.replace(path)``, waiting out a brief lock.
+
+    On Windows the replace fails while anything else has the file open -- an
+    editor, a virus scan, the search indexer, a reader counting entries.
+    Those holds are brief, so wait them out rather than fail the slide.
+    """
     import time
 
-    tmp = path.with_suffix(".tmp")
-    tmp.write_text(json.dumps({"version": 1, "slides": slides}, indent=1,
-                              ensure_ascii=False, sort_keys=True), encoding="utf-8")
-    # On Windows the replace fails while anything else has the file open --
-    # an editor, a virus scan, the search indexer, a reader counting entries.
-    # Those holds are brief, so wait them out rather than fail the slide.
     for attempt in range(20):
         try:
             tmp.replace(path)
@@ -311,12 +352,37 @@ def _save_descriptions(path: Path, slides: dict) -> None:
             time.sleep(0.25)
 
 
+def write_deck_descriptions(directory: Path, deck_id: str, slides: list, cache: dict) -> None:
+    """Write one deck's file from its *current* slides, in slide order.
+
+    Rewriting from the current slides is what renumbers entries after slides
+    are inserted, and drops descriptions of images no longer in the deck.
+    *slides* is ``[(number, title, image_key), ...]``.
+    """
+    entries = [
+        {"slide": number, "title": title, "description": cache[key]["description"],
+         "model": cache[key].get("model", ""), "image_sha256": key}
+        for number, title, key in slides if key in cache
+    ]
+    if not entries:
+        return
+    directory = Path(directory)
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / f"{deck_id}.json"
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps({"version": 2, "deck": deck_id, "slides": entries},
+                              indent=1, ensure_ascii=False), encoding="utf-8")
+    _replace(tmp, path)
+
+
 @dataclass
 class DescribePlan:
     todo: list            # (deck_meta, slide, image_bytes, key) to describe
-    cached: int           # slides with an image already in the cache, left alone
+    cached: int           # slides with an image already described, left alone
     text_only_decks: list  # deck ids with no usable images, so nothing to describe
-    replacing: int = 0    # with force: slides in todo whose cached description is replaced
+    replacing: int = 0    # with force: slides in todo whose description is replaced
+    # Every deck with images: deck id -> [(number, title, image_key), ...]
+    decks: dict = field(default_factory=dict)
 
 
 def plan_descriptions(specs: list[DeckSpec], cache: dict, work_dir: Path,
@@ -330,6 +396,7 @@ def plan_descriptions(specs: list[DeckSpec], cache: dict, work_dir: Path,
     """
     build_materials(specs, work_dir, log=lambda *_: None, descriptions=cache)
     todo, cached, text_only, replacing = [], 0, [], 0
+    decks: dict = {}
     queued: set[str] = set()
     root = Path(work_dir) / MATERIALS_DIR
     manifest = json.loads((root / MANIFEST).read_text(encoding="utf-8"))
@@ -339,9 +406,11 @@ def plan_descriptions(specs: list[DeckSpec], cache: dict, work_dir: Path,
             continue
         deck_dir = root / "slides" / meta["id"]
         deck = json.loads((deck_dir / "deck.json").read_text(encoding="utf-8"))
+        decks[meta["id"]] = []
         for slide in deck["slides"]:
             data = (deck_dir / slide["image"]).read_bytes()
             key = image_key(data)
+            decks[meta["id"]].append((slide["n"], slide["title"], key))
             if key in queued:
                 continue
             if key in cache and not force:
@@ -350,7 +419,7 @@ def plan_descriptions(specs: list[DeckSpec], cache: dict, work_dir: Path,
             replacing += key in cache
             queued.add(key)
             todo.append((meta, slide, data, key))
-    return DescribePlan(todo, cached, text_only, replacing)
+    return DescribePlan(todo, cached, text_only, replacing, decks)
 
 
 def estimate_cost(model_spec, slides: int) -> float:
@@ -358,20 +427,39 @@ def estimate_cost(model_spec, slides: int) -> float:
                      + EST_TOKENS_OUT * model_spec.usd_per_mtok_out) / 1e6
 
 
-def describe_slides(plan: DescribePlan, cache_path: Path, *, model_spec, api_key: str,
+def sync_descriptions(plan: DescribePlan, directory: Path, cache: dict, *, log=print) -> None:
+    """Rewrite every deck's file from the current slides, and retire a legacy file.
+
+    Free: no model call.  It renumbers entries after slides moved, and on the
+    first run after the per-deck format, splits the old single file -- which is
+    then renamed ``.bak`` rather than deleted, since until the deck files are
+    committed it is the only copy of what was paid for.
+    """
+    for deck_id, slides in plan.decks.items():
+        write_deck_descriptions(directory, deck_id, slides, cache)
+    legacy = _legacy_file(directory)
+    if legacy.is_file():
+        backup = legacy.with_suffix(".json.bak")
+        _replace(legacy, backup)
+        log(f"Split {legacy.name} into {Path(directory).name}/<deck>.json; "
+            f"the old file is now {backup.name} and can be deleted.")
+
+
+def describe_slides(plan: DescribePlan, directory: Path, *, model_spec, api_key: str,
                     workers: int = 8, timeout: float = 120, log=print) -> tuple[int, float]:
     """Describe every slide in *plan*; returns ``(described, usd_spent)``.
 
-    The cache is saved after every slide, so an interruption -- or a failed
-    call -- loses nothing already paid for, and re-running picks up where it
-    stopped.
+    A deck's file is rewritten after every slide, so an interruption -- or a
+    failed call -- loses nothing already paid for, and re-running picks up
+    where it stopped.
     """
     import base64
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
     from llmgrader.services.answers import make_openai_answer_caller
 
-    cache = load_descriptions(cache_path)
+    cache = load_descriptions(directory)
+    sync_descriptions(plan, directory, cache, log=log)
     lock = threading.Lock()
     spent = [0.0]
     done = [0]
@@ -393,7 +481,10 @@ def describe_slides(plan: DescribePlan, cache_path: Path, *, model_spec, api_key
                           "deck": meta["id"], "slide": slide["n"]}
             spent[0] += cost
             done[0] += 1
-            _save_descriptions(cache_path, cache)
+            # Every deck that shows this image -- usually just the one.
+            for deck_id, slides in plan.decks.items():
+                if any(k == key for _, _, k in slides):
+                    write_deck_descriptions(directory, deck_id, slides, cache)
             if done[0] % 25 == 0 or done[0] == len(plan.todo):
                 log(f"  {done[0]}/{len(plan.todo)} described, ${spent[0]:.2f} so far")
 

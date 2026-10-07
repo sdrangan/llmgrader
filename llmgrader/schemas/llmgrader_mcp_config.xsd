@@ -46,6 +46,14 @@
   <xs:element name="llmgrader_mcp">
     <xs:complexType>
       <xs:sequence>
+        <!-- Where llmgrader_mcp_build describe writes the slide descriptions,
+             one JSON file per deck; relative to this file.  Default:
+             llmgrader_mcp_descriptions/ beside it.  Commit that folder. -->
+        <xs:element name="descriptions" minOccurs="0">
+          <xs:complexType>
+            <xs:attribute name="path" type="xs:string" use="required"/>
+          </xs:complexType>
+        </xs:element>
         <xs:element name="roots" minOccurs="0">
           <xs:complexType>
             <xs:sequence>

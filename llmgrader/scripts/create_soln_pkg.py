@@ -208,13 +208,13 @@ def main():
     mcp_config = config_dir / 'llmgrader_mcp_config.xml'
     if mcp_config.exists():
         from llmgrader.coursemcp.materials import (
-            MaterialsError, build_materials, descriptions_path, load_descriptions, read_config)
+            MaterialsError, build_materials, descriptions_dir, load_descriptions, read_config)
         print(f"Building course MCP material from {mcp_config.name}:")
         try:
             # Slide descriptions are read from the cache llmgrader_mcp_build
             # --describe writes; this build itself never calls a model.
             build_materials(read_config(mcp_config), output_dir,
-                            descriptions=load_descriptions(descriptions_path(mcp_config)))
+                            descriptions=load_descriptions(descriptions_dir(mcp_config)))
         except (MaterialsError, ImportError) as exc:
             print(f"Error: {exc}")
             if isinstance(exc, ImportError):

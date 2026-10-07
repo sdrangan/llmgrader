@@ -304,7 +304,7 @@ def described_deck(tmp_path, monkeypatch, replies):
     make_pdf(pub / "deck.pdf", 2)
     config = write_config(tmp_path, '<deck id="d" root="pub" unit="U" pdf="deck.pdf">deck.pptx</deck>')
     specs = read_config(config)
-    cache = materials.descriptions_path(config)
+    cache = materials.descriptions_dir(config)
     calls = []
     monkeypatch.setattr(answers, "make_openai_answer_caller", fake_caller(replies, calls))
     model = models.default_for_tier("simple")
@@ -439,6 +439,56 @@ def test_save_waits_out_a_briefly_locked_file(tmp_path, monkeypatch) -> None:
 
     monkeypatch.setattr(Path, "replace", flaky_replace)
     monkeypatch.setattr("time.sleep", lambda _s: None)
-    path = tmp_path / "llmgrader_mcp_descriptions.json"
-    materials._save_descriptions(path, {"k": {"description": "d"}})
-    assert materials.load_descriptions(path) == {"k": {"description": "d"}}
+    directory = tmp_path / "llmgrader_mcp_descriptions"
+    materials.write_deck_descriptions(directory, "d", [(1, "Title", "k")],
+                                      {"k": {"description": "d", "model": "m"}})
+    assert materials.load_descriptions(directory)["k"]["description"] == "d"
+
+
+def test_descriptions_are_one_file_per_deck_in_slide_order(tmp_path, monkeypatch) -> None:
+    """Readable top to bottom: a lecture's descriptions, numbered and titled."""
+    materials, specs, directory, model, _ = described_deck(tmp_path, monkeypatch, {
+        1: "First figure.", 2: "Second figure."})
+    plan = materials.plan_descriptions(specs, {}, tmp_path / "w")
+    materials.describe_slides(plan, directory, model_spec=model, api_key="k", log=lambda *_: None)
+
+    assert directory == tmp_path / "llmgrader_mcp_descriptions"
+    assert [p.name for p in directory.iterdir()] == ["d.json"]
+    data = json.loads((directory / "d.json").read_text(encoding="utf-8"))
+    assert data["deck"] == "d"
+    assert [(e["slide"], e["title"], e["description"]) for e in data["slides"]] == [
+        (1, "Waveforms", "First figure."), (2, "Summary", "Second figure.")]
+
+
+def test_legacy_single_file_is_split_without_paying(tmp_path, monkeypatch) -> None:
+    """The first release wrote one file; its descriptions carry over for free."""
+    materials, specs, directory, model, calls = described_deck(tmp_path, monkeypatch, {})
+    plan = materials.plan_descriptions(specs, {}, tmp_path / "w1")
+    keys = [key for _, _, key in plan.decks["d"]]
+    legacy = tmp_path / "llmgrader_mcp_descriptions.json"
+    legacy.write_text(json.dumps({"version": 1, "slides": {
+        keys[0]: {"description": "Old one.", "model": "m", "deck": "d", "slide": 1},
+        keys[1]: {"description": "Old two.", "model": "m", "deck": "d", "slide": 2},
+    }}), encoding="utf-8")
+
+    cache = materials.load_descriptions(directory)
+    again = materials.plan_descriptions(specs, cache, tmp_path / "w2")
+    assert len(again.todo) == 0  # nothing to buy: the legacy file counts
+    materials.sync_descriptions(again, directory, cache, log=lambda *_: None)
+
+    assert not legacy.exists()
+    assert (tmp_path / "llmgrader_mcp_descriptions.json.bak").exists()
+    data = json.loads((directory / "d.json").read_text(encoding="utf-8"))
+    assert [e["description"] for e in data["slides"]] == ["Old one.", "Old two."]
+    assert calls == []
+
+
+def test_descriptions_path_can_be_set_in_the_config(tmp_path) -> None:
+    from llmgrader.coursemcp import materials
+
+    config = tmp_path / "llmgrader_mcp_config.xml"
+    config.write_text("""<llmgrader_mcp>
+  <descriptions path="notes/slide_descriptions"/>
+</llmgrader_mcp>""", encoding="utf-8")
+    assert materials.descriptions_dir(config) == (tmp_path / "notes" / "slide_descriptions").resolve()
+    read_config(config)  # and the schema accepts it

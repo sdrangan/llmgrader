@@ -14,8 +14,8 @@ published, and for --describe.
 
 --describe asks a vision model to describe each slide's figures, so that
 search_slides can find a topic that appears only in a diagram.  The results
-go to llmgrader_mcp_descriptions.json beside the config -- commit it -- keyed
-by each slide image's content, so a slide is paid for once, and every later
+go to llmgrader_mcp_descriptions/, one JSON file per deck in slide order,
+beside the config -- commit it -- matched to slides by each image's content, so a slide is paid for once, and every later
 build (including create_soln_pkg) reads it for free.  After editing slides,
 plain --describe redoes just the ones whose image changed; --force redoes
 slides that already have a description (a better --model, or a poor result).  Only slides with an
@@ -36,11 +36,12 @@ from llmgrader.coursemcp.materials import (
     MaterialsError,
     build_materials,
     describe_slides,
-    descriptions_path,
+    descriptions_dir,
     estimate_cost,
     load_descriptions,
     plan_descriptions,
     read_config,
+    sync_descriptions,
 )
 
 DEFAULT_CONFIG = "llmgrader_mcp_config.xml"
@@ -69,21 +70,28 @@ def resolve_model(value: str):
 
 def run_describe(args, specs) -> int:
     model = resolve_model(args.model)
-    cache_path = descriptions_path(args.config)
+    directory = descriptions_dir(args.config)
     with tempfile.TemporaryDirectory() as work:
         print("Rendering slides to find the ones not yet described...")
-        plan = plan_descriptions(specs, load_descriptions(cache_path), work, force=args.force)
+        cache = load_descriptions(directory)
+        plan = plan_descriptions(specs, cache, work, force=args.force)
         for deck_id in plan.text_only_decks:
             print(f"  [{deck_id}] skipped: no usable PDF, so no images to describe")
         cost = estimate_cost(model, len(plan.todo))
-        print(f"\n{len(plan.todo)} slide(s) to describe, {plan.cached} already in "
-              f"{cache_path.name}.")
+        print(f"\n{len(plan.todo)} slide(s) to describe, {plan.cached} already described "
+              f"in {directory.name}/.")
         if plan.replacing:
             print(f"--force: {plan.replacing} of them already have a description, "
                   "which will be replaced.")
         print(f"Model {model.id}: estimated ${cost:.2f} "
               f"(~{len(plan.todo)} calls; the estimate assumes a typical slide).")
-        if args.dry_run or not plan.todo:
+        if args.dry_run:
+            return 0
+        if not plan.todo:
+            # Nothing to buy, but the deck files are still brought up to date:
+            # renumbered after slides moved, or split out of a legacy file.
+            sync_descriptions(plan, directory, cache)
+            print(f"Nothing to describe; {directory.name}/ is up to date.")
             return 0
         api_key = os.environ.get("OPENAI_API_KEY")
         if not api_key:
@@ -93,9 +101,10 @@ def run_describe(args, specs) -> int:
             if answer.strip().lower() not in {"y", "yes"}:
                 print("Nothing spent.")
                 return 0
-        described, spent = describe_slides(plan, cache_path, model_spec=model, api_key=api_key)
-        print(f"\nDescribed {described} slide(s) for ${spent:.2f}; saved to {cache_path}.")
-        print("Commit that file, then rebuild the package (create_soln_pkg) to include them.")
+        described, spent = describe_slides(plan, directory, model_spec=model, api_key=api_key)
+        print(f"\nDescribed {described} slide(s) for ${spent:.2f}; saved in {directory}.")
+        print(f"Commit {directory.name}/, then rebuild the package (create_soln_pkg) "
+              "to include them.")
     return 0
 
 
@@ -146,7 +155,7 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         print(f"Building slide material into {args.package}:")
         build_materials(specs, args.package,
-                        descriptions=load_descriptions(descriptions_path(args.config)))
+                        descriptions=load_descriptions(descriptions_dir(args.config)))
     except MaterialsError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
