@@ -36,6 +36,22 @@ def clean_cdata(text: str) -> str:
     return strip_code_block_leading_newlines(text)
 
 
+def element_text(elem) -> str:
+    """Everything inside *elem*, inline markup included, as clean_cdata cleans it.
+
+    ``elem.text`` is only the text *before the first child element*, so a
+    rubric condition written as ``the <code>v</code> update ...`` outside
+    CDATA was cut to "the".  The children are serialized back as written --
+    an author's ``<code>`` is the same markup a CDATA block would have carried.
+    """
+    if elem is None:
+        return ""
+    inner = (elem.text or "") + "".join(
+        ET.tostring(child, encoding="unicode") for child in elem
+    )
+    return clean_cdata(inner)
+
+
 @dataclass
 class UnitPackageData:
     units: dict
@@ -823,15 +839,15 @@ class UnitParser:
             part = "all"
 
         condition_elem = rubric_item.find("condition")
-        condition = clean_cdata(condition_elem.text if condition_elem is not None else "")
+        condition = element_text(condition_elem)
 
         display_text_elem = rubric_item.find("display_text")
-        display_text = clean_cdata(display_text_elem.text if display_text_elem is not None else "")
+        display_text = element_text(display_text_elem)
         if not display_text:
             display_text = condition
 
         notes_elem = rubric_item.find("notes")
-        notes = clean_cdata(notes_elem.text if notes_elem is not None else "")
+        notes = element_text(notes_elem)
 
         rubric_data = {
             "condition": condition,
@@ -1227,10 +1243,10 @@ class UnitParser:
                             )
 
                         question_text_elem = question.find("question_text")
-                        question_text = clean_cdata(question_text_elem.text if question_text_elem is not None else "")
+                        question_text = element_text(question_text_elem)
 
                         solution_elem = question.find("solution")
-                        solution = clean_cdata(solution_elem.text if solution_elem is not None else "")
+                        solution = element_text(solution_elem)
                         # Extract first: the extractor resolves the unprefixed
                         # /pkg_assets/ form against the package on disk, and it
                         # has no business knowing about URLs.
@@ -1239,7 +1255,7 @@ class UnitParser:
                         question_text = self._scope_pkg_asset_urls(question_text)
 
                         grading_notes_elem = question.find("grading_notes")
-                        grading_notes = clean_cdata(grading_notes_elem.text if grading_notes_elem is not None else "")
+                        grading_notes = element_text(grading_notes_elem)
 
                         required_elem = question.find("required")
                         if required_elem is None:
