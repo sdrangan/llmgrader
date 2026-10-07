@@ -1250,6 +1250,11 @@ class APIController:
                 payload, status_code = result
                 return jsonify(payload), status_code
 
+            if target_id:
+                # The package may have renamed the course (a new course number,
+                # a new semester); the id is unchanged, only what it is called.
+                self.registry.refresh_display(target_id)
+
             if isinstance(result, dict):
                 result = dict(result)
                 result["course_id"] = target_id
