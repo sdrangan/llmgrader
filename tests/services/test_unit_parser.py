@@ -235,3 +235,54 @@ def test_display_text_part_label_not_warned_for_whole_question_items() -> None:
     # part="all" gets no prefix from the grader, so there is nothing to double.
     result = UnitParser.validate_unit_text(_unit_with_display_text("Part a: Thing", part="all"))
     assert [w for w in result["warnings"] if "display_text" in w] == []
+
+
+INLINE_MARKUP_UNIT = r"""<unit id="u" title="U" version="1.0">
+  <question qtag="Q">
+    <question_text>Simulate the <code>always_ff</code> block.</question_text>
+    <solution>Use <b>non-blocking</b> assignments.</solution>
+    <grading_notes>Accept <code>&lt;=</code> or an equivalent.</grading_notes>
+    <partial_credit>true</partial_credit>
+    <parts>
+      <part><part_label>a</part_label><points>2</points></part>
+    </parts>
+    <rubrics>
+      <item id="r1" part="a" point_adjustment="+2">
+        <display_text>Uses the old <code>x</code></display_text>
+        <condition>The <code>v</code> update tests the pre-update value of
+        <code>x</code>, so the step out of \((25,10)\) gives \((35,10)\).</condition>
+        <notes>Do not award it if the student flips <code>v</code> one cycle early.</notes>
+      </item>
+    </rubrics>
+    <rubric_total>sum_positive</rubric_total>
+  </question>
+</unit>"""
+
+
+def test_inline_markup_outside_cdata_is_kept_whole(tmp_path: Path) -> None:
+    """Text after an inline tag must survive.
+
+    Reading only ``elem.text`` stopped at the first child element, so
+    "The <code>v</code> update tests ..." reached the grader as "The".  In
+    one real course that cut 137 of 352 rubric items short.
+    """
+    (tmp_path / "llmgrader_config.xml").write_text("""<llmgrader>
+  <course><name>C</name><semester>S</semester></course>
+  <units><unit><name>U</name><source>u.xml</source><destination>u.xml</destination></unit></units>
+</llmgrader>""", encoding="utf-8")
+    (tmp_path / "u.xml").write_text(INLINE_MARKUP_UNIT, encoding="utf-8")
+
+    question = _make_parser(tmp_path).parse().units["U"]["Q"]
+    item = question["rubrics"]["r1"]
+
+    # Whitespace aside -- a continuation line keeps its source indentation,
+    # exactly as it does inside CDATA.
+    assert " ".join(item["condition"].split()) == (
+        r"The <code>v</code> update tests the pre-update value of "
+        r"<code>x</code>, so the step out of \((25,10)\) gives \((35,10)\)."
+    )
+    assert item["display_text"] == "Uses the old <code>x</code>"
+    assert item["notes"] == "Do not award it if the student flips <code>v</code> one cycle early."
+    assert question["grading_notes"] == "Accept <code>&lt;=</code> or an equivalent."
+    assert question["question_text"] == "Simulate the <code>always_ff</code> block."
+    assert question["solution"] == "Use <b>non-blocking</b> assignments."
