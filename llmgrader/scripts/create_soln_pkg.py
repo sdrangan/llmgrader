@@ -203,6 +203,21 @@ def main():
             print(f"  Destination: {destination_rel.as_posix()}")
             print()
 
+    # Course MCP material (lecture slides), when the course publishes any.
+    # Built into the package so one upload carries it.
+    mcp_config = config_dir / 'llmgrader_mcp_config.xml'
+    if mcp_config.exists():
+        from llmgrader.coursemcp.materials import MaterialsError, build_materials, read_config
+        print(f"Building course MCP material from {mcp_config.name}:")
+        try:
+            build_materials(read_config(mcp_config), output_dir)
+        except (MaterialsError, ImportError) as exc:
+            print(f"Error: {exc}")
+            if isinstance(exc, ImportError):
+                print('Install the build dependencies: pip install "llmgrader[mcp-build]"')
+            return 1
+        print()
+
     # Create ZIP archive
     zip_filename = 'soln_package.zip'
     print(f"Creating archive: {zip_filename}")

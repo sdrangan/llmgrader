@@ -19,6 +19,7 @@ from mcp.server.mcpserver import Image, MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 
 from llmgrader.coursemcp import content as cc
+from llmgrader.coursemcp.materials import load_materials
 from llmgrader.services.course_registry import CourseRegistry
 
 INSTRUCTIONS = (
@@ -29,7 +30,10 @@ INSTRUCTIONS = (
 
 CONTENT_INSTRUCTIONS = (
     " Units come from list_units and questions from list_questions; pass "
-    "their names exactly. This is practice material for a student who is "
+    "their names exactly. Lecture slides: list_materials, then get_outline or "
+    "search_slides to find where a topic is taught, and get_slide to see a "
+    "slide -- most of a slide's content is in its figure, so look at the "
+    "image, and cite slides by deck and number. This is practice material for a student who is "
     "studying: when they are working on a problem, help them reason toward "
     "the answer -- use the rubric to see what counts, and the worked solution "
     "to check their reasoning or build a hint -- rather than reproducing the "
@@ -240,3 +244,91 @@ def _add_content_tools(mcp: MCPServer, require_course) -> None:
             "qtag": tag,
             "solution": cc.tidy_html(question.get("solution", "")),
         }, figures)
+
+    def require_materials(grader):
+        materials = load_materials(grader.soln_pkg)
+        if materials is None or not materials.decks:
+            raise ToolError("This course has not published any lecture slides.")
+        return materials
+
+    def require_deck(materials, deck: str) -> dict:
+        found = materials.deck(deck.strip().lower())
+        if found is None:
+            raise ToolError(f"Unknown deck {deck!r}. Valid decks, from list_materials: "
+                            + ", ".join(repr(d) for d in materials.deck_ids()))
+        return found
+
+    @mcp.tool()
+    def list_materials(course_id: str, unit: str | None = None) -> list[dict]:
+        """List the course's lecture slide decks: id, unit, title and slide count.
+
+        Pass unit to list one unit's decks.  images is false for a deck served
+        as text only.  Use the id as deck in get_outline, search_slides and
+        get_slide.
+        """
+        log_call("list_materials", course=course_id, unit=unit)
+        materials = require_materials(require_course(course_id))
+        wanted = " ".join(unit.lower().split()) if unit else None
+        return [
+            {"deck": d["id"], "unit": d["unit"], "title": d["title"],
+             "slides": d["slides"], "images": d["images"]}
+            for d in materials.decks
+            if wanted is None or " ".join(d["unit"].lower().split()) == wanted
+        ]
+
+    @mcp.tool()
+    def get_outline(course_id: str, deck: str) -> list[dict]:
+        """A deck's outline: every slide's number and title, and a short excerpt.
+
+        Use it to see how a lecture is organised, or which slides cover a topic
+        before opening them with get_slide.
+        """
+        log_call("get_outline", course=course_id, deck=deck)
+        found = require_deck(require_materials(require_course(course_id)), deck)
+        outline = []
+        for slide in found["slides"]:
+            excerpt = " ".join(slide["text"].split())
+            outline.append({"slide": slide["n"], "title": slide["title"],
+                            "excerpt": excerpt[:100] + ("…" if len(excerpt) > 100 else "")})
+        return outline
+
+    @mcp.tool()
+    def search_slides(course_id: str, query: str, unit: str | None = None) -> list[dict]:
+        """Find the slides that mention a topic: deck, slide number, title, snippet.
+
+        A keyword search over slide titles, text and speaker notes, best match
+        first.  It matches words, not meanings, so if the first search misses,
+        try the course's own terms and synonyms (e.g. "FSM", "state machine",
+        "next-state logic").  Text only: a topic shown only in a figure may
+        not be found, and get_outline can help there.
+        """
+        log_call("search_slides", course=course_id, unit=unit)  # not the query: student words
+        materials = require_materials(require_course(course_id))
+        return materials.search(query, unit=unit)
+
+    @mcp.tool()
+    def get_slide(course_id: str, deck: str, slide: int):
+        """One lecture slide: its image, title, text and the speaker notes.
+
+        deck comes from list_materials or search_slides, and slide is its
+        number in the deck.  Look at the image: diagrams, waveforms and
+        equations are usually only there.
+        """
+        log_call("get_slide", course=course_id, deck=deck, slide=slide)
+        materials = require_materials(require_course(course_id))
+        found = require_deck(materials, deck)
+        slides = found["slides"]
+        if not 1 <= slide <= len(slides):
+            raise ToolError(f"Deck {found['id']!r} has slides 1 to {len(slides)}.")
+        entry = slides[slide - 1]
+        payload = {"deck": found["id"], "unit": found["unit"], "deck_title": found["title"],
+                   "slide": entry["n"], "of": len(slides), "title": entry["title"],
+                   "text": entry["text"], "notes": entry["notes"]}
+        blocks: list = []
+        image = materials.image_path(found["id"], entry["image"]) if entry.get("image") else None
+        if image is None:
+            payload["image"] = "not available: this deck is served as text only"
+        blocks.append(json.dumps(payload, indent=2, ensure_ascii=False))
+        if image is not None:
+            blocks.append(Image(data=image.read_bytes(), format="jpeg"))
+        return blocks

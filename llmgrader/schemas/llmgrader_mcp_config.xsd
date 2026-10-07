@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- llmgrader_mcp_config.xml: the course material the course MCP publishes
+     beyond the grading package: today, lecture slide decks.
+
+     It sits beside llmgrader_config.xml, and create_soln_pkg builds what it
+     lists into the course package (mcp_materials/), so one upload still
+     carries everything.  Only what is listed here is published: there are no
+     patterns, because a course repository also holds exams, autograder keys
+     and lab solutions, and a new one of those must not be published because
+     nobody remembered to exclude it.  See plans/course_mcp.md and
+     docs/admin/mcp/package.md. -->
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" elementFormDefault="qualified">
+
+  <!-- Becomes a directory name and a tool argument. -->
+  <xs:simpleType name="idType">
+    <xs:restriction base="xs:string">
+      <xs:pattern value="[a-z0-9][a-z0-9_-]{0,63}"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <!-- A repository the material is drawn from, by name.  path is relative to
+       this file; the build can override it (the build's root option). -->
+  <xs:complexType name="rootType">
+    <xs:attribute name="id" type="idType" use="required"/>
+    <xs:attribute name="path" type="xs:string" use="required"/>
+  </xs:complexType>
+
+  <!-- One slide deck.  The element text is the .pptx (slide text and speaker
+       notes); pdf, when given, is the same deck exported to PDF, from which
+       each slide's image is rendered.  A PDF whose page count differs from
+       the deck's slide count is stale, and is not used. -->
+  <xs:complexType name="deckType">
+    <xs:simpleContent>
+      <xs:extension base="xs:string">
+        <xs:attribute name="id" type="idType" use="required"/>
+        <!-- The unit it belongs to: a unit <name> from llmgrader_config.xml
+             where there is one, or free text such as "Lab: Root Solver". -->
+        <xs:attribute name="unit" type="xs:string" use="required"/>
+        <xs:attribute name="title" type="xs:string" use="optional"/>
+        <xs:attribute name="root" type="idType" use="optional"/>
+        <xs:attribute name="pdf" type="xs:string" use="optional"/>
+      </xs:extension>
+    </xs:simpleContent>
+  </xs:complexType>
+
+  <xs:element name="llmgrader_mcp">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element name="roots" minOccurs="0">
+          <xs:complexType>
+            <xs:sequence>
+              <xs:element name="root" type="rootType" maxOccurs="unbounded"/>
+            </xs:sequence>
+          </xs:complexType>
+        </xs:element>
+        <xs:element name="slides" minOccurs="0">
+          <xs:complexType>
+            <xs:sequence>
+              <xs:element name="deck" type="deckType" maxOccurs="unbounded"/>
+            </xs:sequence>
+          </xs:complexType>
+        </xs:element>
+      </xs:sequence>
+    </xs:complexType>
+    <xs:unique name="uniqueDeckId">
+      <xs:selector xpath="slides/deck"/>
+      <xs:field xpath="@id"/>
+    </xs:unique>
+    <xs:unique name="uniqueRootId">
+      <xs:selector xpath="roots/root"/>
+      <xs:field xpath="@id"/>
+    </xs:unique>
+  </xs:element>
+</xs:schema>

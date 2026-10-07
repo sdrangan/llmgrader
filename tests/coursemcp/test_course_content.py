@@ -153,7 +153,8 @@ def tool_names(client, **kwargs) -> set[str]:
     return {tool["name"] for tool in response.get_json()["result"]["tools"]}
 
 
-CONTENT_TOOLS = {"list_questions", "get_question", "get_rubric", "get_solution"}
+CONTENT_TOOLS = {"list_questions", "get_question", "get_rubric", "get_solution",
+                 "list_materials", "get_outline", "search_slides", "get_slide"}
 
 
 # ---------------------------------------------------------------------------

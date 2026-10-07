@@ -17,6 +17,11 @@ dependencies = [
     "cryptography>=43"
 ]
 
+[project.optional-dependencies]
+# Building lecture slides into a course package for the course MCP
+# (llmgrader_mcp_build, create_soln_pkg).  Not needed to serve them.
+mcp-build = ["python-pptx>=1.0", "pymupdf>=1.24"]
+
 [build-system]
 requires = ["setuptools", "wheel"]
 build-backend = "setuptools.build_meta"
@@ -50,4 +55,5 @@ llmgrader_mcp_setup = "llmgrader.scripts.llmgrader_mcp_setup:main"
 llmgrader_mcp_server = "llmgrader.mcp.server:main"
 llmgrader_test = "llmgrader.scripts.llmgrader_test:main"
 llmgrader_answer = "llmgrader.scripts.llmgrader_answer:main"
+llmgrader_mcp_build = "llmgrader.scripts.llmgrader_mcp_build:main"
 generate_signing_keys = "llmgrader.scripts.generate_signing_keys:main"
