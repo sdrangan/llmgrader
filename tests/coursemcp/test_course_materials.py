@@ -361,3 +361,21 @@ def test_describe_dry_run_spends_nothing(tmp_path, monkeypatch, capsys) -> None:
     out = capsys.readouterr().out
     assert "2 slide(s) to describe" in out and "estimated $" in out
     assert calls == [] and not cache.exists()
+
+
+def test_missing_config_is_a_short_message(tmp_path, monkeypatch, capsys) -> None:
+    """Run from the wrong folder: one line saying so, not a urllib traceback."""
+    from llmgrader.scripts import llmgrader_mcp_build
+
+    monkeypatch.chdir(tmp_path)
+    assert llmgrader_mcp_build.main(["--dry-run"]) == 1
+    err = capsys.readouterr().err
+    assert "No llmgrader_mcp_config.xml in" in err
+    assert "Traceback" not in err
+
+
+def test_malformed_config_is_a_short_message(tmp_path) -> None:
+    path = tmp_path / "llmgrader_mcp_config.xml"
+    path.write_text("<llmgrader_mcp><slides>", encoding="utf-8")
+    with pytest.raises(MaterialsError, match="not well-formed XML"):
+        read_config(path)

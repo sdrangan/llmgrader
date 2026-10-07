@@ -56,15 +56,25 @@ class DeckSpec:
 
 def read_config(config_path: str | Path, root_overrides: dict[str, str] | None = None) -> list[DeckSpec]:
     """The decks *config_path* lists, with every path resolved and checked."""
+    import xml.etree.ElementTree as ET
+
     import xmlschema
 
     config_path = Path(config_path).resolve()
+    if not config_path.is_file():
+        raise MaterialsError(
+            f"No {config_path.name} in {config_path.parent}.\n"
+            f"Run this from the folder that holds your course's llmgrader_config.xml "
+            f"and {config_path.name}, or pass --config <path>.")
+    try:
+        ET.parse(config_path)
+    except ET.ParseError as exc:
+        raise MaterialsError(f"{config_path.name} is not well-formed XML: {exc}") from exc
     schema = xmlschema.XMLSchema(str(SCHEMA_PATH))
     errors = [str(e.reason or e) for e in schema.iter_errors(str(config_path))]
     if errors:
         raise MaterialsError(f"{config_path.name} is not valid: " + "; ".join(errors))
 
-    import xml.etree.ElementTree as ET
     root_elem = ET.parse(config_path).getroot()
     base = config_path.parent
     roots = {"": base}
