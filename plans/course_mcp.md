@@ -472,6 +472,42 @@ derivations and break figure references — which in this course is most of the
 value. Real retrieval earns its place only when the material is unstructured or
 scanned.
 
+## Status, 2026-10-07
+
+What was built differs from the phases above in a few deliberate ways; the
+code and its tests are the reference.
+
+- **Phase 1 landed in-process, not as ASGI.** `/mcp` is served from the
+  Flask portal by wrapping the MCP app with a2wsgi (`coursemcp/mount.py`), so
+  `gunicorn run:app` is unchanged; no uvicorn worker, no second service. Off
+  unless `LLMGRADER_MCP_ENABLED`. Two outages taught the constraint: Render
+  runs one sync worker, so any request that stays open freezes grading. The
+  MCP therefore starts lazily per process (a thread started at app creation
+  died with gunicorn's fork) and answers anything but POST with a 405 (mcp 2
+  holds a GET open forever). Both have tests with a time limit.
+- **mcp 2** (both servers), on main.
+- **The token is a header first** (decision 5 revisited): claude.ai's
+  connector form now takes request headers, so `Authorization: Bearer` is
+  preferred and `/mcp/<token>` is the fallback. 403, not 401, on a bad token.
+  One portal-wide token (`LLMGRADER_MCP_TOKEN`); per-course scope is still
+  open. Without a token the content tools are not registered at all.
+- **Content tools** (`feature/course-mcp-content`): `list_questions`,
+  `get_question` (with figures and `variation_guidance`), `get_rubric` (with
+  `grading_notes`), `get_solution`.
+- **Phase 5 started with slides, not documents**: `llmgrader_mcp_config.xml`
+  lists decks; `create_soln_pkg` builds them into `mcp_materials/` in the
+  package; `list_materials`, `get_outline`, `search_slides` (BM25),
+  `get_slide` (image from the PDF). No vision descriptions yet -- the one
+  step that costs money, so not run unattended.
+- **Found on the way:** UnitParser was truncating rubric text at the first
+  inline tag (137 of 352 hwdesign items). Fixed on
+  `fix/rubric-inline-markup`, separately mergeable.
+
+Next: vision descriptions for slides (closes "moore mealy" finding nothing:
+the words are only in figures); `skill=` tags into `get_rubric` and
+`list_skills` (UnitParser does not parse `skill` yet); lab instructions as
+documents; per-unit solution visibility in the MCP config.
+
 ## Rejected alternatives
 
 **In-app chat tab.** Costed at 1.5–3 weeks for a production version, plus
