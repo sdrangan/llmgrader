@@ -137,6 +137,35 @@ def test_failed_mount_leaves_the_portal_serving(tmp_path, monkeypatch) -> None:
     assert rpc(client, "tools/list").status_code == 404
 
 
+def test_nothing_starts_until_the_first_mcp_request(tmp_path, monkeypatch) -> None:
+    """gunicorn may build the app in its master and fork workers from it.
+
+    A thread started at app creation would not survive the fork, leaving each
+    worker a loop nothing runs -- every MCP request then hangs, holding the
+    portal's only worker.  So creating the app must start no thread at all.
+    """
+    app = build_app(tmp_path, monkeypatch, enabled=True)
+    runner = app.course_mcp
+    assert runner._loop is None
+    assert rpc(app.test_client(), "tools/list").status_code == 200
+    assert runner._loop is not None and runner._loop.is_running()
+
+
+def test_a_forked_process_starts_its_own_mcp(client, monkeypatch) -> None:
+    """After a fork the pid differs, and the inherited server must not be used."""
+    import os
+
+    assert rpc(client, "tools/list").status_code == 200
+    runner = client.application.course_mcp
+    first_wsgi = runner._wsgi
+
+    real_pid = os.getpid()
+    monkeypatch.setattr(os, "getpid", lambda: real_pid + 1)
+    assert rpc(client, "tools/list").status_code == 200
+    assert runner._wsgi is not first_wsgi
+    assert runner._pid == real_pid + 1
+
+
 def test_portal_routes_still_served_beside_mcp(client) -> None:
     assert client.get("/c/alpha/units").status_code == 200
 
