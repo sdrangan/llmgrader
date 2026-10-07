@@ -25,12 +25,13 @@ The student-facing instructions are in
 
 {: .note }
 The course MCP serves questions, rubrics, worked solutions and lecture slides,
-behind a course access token. Lab instructions and other documents are next.
+openly or behind an optional course access token. Lab instructions and other
+documents are next.
 
 | Piece | Status |
 | --- | --- |
 | Served by the portal at `/mcp`, behind `LLMGRADER_MCP_ENABLED` | Done |
-| Course access token (`LLMGRADER_MCP_TOKEN`) | Done |
+| Optional course access token (`LLMGRADER_MCP_TOKEN`) | Done |
 | `list_courses`, `list_units` | Done |
 | `list_questions`, `get_question`, `get_rubric`, `get_solution` | Done |
 | Lecture slides: `list_materials`, `get_outline`, `search_slides`, `get_slide` | Done |
@@ -130,9 +131,12 @@ It is off unless `LLMGRADER_MCP_ENABLED` is set; see [Deploying](./deploy.md).
 
 Solutions, rubrics and grading notes **are** exposed, for every unit: this is
 practice material, and an assistant that cannot see the solution cannot check a
-student's reasoning or build a useful hint. The access token is for a different
-reason -- a complete answer key should not sit on the open web, where it is
-crawled and indexed.
+student's reasoning or build a useful hint.
+
+By default anyone with the address can use the MCP, so students need nothing
+else and the address can go on the course web page. If you reuse problems and
+would rather not leave their solutions readable by anyone, set the optional
+token -- see [Deploying](./deploy.md).
 
 Grading notes go to students' assistants as part of `get_rubric`, so keep them
 to what you would say to a student: common mistakes and what is accepted, not

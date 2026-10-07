@@ -13,22 +13,18 @@ start command: it is switched on with environment variables.
 
 ---
 
-## Step 1: Decide who can read the material
+## Step 1: Decide whether to require a token
 
-The MCP serves your questions, rubrics, **worked solutions** and slides.
-Choose one:
+The MCP serves your questions, rubrics, **worked solutions** and slides. Turning
+it on publishes them to anyone with the address.
 
-- **Open** (`LLMGRADER_MCP_PUBLIC=1`). Anyone with the address can use it, and
-  students need nothing but the address -- you can put it on the course web
-  page. Choose this when the problems are study material and you do not mind
-  their solutions being readable by anyone, now and in later semesters.
+- **No token (the default).** Students need nothing but the address, so you can
+  put it on the course web page. Choose this when the problems are study
+  material and you do not mind their solutions being readable by anyone, now
+  and in later semesters.
 - **Token** (`LLMGRADER_MCP_TOKEN`). Every request must carry a secret you give
   students. Choose this when you reuse problems and want to change the key
-  each semester. The cost is that every student has to find and paste the
-  token.
-
-With neither set, the MCP serves course and unit titles only, so an answer key
-is never published by accident.
+  each semester. The cost is that every student has to find and paste it.
 
 For a token, generate a long random value:
 
@@ -48,10 +44,7 @@ In the Render dashboard, open your portal's web service, go to
 | Variable | Value | Remarks |
 | --- | --- | --- |
 | `LLMGRADER_MCP_ENABLED` | `1` | Serves the course MCP at `/mcp`. Off when unset. |
-| `LLMGRADER_MCP_PUBLIC` | `1` | **Open:** serves everything, with no token. |
-| `LLMGRADER_MCP_TOKEN` | the token from step 1 | **Token:** required on every MCP request. Ignored when `LLMGRADER_MCP_PUBLIC` is set. |
-
-Set `LLMGRADER_MCP_PUBLIC` *or* `LLMGRADER_MCP_TOKEN`, not both.
+| `LLMGRADER_MCP_TOKEN` | the token from step 1 | **Optional.** When set, required on every MCP request. Unset, the MCP is open. |
 
 Save. Render redeploys the service. When it starts, the deploy log shows one of:
 
@@ -68,9 +61,8 @@ or, if the MCP could not start:
 In the second case **the portal is unaffected** -- students can still answer and
 grade questions -- and only `/mcp` is missing. Report the error.
 
-**With neither** `LLMGRADER_MCP_PUBLIC` nor `LLMGRADER_MCP_TOKEN`, the MCP
-serves only course and unit titles; the question, rubric, solution and slide
-tools do not exist. Choose one before you tell students about the MCP.
+**To switch later**, add or delete `LLMGRADER_MCP_TOKEN`. Adding one means every
+student has to update their connector, so announce it.
 
 **To turn the MCP off**, delete `LLMGRADER_MCP_ENABLED`. Without it, the portal
 does not load the MCP code at all.
@@ -120,7 +112,6 @@ A working server replies with JSON listing its tools: `list_courses`,
 | Reply | Meaning |
 | --- | --- |
 | HTTP 403, *"This course MCP needs the course access token"* | The token is missing or does not match `LLMGRADER_MCP_TOKEN`. |
-| Only `list_courses` and `list_units` | `LLMGRADER_MCP_TOKEN` is not set on the server. |
 | HTTP 404 | `LLMGRADER_MCP_ENABLED` is not set, or the mount failed; check the deploy log. |
 
 ### With an assistant
@@ -149,8 +140,8 @@ Click **Connect**, then run tools from the **Tools** tab.
 
 ## Step 5: Tell students
 
-**Open:** post the address, `https://<portal>/mcp`, anywhere -- the course web
-page, the syllabus, the LMS.
+**No token:** post the address, `https://<portal>/mcp`, anywhere -- the course
+web page, the syllabus, the LMS.
 
 **Token:** post the address and the token where only your students can see
 them -- the LMS, not a public page. Posting the single address

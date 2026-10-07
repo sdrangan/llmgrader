@@ -1,14 +1,8 @@
 """The course MCP tools: what a student's own AI can ask the portal.
 
-Read-only.  Two tiers:
-
-* **Titles** -- ``list_courses``, ``list_units``: nothing a student could not
-  see on the portal's landing page.  Always served.
-* **Content** -- questions, rubrics, solutions.  Served only when the portal
-  has a course token configured (``mount.py``), because a complete answer key
-  must not sit on the open web where it is crawled and indexed
-  (``plans/course_mcp.md`` decision 4).  The gate is the token, not the tools:
-  without one, the content tools are not even registered.
+Read-only: the course's titles, questions, rubrics, solutions and slides.
+Who may call it -- anyone, or only holders of a course token -- is
+``mount.py``'s business, not the tools'.
 """
 
 from __future__ import annotations
@@ -57,9 +51,10 @@ def build_course_mcp(registry: CourseRegistry, *, content: bool = False,
                      public_url=lambda: None) -> MCPServer:
     """An MCP server whose tools read the courses *registry* serves.
 
-    *content* adds the question, rubric and solution tools; ``mount.py``
-    passes it only when a course token is configured.  *public_url* returns
-    the portal's public address, for links a student can open, or None.
+    *content* adds the question, rubric, solution and slide tools; ``mount.py``
+    always passes it -- a token, if any, is checked before a request gets
+    here.  *public_url* returns the portal's public address, for links a
+    student can open, or None.
 
     Only the tools are defined here.  How it is served over HTTP is
     ``mount.py``'s business: in mcp 2 those settings belong to the app, not

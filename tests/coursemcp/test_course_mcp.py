@@ -67,9 +67,8 @@ def build_app(tmp_path: Path, monkeypatch, *, enabled: bool, archived=()):
         monkeypatch.setenv("LLMGRADER_MCP_ENABLED", "1")
     else:
         monkeypatch.delenv("LLMGRADER_MCP_ENABLED", raising=False)
-    # This file tests the title tier; access settings from the shell must not leak in.
+    # A token set in the shell must not leak in and refuse these requests.
     monkeypatch.delenv("LLMGRADER_MCP_TOKEN", raising=False)
-    monkeypatch.delenv("LLMGRADER_MCP_PUBLIC", raising=False)
 
     courses_root = storage / "courses"
     for course_id, spec in COURSES.items():
@@ -238,7 +237,9 @@ def test_tools_are_listed(client) -> None:
     response = rpc(client, "tools/list")
     assert response.status_code == 200
     names = {tool["name"] for tool in response.get_json()["result"]["tools"]}
-    assert names == {"list_courses", "list_units"}
+    assert names == {"list_courses", "list_units", "list_questions", "get_question",
+                     "get_rubric", "get_solution", "list_materials", "get_outline",
+                     "search_slides", "get_slide"}
 
 
 def test_public_host_header_is_accepted(client) -> None:
