@@ -14,5 +14,6 @@ This section contains documentation for instructors and administrators who wish 
 - [Build the course package](./buildcourse/) on the local machine.  The course package will include all the units in the class, and XML descriptions of the problems and grading rubrics
 - [Deploy the course on a web portal](./deploy/).  We recommend render.com.  At this point, students will be able to view and answer questions, and download submissions.
 - [Integrate with Gradescope](./gradescope/):  For each unit, create an assignment in Gradescope with an autograder that can receive the student submissions.
+- [Course MCP](./mcp/overview.md) (optional, early):  Let students connect their own AI assistant to the course material.
 
 

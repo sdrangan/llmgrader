@@ -14,3 +14,4 @@ Use the links below to jump into the parts you need:
 
 * [How to answer and grade questions](./grade.md)
 * [View the dashboard and submitting answers to Gradescope](./dashboard.md)
+* [Study with your own AI assistant](./mcp.md) (new, early)
