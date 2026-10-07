@@ -37,4 +37,17 @@ def create_app(
     app.api_controller = controller
     controller.register(app)
 
+    # The student-facing course MCP at /mcp (plans/course_mcp.md).  Off unless
+    # LLMGRADER_MCP_ENABLED is set, so a portal that has not opted in serves
+    # exactly what it did before -- it does not even import the MCP library.
+    # A mount that fails is logged and skipped rather than raised: grading
+    # matters more than /mcp, and a portal that will not boot serves neither.
+    if os.environ.get("LLMGRADER_MCP_ENABLED", "").strip().lower() in {"1", "true", "yes"}:
+        try:
+            from llmgrader.coursemcp.mount import mount_course_mcp
+            mount_course_mcp(app, registry)
+            print("[CourseMCP] Serving the course MCP at /mcp")
+        except Exception as exc:
+            print(f"[CourseMCP] Not mounted, portal continues without /mcp: {exc!r}")
+
     return app

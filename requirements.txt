@@ -7,3 +7,5 @@ openai
 pydantic>=2,<3
 xmlschema>=3,<4
 cryptography>=43
+mcp>=1.27.0,<2
+a2wsgi>=1.10
