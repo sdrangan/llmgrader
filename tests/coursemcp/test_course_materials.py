@@ -422,3 +422,23 @@ def test_deck_and_force_need_describe(tmp_path, monkeypatch, capsys) -> None:
     assert llmgrader_mcp_build.main(["--config", str(config), "--describe", "--dry-run",
                                      "--deck", "nope"]) == 1
     assert "unknown deck(s) nope" in capsys.readouterr().err
+
+
+def test_save_waits_out_a_briefly_locked_file(tmp_path, monkeypatch) -> None:
+    """Windows refuses the replace while another program has the file open."""
+    from llmgrader.coursemcp import materials
+
+    real_replace = Path.replace
+    failures = iter([PermissionError("locked"), PermissionError("locked")])
+
+    def flaky_replace(self, target):
+        error = next(failures, None)
+        if error:
+            raise error
+        return real_replace(self, target)
+
+    monkeypatch.setattr(Path, "replace", flaky_replace)
+    monkeypatch.setattr("time.sleep", lambda _s: None)
+    path = tmp_path / "llmgrader_mcp_descriptions.json"
+    materials._save_descriptions(path, {"k": {"description": "d"}})
+    assert materials.load_descriptions(path) == {"k": {"description": "d"}}

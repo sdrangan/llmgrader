@@ -293,10 +293,22 @@ def load_descriptions(path: str | Path) -> dict:
 
 
 def _save_descriptions(path: Path, slides: dict) -> None:
+    import time
+
     tmp = path.with_suffix(".tmp")
     tmp.write_text(json.dumps({"version": 1, "slides": slides}, indent=1,
                               ensure_ascii=False, sort_keys=True), encoding="utf-8")
-    tmp.replace(path)
+    # On Windows the replace fails while anything else has the file open --
+    # an editor, a virus scan, the search indexer, a reader counting entries.
+    # Those holds are brief, so wait them out rather than fail the slide.
+    for attempt in range(20):
+        try:
+            tmp.replace(path)
+            return
+        except PermissionError:
+            if attempt == 19:
+                raise
+            time.sleep(0.25)
 
 
 @dataclass
