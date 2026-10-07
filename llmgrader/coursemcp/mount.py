@@ -25,9 +25,11 @@ from __future__ import annotations
 
 import asyncio
 import hmac
+import io
 import json
 import os
 import threading
+import time
 
 from a2wsgi import ASGIMiddleware
 from flask import Flask
@@ -35,7 +37,9 @@ from mcp.server.transport_security import TransportSecuritySettings
 from werkzeug.middleware.dispatcher import DispatcherMiddleware
 
 from llmgrader.coursemcp.server import build_course_mcp
+from llmgrader.coursemcp.usage import build_rows, coarse_client, mint_session_id, parse_json
 from llmgrader.services.course_registry import CourseRegistry
+from llmgrader.services.mcp_usage import McpUsageStore, usage_db_path
 
 MOUNT_PATH = "/mcp"
 START_TIMEOUT_S = 10
@@ -94,8 +98,11 @@ class CourseMCPRunner:
     than the message.
     """
 
-    def __init__(self, registry: CourseRegistry):
+    def __init__(self, registry: CourseRegistry, usage: McpUsageStore | None = None):
         self.registry = registry
+        # One row per MCP request, in its own database (plans/mcp_usage.md).
+        self.usage = usage if usage is not None else McpUsageStore(
+            usage_db_path(registry.storage.get_storage_path()))
         self.token = configured_token()
         # The portal's public address, for links a student can open (a
         # slide's image).  LLMGRADER_PUBLIC_URL if set; otherwise taken from
@@ -187,26 +194,111 @@ class CourseMCPRunner:
         # This server sends nothing unprompted, and the MCP spec has a server
         # without that stream answer GET with 405.  That is also the clearest
         # thing a person checking the address in a browser can be shown.
+        #
+        # A GET is a browser checking the address, not use: it is not recorded.
         if environ.get("REQUEST_METHOD") != "POST":
             start_response("405 Method Not Allowed", [
                 ("Allow", "POST"),
                 ("Content-Type", "text/plain; charset=utf-8"),
             ])
             return [NOT_POST_MESSAGE]
+        started = time.monotonic()
+        body = self._read_body(environ)
         if self.token and not (token_in_path or self._bearer_matches(environ)):
-            start_response("403 Forbidden", [("Content-Type", "application/json")])
-            return [_refusal(
+            refusal = _refusal(
                 "This course MCP needs the course access token. Add it to the "
                 "connector as the request header 'Authorization: Bearer <token>', "
-                "using the token your instructor posted.")]
+                "using the token your instructor posted.")
+            start_response("403 Forbidden", [("Content-Type", "application/json")])
+            return _Recorded([refusal], lambda: self._record(
+                body, environ, 403, refusal, started, refused=True))
         try:
             mcp_wsgi = self.wsgi()
         except Exception as exc:
             print(f"[CourseMCP] Could not start: {exc!r}")
+            message = b"The course MCP could not start on this server.\n"
             start_response("503 Service Unavailable",
                            [("Content-Type", "text/plain; charset=utf-8")])
-            return [b"The course MCP could not start on this server.\n"]
-        return mcp_wsgi(environ, start_response)
+            return _Recorded([message], lambda: self._record(
+                body, environ, 503, message, started))
+        return self._serve(mcp_wsgi, environ, start_response, body, started)
+
+    # ------------------------------------------------------------------
+    # Recording (plans/mcp_usage.md, decision 7)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _read_body(environ) -> bytes:
+        """Read the request body, and put it back for the MCP app to read."""
+        stream = environ.get("wsgi.input")
+        try:
+            length = int(environ.get("CONTENT_LENGTH") or 0)
+        except ValueError:
+            length = 0
+        body = (stream.read(length) if length > 0 else stream.read()) if stream else b""
+        environ["wsgi.input"] = io.BytesIO(body)
+        environ["CONTENT_LENGTH"] = str(len(body))
+        return body
+
+    def _serve(self, mcp_wsgi, environ, start_response, body: bytes, started: float):
+        """Answer through the MCP app, collecting the response to summarize it.
+
+        The server answers in JSON (``json_response=True``), so the body is
+        one short document and collecting it delays nothing.  An
+        ``initialize`` response gains a minted ``Mcp-Session-Id``.
+        """
+        captured: dict = {}
+        chunks: list[bytes] = []
+
+        def capture(status, headers, exc_info=None):
+            captured["status"] = status
+            captured["headers"] = list(headers)
+            return chunks.append
+
+        result = mcp_wsgi(environ, capture)
+        try:
+            for chunk in result:
+                chunks.append(chunk)
+        finally:
+            close = getattr(result, "close", None)
+            if close is not None:
+                close()
+
+        status = captured.get("status", "500 Internal Server Error")
+        headers = captured.get("headers", [])
+        response_body = b"".join(chunks)
+        status_code = int(status.split(" ", 1)[0])
+
+        message = parse_json(body)
+        if (isinstance(message, dict) and message.get("method") == "initialize"
+                and status_code == 200
+                and not any(name.lower() == "mcp-session-id" for name, _ in headers)):
+            params = message.get("params") if isinstance(message.get("params"), dict) else {}
+            info = params.get("clientInfo") if isinstance(params.get("clientInfo"), dict) else {}
+            session_id = mint_session_id(coarse_client(info.get("name")))
+            headers.append(("Mcp-Session-Id", session_id))
+            # The initialize itself is recorded under the id it is given.
+            environ["HTTP_MCP_SESSION_ID"] = session_id
+
+        start_response(status, headers)
+        return _Recorded([response_body], lambda: self._record(
+            body, environ, status_code, response_body, started))
+
+    def _record(self, body, environ, status_code, response_body, started, *, refused=False):
+        """Write this exchange's rows.  Never raises: the student has the answer."""
+        try:
+            duration_ms = int((time.monotonic() - started) * 1000)
+            for row in build_rows(body, environ, status_code, response_body, duration_ms,
+                                  refused=refused):
+                row["package_version"] = self._package_version(row.get("course_id"))
+                self.usage.record(row)
+        except Exception as exc:
+            print(f"[McpUsage] Could not record a call: {exc!r}")
+
+    def _package_version(self, course_id):
+        if not isinstance(course_id, str) or self.registry.get(course_id) is None:
+            return None
+        return self.registry.grader_for(course_id).package_version
 
 
     def _take_path_token(self, environ) -> bool:
@@ -223,6 +315,27 @@ class CourseMCPRunner:
         header = environ.get("HTTP_AUTHORIZATION", "")
         scheme, _, value = header.partition(" ")
         return scheme.lower() == "bearer" and _same(value.strip(), self.token)
+
+
+class _Recorded:
+    """A response body whose ``close()`` records the exchange.
+
+    A WSGI server calls ``close()`` once the response has been sent, so the
+    usage write adds to the request's time on the worker but never delays
+    the answer.
+    """
+
+    def __init__(self, chunks: list[bytes], on_close):
+        self._chunks = chunks
+        self._on_close = on_close
+
+    def __iter__(self):
+        return iter(self._chunks)
+
+    def close(self) -> None:
+        on_close, self._on_close = self._on_close, None
+        if on_close is not None:
+            on_close()
 
 
 def mount_course_mcp(app: Flask, registry: CourseRegistry) -> None:

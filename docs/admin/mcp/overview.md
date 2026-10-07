@@ -147,5 +147,6 @@ What is published is chosen by an explicit list in the
 a course repository typically also holds exams, autograder keys and lab
 solution code, none of which should reach a student.
 
-Nothing a student does through the MCP is recorded or graded. The server logs
-which tools are called, not what the student asked.
+Nothing a student does through the MCP is graded. The portal counts which tools
+are called and on which questions and slides, anonymously and never with what
+the student asked; see [what is recorded](./deploy.md#what-is-recorded).

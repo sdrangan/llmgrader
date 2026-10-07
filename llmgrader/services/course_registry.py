@@ -558,6 +558,31 @@ class CourseRegistry:
             make_default=make_default,
         )
 
+    def refresh_display(self, course_id: str) -> CourseEntry | None:
+        """Update a course's name and semester from its current package.
+
+        The *id* is recorded once and never re-derived (it names directories,
+        URLs and submission rows), but the name and semester are only what the
+        course is called: they should follow the package the course now
+        serves.  Without this, a name recorded at first registration -- say an
+        old course number -- outlived every later upload.  Called after an
+        upload; a package with no <course> name leaves the entry alone.
+        """
+        entry = self._entries.get(course_id)
+        if entry is None:
+            return None
+        try:
+            block = read_course_block(self.soln_pkg_path(course_id))
+        except Exception:
+            return entry
+        name = (block.get("name") or "").strip()
+        semester = (block.get("semester") or "").strip()
+        if name and (name, semester) != (entry.name, entry.semester):
+            entry.name, entry.semester = name, semester
+            if self.uses_registry_file:
+                self._write_registry_file()
+        return entry
+
     # ------------------------------------------------------------------
     # Course management (admin)
     # ------------------------------------------------------------------

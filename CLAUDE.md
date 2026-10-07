@@ -245,6 +245,32 @@ rather than the fatal error `run` raises, so an image-free unit works from a
 loose unit file. See `docs/admin/buildcourse/aitest.md` and
 `plans/answer_cli.md`.
 
+### Package versions and MCP usage
+
+`services/package_info.py`: `create_soln_pkg` writes `package_info.json`
+(version = build date + head of a sha256 over the package's files, sorted by
+path, the info file excluded) and records each source repo's commit, counting
+uncommitted/untracked changes **only among the files the package is built
+from**. A package without the file gets `computed.<hash>` at load.
+`Grader.package_version` is stamped on `submissions.package_version`, returned
+by the MCP's `list_courses` (and no other tool) and shown on Manage Courses.
+
+`services/mcp_usage.py` (`McpUsageStore`) owns `<storage>/db/mcp_usage.db`,
+a separate file so usage writes never contend with grading for SQLite's lock.
+`coursemcp/usage.py` turns one request/response pair into rows;
+`CourseMCPRunner` (`coursemcp/mount.py`) reads the body, collects the JSON
+response, mints `Mcp-Session-Id` on `initialize` (the coarse client is the
+id's prefix, since 2025 clients name themselves only in `initialize` and the
+server keeps no state), and writes from the response iterable's `close()` --
+so a test client must buffer (`buffered=True`) to see the row. A write never
+fails a call. Every tool argument must be in `IDENTIFIER_ARGUMENTS` or
+`REDACTED_ARGUMENTS`; a test fails otherwise, and an unlisted one is redacted
+anyway.
+
+The Analytics routes take `db=grade|mcp` (default `grade`, anything else
+refused) and open the file read-only. Presets live in `static/js/analytics.js`;
+the UI suite runs each one, since nothing else parses them.
+
 ### Course content format
 
 Courses are defined as **XML files** validated against `llmgrader/schemas/unit.xsd` (questions/solutions/rubrics) and `llmgrader/schemas/llmgrader_config.xsd` (course metadata and unit references). `UnitParser` handles schema validation, CDATA cleaning, and line-number mapping for error reporting.

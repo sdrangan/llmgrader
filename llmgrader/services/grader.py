@@ -28,6 +28,7 @@ from pydantic import ValidationError, ConfigDict, model_validator
 import sys
 from datetime import datetime, timezone
 from llmgrader.services.prompt import PromptBuilder
+from llmgrader.services.package_info import package_version
 from llmgrader.services.portal_storage import PortalStorage
 from llmgrader.services.unit_parser import UnitParser
 from llmgrader.services.models import (
@@ -515,6 +516,9 @@ class Grader:
         self.unit_validation_errors = []
         self.unit_validation_alert = None
         self.course_info = {}
+        # The loaded package's version (services/package_info.py), stamped on
+        # every submission.  None until a package is loaded.
+        self.package_version = None
         self.prompt_builder = PromptBuilder()
 
         self._prepare_scratch_dir(owns_scratch)
@@ -831,6 +835,7 @@ class Grader:
             self.unit_validation_errors = ["Unit package could not be loaded (None returned)"]
             self.unit_validation_alert = "Unit package could not be loaded."
             self.course_info = {}
+            self.package_version = None
             return
 
         self.soln_pkg = unit_package.soln_pkg_path
@@ -842,6 +847,7 @@ class Grader:
         self.unit_validation_errors = unit_package.validation_errors
         self.unit_validation_alert = unit_package.validation_alert
         self.course_info = unit_package.course_info
+        self.package_version = package_version(self.soln_pkg)
     
     def build_task_prompt(
         self,
@@ -1690,6 +1696,7 @@ class Grader:
             # None for a Grader built without a course (llmgrader_test, the
             # replay tool); the column is nullable and stays NULL.
             course_id=self.course_id,
+            package_version=self.package_version,
             question_text=question_text,
             ref_soln=solution,
             grading_notes=grading_notes,

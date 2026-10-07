@@ -624,6 +624,18 @@ function initializeMenuSystem() {
             if (course.deleted_at) label.style.opacity = '0.6';
             row.appendChild(label);
 
+            // Which package is being served: the version create_soln_pkg
+            // stamped on it, so an upload can be confirmed at a glance.
+            var version = document.createElement('td');
+            version.className = 'course-package-version';
+            version.textContent = course.package_version || '';
+            version.title = course.package_version ? 'Course package version' : '';
+            version.style.padding = '4px 8px';
+            version.style.whiteSpace = 'nowrap';
+            version.style.fontFamily = 'monospace';
+            version.style.opacity = '0.8';
+            row.appendChild(version);
+
             var count = document.createElement('td');
             count.textContent = course.submissions + ' graded';
             count.style.padding = '4px 8px';
@@ -848,8 +860,8 @@ function initializeMenuSystem() {
                 // Loading into the course being viewed refreshes the unit list;
                 // loading into another one changes nothing on screen.
                 if (loaded.course_id && loaded.course_id !== (window.LLMGRADER_COURSE_ID || '')) {
-                    alert('Package loaded into ' + loaded.course_id
-                          + '. Switch to that course to see it.');
+                    alert('Package ' + (loaded.package_version || '') + ' loaded into '
+                          + loaded.course_id + '. Switch to that course to see it.');
                 } else if (typeof loadUnits === 'function') {
                     await loadUnits();
                 }

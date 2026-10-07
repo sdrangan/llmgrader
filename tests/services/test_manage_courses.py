@@ -190,6 +190,27 @@ def test_a_good_package_replaces_the_old_one(one_course_app) -> None:
     assert names == ["Alpha Unit Revised"]
 
 
+def test_an_upload_reports_the_new_package_version(one_course_app) -> None:
+    """The version on Manage Courses changes with the package it names."""
+    client = one_course_app.test_client()
+
+    def listed_version():
+        courses = client.get("/api/admin/courses").get_json()["courses"]
+        return next(c["package_version"] for c in courses if c["id"] == "alpha")
+
+    before = listed_version()
+    response = upload(
+        client,
+        package_bytes("alpha", unit_title="Alpha Unit Revised"),
+        course_id="alpha",
+    )
+
+    assert response.status_code == 200, response.get_json()
+    after = response.get_json()["package_version"]
+    assert before and after and after != before
+    assert listed_version() == after
+
+
 def test_the_swap_leaves_no_staging_directory_behind(one_course_app) -> None:
     client = one_course_app.test_client()
     upload(client, package_bytes("alpha"), course_id="alpha")

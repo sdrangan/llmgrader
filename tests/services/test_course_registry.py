@@ -177,6 +177,28 @@ def test_the_id_is_read_back_and_never_re_derived(storage_root: Path) -> None:
     assert second.get("demo-class-spring-2026").name == "Demo Class"
 
 
+def test_an_upload_refreshes_the_name_but_never_the_id(storage_root: Path) -> None:
+    """A renamed course (a new course number) shows its new name after an upload.
+
+    The id is what must stay fixed; the name and semester are only what the
+    course is called, and a name frozen at first registration outlived every
+    later upload.
+    """
+    pkg = write_package(storage_root / "courses" / "hwdesign" / "soln_pkg",
+                        name="ECE-GY 9483 Hardware Design", semester="Spring 2026",
+                        course_id="hwdesign")
+    registry = CourseRegistry()
+    registry.register_package(str(pkg), make_default=True)
+
+    write_package(pkg, name="ECE-GY 6463 Advanced Hardware Design", semester="Fall 2026",
+                  course_id="hwdesign")
+    registry.refresh_display("hwdesign")
+
+    reloaded = CourseRegistry().get("hwdesign")
+    assert (reloaded.id, reloaded.name, reloaded.semester) == (
+        "hwdesign", "ECE-GY 6463 Advanced Hardware Design", "Fall 2026")
+
+
 def test_a_corrupt_registry_file_is_set_aside_rather_than_bricking_the_portal(
     storage_root: Path,
 ) -> None:

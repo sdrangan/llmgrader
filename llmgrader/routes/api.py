@@ -18,9 +18,11 @@ from datetime import datetime, timezone
 import requests
 
 import shutil
+from pathlib import Path
 
 from llmgrader.services.course_registry import CoursePackageError, ID_SOURCE_FALLBACK
 from llmgrader.services.grader import preferred_model_for
+from llmgrader.services.mcp_usage import McpUsageStore, usage_db_path
 from llmgrader.services.models import (
     DEFAULT_MODEL_COMPLEX,
     DEFAULT_MODEL_SIMPLE,
@@ -317,6 +319,34 @@ class APIController:
     SCHEMA_HIDDEN_COLUMNS = {
         ("submissions", "user_email"),
     }
+
+    # The databases the Analytics view can query, by the name its `db`
+    # parameter uses (plans/mcp_usage.md, decision 8).  Nothing else is
+    # accepted: an unknown value is refused, never mapped to a default.
+    ANALYTICS_DATABASES = ("grade", "mcp")
+
+    def analytics_db_path(self, db: str | None) -> str | None:
+        """The file behind an Analytics `db` value; None when it names none.
+
+        Absent means `grade`, so every caller from before the MCP database
+        keeps working unchanged.
+        """
+        db = "grade" if db in (None, "") else db
+        if db == "grade":
+            return self.grader.db_path
+        if db == "mcp":
+            path = usage_db_path(self.registry.storage.get_storage_path())
+            if not os.path.exists(path):
+                # A portal with the MCP off, or not yet called, still gets an
+                # empty table to look at rather than a missing-file error.
+                McpUsageStore(path)
+            return path
+        return None
+
+    @staticmethod
+    def connect_analytics_db(path: str) -> sqlite3.Connection:
+        """Open *path* read-only: a second guard behind is_safe_analytics_sql."""
+        return sqlite3.connect(Path(path).resolve().as_uri() + "?mode=ro", uri=True)
 
     @staticmethod
     def is_safe_analytics_sql(sql_query: str) -> bool:
@@ -1129,6 +1159,7 @@ class APIController:
                 "deleted_at": entry.deleted_at,
                 "is_default": entry.id == self.registry.default_course_id,
                 "loaded": bool(getattr(grader, "units", None)) if grader else False,
+                "package_version": getattr(grader, "package_version", None) if grader else None,
                 "submissions": self.registry.storage.count_submissions_for_course(entry.id),
             }
 
@@ -1250,9 +1281,15 @@ class APIController:
                 payload, status_code = result
                 return jsonify(payload), status_code
 
+            if target_id:
+                # The package may have renamed the course (a new course number,
+                # a new semester); the id is unchanged, only what it is called.
+                self.registry.refresh_display(target_id)
+
             if isinstance(result, dict):
                 result = dict(result)
                 result["course_id"] = target_id
+                result["package_version"] = grader.package_version
             return jsonify(result)
         
         @app.route("/admin/dbviewer", methods=["POST"])
@@ -1260,13 +1297,22 @@ class APIController:
         def dbviewer_api():
             """
             JSON API for Analytics view.
-            Accepts: { "sql_query": "SELECT ..." }
+            Accepts: { "sql_query": "SELECT ...", "db": "grade" | "mcp" }
+            (db defaults to grade, and may also be given as ?db=).
             Returns: { "columns": [...], "rows": [...], "error": null }
             """
 
             data = request.get_json(silent=True) or {}
             sql_query = (data.get("sql_query") or "").strip()
+            db = data.get("db") or request.args.get("db") or "grade"
+            db_path = self.analytics_db_path(db)
 
+            if db_path is None:
+                return jsonify({
+                    "columns": [],
+                    "rows": [],
+                    "error": f"Unknown database '{db}'"
+                }), 400
             if not sql_query:
                 return jsonify({
                     "columns": [],
@@ -1281,7 +1327,7 @@ class APIController:
                 })
 
             try:
-                conn = sqlite3.connect(self.grader.db_path)
+                conn = self.connect_analytics_db(db_path)
                 cursor = conn.cursor()
                 cursor.execute(sql_query)
 
@@ -1306,8 +1352,9 @@ class APIController:
                         formatted.append(tuple(row))
                     rows = formatted
 
-                # Store last query for CSV download
-                session["last_sql"] = sql_query
+                # Store last query for CSV download, one per database, so a
+                # download always comes from the database it was run against.
+                session["last_sql" if db == "grade" else f"last_sql_{db}"] = sql_query
 
                 return jsonify({
                     "columns": columns,
@@ -1335,10 +1382,16 @@ class APIController:
             class attribute is the target schema, not necessarily what this
             particular file holds.
 
+            Takes ?db=grade (the default) or ?db=mcp.
+
             Returns: { "tables": [ { "name": ..., "columns": [...] }, ... ] }
             """
+            db = request.args.get("db") or "grade"
+            db_path = self.analytics_db_path(db)
+            if db_path is None:
+                return jsonify({"tables": [], "error": f"Unknown database '{db}'"}), 400
             try:
-                conn = sqlite3.connect(self.grader.db_path)
+                conn = self.connect_analytics_db(db_path)
                 cursor = conn.cursor()
 
                 cursor.execute(
@@ -1369,17 +1422,22 @@ class APIController:
         @self.require_admin
         def dbviewer_download():
             """
-            Download CSV of the last SQL query results.
+            Download CSV of the last SQL query results, from ?db=grade (the
+            default) or ?db=mcp.
             """
-            sql_query = session.get("last_sql")
-            
+            db = request.args.get("db") or "grade"
+            db_path = self.analytics_db_path(db)
+            if db_path is None:
+                return {"error": f"Unknown database '{db}'"}, 400
+            sql_query = session.get("last_sql" if db == "grade" else f"last_sql_{db}")
+
             if not sql_query:
                 return {"error": "No query in session"}, 400
             if not self.is_safe_analytics_sql(sql_query):
                 return {"error": "Only read-only SELECT queries are allowed"}, 400
-            
+
             try:
-                conn = sqlite3.connect(self.grader.db_path)
+                conn = self.connect_analytics_db(db_path)
                 cursor = conn.cursor()
                 cursor.execute(sql_query)
                 
@@ -1405,11 +1463,32 @@ class APIController:
                 output.close()
                 
                 response = Response(csv_data, mimetype="text/csv")
-                response.headers["Content-Disposition"] = "attachment; filename=submissions.csv"
+                filename = "submissions.csv" if db == "grade" else "mcp_usage.csv"
+                response.headers["Content-Disposition"] = f"attachment; filename={filename}"
                 return response
-                
+
             except Exception as e:
                 return {"error": f"Download Error: {str(e)}"}, 500
+
+        @app.route("/admin/dbviewer/mcp/delete_before", methods=["POST"])
+        @self.require_admin
+        def mcp_usage_delete_before():
+            """Delete MCP usage rows recorded before a date (decision 9).
+
+            The MCP database only: usage is disposable telemetry, grades are
+            not, and no route deletes a submission.  Accepts
+            { "before": "YYYY-MM-DD" }; rows strictly before that day, UTC, go.
+            """
+            data = request.get_json(silent=True) or {}
+            before = (data.get("before") or "").strip()
+            try:
+                day = datetime.strptime(before, "%Y-%m-%d").date()
+            except ValueError:
+                return jsonify({"error": "Give the date as YYYY-MM-DD."}), 400
+            store = McpUsageStore(self.analytics_db_path("mcp"))
+            deleted = store.delete_before(day.isoformat())
+            print(f"[McpUsage] Deleted {deleted} row(s) recorded before {day.isoformat()}")
+            return jsonify({"status": "ok", "deleted": deleted, "before": day.isoformat()})
 
         @app.route("/admin/submission/<int:sub_id>")
         @self.require_admin

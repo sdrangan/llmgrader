@@ -63,6 +63,11 @@ most from it, try asking things like:
 - *"Give me a similar problem, then check my answer."*
 - *"Which slide explains this? Show me."*
 
+Nothing you do through the MCP is graded. The portal counts its use
+anonymously -- which problems and slides are looked at, and how often -- so
+your instructor can see what helps. It never records your name, your
+questions or what your assistant says to you.
+
 ---
 
 ## What you need: the address
