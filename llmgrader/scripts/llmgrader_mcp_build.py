@@ -6,6 +6,7 @@
 
     llmgrader_mcp_build --describe --dry-run            # count slides to describe, estimate cost
     llmgrader_mcp_build --describe                      # describe them (OpenAI; costs money)
+    llmgrader_mcp_build --describe --deck fsm --force   # redo one deck's descriptions
 
 ``create_soln_pkg`` runs the same build when ``llmgrader_mcp_config.xml`` sits
 beside ``llmgrader_config.xml``, so this is mostly for checking what will be
@@ -15,7 +16,9 @@ published, and for --describe.
 search_slides can find a topic that appears only in a diagram.  The results
 go to llmgrader_mcp_descriptions.json beside the config -- commit it -- keyed
 by each slide image's content, so a slide is paid for once, and every later
-build (including create_soln_pkg) reads it for free.  Only slides with an
+build (including create_soln_pkg) reads it for free.  After editing slides,
+plain --describe redoes just the ones whose image changed; --force redoes
+slides that already have a description (a better --model, or a poor result).  Only slides with an
 image can be described: a deck with no PDF, or a stale one, is skipped.
 
 Needs python-pptx and PyMuPDF: ``pip install "llmgrader[mcp-build]"``;
@@ -69,12 +72,15 @@ def run_describe(args, specs) -> int:
     cache_path = descriptions_path(args.config)
     with tempfile.TemporaryDirectory() as work:
         print("Rendering slides to find the ones not yet described...")
-        plan = plan_descriptions(specs, load_descriptions(cache_path), work)
+        plan = plan_descriptions(specs, load_descriptions(cache_path), work, force=args.force)
         for deck_id in plan.text_only_decks:
             print(f"  [{deck_id}] skipped: no usable PDF, so no images to describe")
         cost = estimate_cost(model, len(plan.todo))
         print(f"\n{len(plan.todo)} slide(s) to describe, {plan.cached} already in "
               f"{cache_path.name}.")
+        if plan.replacing:
+            print(f"--force: {plan.replacing} of them already have a description, "
+                  "which will be replaced.")
         print(f"Model {model.id}: estimated ${cost:.2f} "
               f"(~{len(plan.todo)} calls; the estimate assumes a typical slide).")
         if args.dry_run or not plan.todo:
@@ -109,10 +115,24 @@ def main(argv: list[str] | None = None) -> int:
                         help="model for --describe: a tier or a model id (default: simple)")
     parser.add_argument("--yes", action="store_true",
                         help="with --describe, do not ask before spending")
+    parser.add_argument("--force", action="store_true",
+                        help="with --describe, redo slides that already have a description "
+                             "(not needed after editing slides: changed slides are redone anyway)")
+    parser.add_argument("--deck", action="append", default=[], metavar="ID",
+                        help="with --describe, only these decks (by id); may be repeated")
     args = parser.parse_args(argv)
 
     try:
         specs = read_config(args.config, parse_roots(args.root))
+        if (args.deck or args.force) and not args.describe:
+            raise MaterialsError("--deck and --force go with --describe")
+        if args.deck:
+            known = {spec.id for spec in specs}
+            unknown = [d for d in args.deck if d not in known]
+            if unknown:
+                raise MaterialsError(f"unknown deck(s) {', '.join(unknown)}; "
+                                     f"decks in the config: {', '.join(sorted(known))}")
+            specs = [spec for spec in specs if spec.id in args.deck]
         if args.describe:
             return run_describe(args, specs)
         if args.dry_run:

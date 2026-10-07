@@ -379,3 +379,46 @@ def test_malformed_config_is_a_short_message(tmp_path) -> None:
     path.write_text("<llmgrader_mcp><slides>", encoding="utf-8")
     with pytest.raises(MaterialsError, match="not well-formed XML"):
         read_config(path)
+
+
+def test_force_redoes_described_slides(tmp_path, monkeypatch) -> None:
+    materials, specs, cache, model, calls = described_deck(tmp_path, monkeypatch, {
+        1: "First.", 2: "Second."})
+    plan = materials.plan_descriptions(specs, {}, tmp_path / "w1")
+    materials.describe_slides(plan, cache, model_spec=model, api_key="k", log=lambda *_: None)
+
+    saved = materials.load_descriptions(cache)
+    plain = materials.plan_descriptions(specs, saved, tmp_path / "w2")
+    forced = materials.plan_descriptions(specs, saved, tmp_path / "w3", force=True)
+    assert (len(plain.todo), plain.replacing) == (0, 0)
+    assert (len(forced.todo), forced.replacing, forced.cached) == (2, 2, 0)
+
+
+def test_identical_slides_are_sent_once(tmp_path, monkeypatch) -> None:
+    from llmgrader.coursemcp import materials
+
+    pub = tmp_path / "pub"
+    pub.mkdir()
+    make_deck(pub / "deck.pptx", ["Divider", "Divider"])
+    pymupdf = pytest.importorskip("pymupdf")
+    doc = pymupdf.open()
+    for _ in range(2):  # two pages drawn identically
+        doc.new_page(width=720, height=405).insert_text((72, 72), "Same", fontsize=40)
+    doc.save(str(pub / "deck.pdf"))
+    config = write_config(tmp_path, '<deck id="d" root="pub" unit="U" pdf="deck.pdf">deck.pptx</deck>')
+    plan = materials.plan_descriptions(read_config(config), {}, tmp_path / "w")
+    assert len(plan.todo) == 1
+
+
+def test_deck_and_force_need_describe(tmp_path, monkeypatch, capsys) -> None:
+    from llmgrader.scripts import llmgrader_mcp_build
+
+    pub = tmp_path / "pub"
+    pub.mkdir()
+    (pub / "a.pptx").write_bytes(b"x")
+    config = write_config(tmp_path, '<deck id="a" root="pub" unit="U">a.pptx</deck>')
+    assert llmgrader_mcp_build.main(["--config", str(config), "--force"]) == 1
+    assert "go with --describe" in capsys.readouterr().err
+    assert llmgrader_mcp_build.main(["--config", str(config), "--describe", "--dry-run",
+                                     "--deck", "nope"]) == 1
+    assert "unknown deck(s) nope" in capsys.readouterr().err

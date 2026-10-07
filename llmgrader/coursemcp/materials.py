@@ -302,14 +302,23 @@ def _save_descriptions(path: Path, slides: dict) -> None:
 @dataclass
 class DescribePlan:
     todo: list            # (deck_meta, slide, image_bytes, key) to describe
-    cached: int           # slides with an image already in the cache
+    cached: int           # slides with an image already in the cache, left alone
     text_only_decks: list  # deck ids with no usable images, so nothing to describe
+    replacing: int = 0    # with force: slides in todo whose cached description is replaced
 
 
-def plan_descriptions(specs: list[DeckSpec], cache: dict, work_dir: Path) -> DescribePlan:
-    """Render every deck into *work_dir* and work out which slides need a call."""
+def plan_descriptions(specs: list[DeckSpec], cache: dict, work_dir: Path,
+                      *, force: bool = False) -> DescribePlan:
+    """Render every deck into *work_dir* and work out which slides need a call.
+
+    A slide is sent when its image is not in *cache* -- which is how an edited
+    slide gets a new description and an unchanged one does not -- or always,
+    with *force*, to redo descriptions (a better model, a poor result).
+    Identical images are sent once: they share a cache entry.
+    """
     build_materials(specs, work_dir, log=lambda *_: None, descriptions=cache)
-    todo, cached, text_only = [], 0, []
+    todo, cached, text_only, replacing = [], 0, [], 0
+    queued: set[str] = set()
     root = Path(work_dir) / MATERIALS_DIR
     manifest = json.loads((root / MANIFEST).read_text(encoding="utf-8"))
     for meta in manifest["decks"]:
@@ -321,11 +330,15 @@ def plan_descriptions(specs: list[DeckSpec], cache: dict, work_dir: Path) -> Des
         for slide in deck["slides"]:
             data = (deck_dir / slide["image"]).read_bytes()
             key = image_key(data)
-            if key in cache:
+            if key in queued:
+                continue
+            if key in cache and not force:
                 cached += 1
-            else:
-                todo.append((meta, slide, data, key))
-    return DescribePlan(todo, cached, text_only)
+                continue
+            replacing += key in cache
+            queued.add(key)
+            todo.append((meta, slide, data, key))
+    return DescribePlan(todo, cached, text_only, replacing)
 
 
 def estimate_cost(model_spec, slides: int) -> float:
