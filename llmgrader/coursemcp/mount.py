@@ -24,6 +24,8 @@ MCPServer, not just a new thread.)
 from __future__ import annotations
 
 import asyncio
+import hmac
+import json
 import os
 import threading
 
@@ -47,11 +49,53 @@ NOT_POST_MESSAGE = (
 )
 
 
+TOKEN_ENV = "LLMGRADER_MCP_TOKEN"
+MIN_TOKEN_CHARS = 16
+
+
+def configured_token() -> str | None:
+    """The course token from ``LLMGRADER_MCP_TOKEN``, or None when unset."""
+    token = os.environ.get(TOKEN_ENV, "").strip()
+    return token or None
+
+
+def _same(given: str, token: str) -> bool:
+    """Constant-time comparison.  Bytes, since compare_digest rejects non-ASCII str."""
+    return hmac.compare_digest(given.encode("utf-8"), token.encode("utf-8"))
+
+
+def _refusal(message: str) -> bytes:
+    # A JSON-RPC error body, so an AI client shows the message rather than a
+    # bare status code.
+    return json.dumps({"jsonrpc": "2.0", "id": None,
+                       "error": {"code": -32001, "message": message}}).encode()
+
+
 class CourseMCPRunner:
-    """The course MCP as a WSGI app, started on first use in each process."""
+    """The course MCP as a WSGI app, started on first use in each process.
+
+    **The course token.**  With ``LLMGRADER_MCP_TOKEN`` set, every MCP request
+    must carry it, and the question, rubric and solution tools are served;
+    unset, the endpoint is open and serves titles only.  The token is accepted
+    two ways:
+
+    * ``Authorization: Bearer <token>`` -- preferred.  claude.ai's connector
+      form, VS Code's ``mcp.json`` and ``claude mcp add --header`` can all send
+      a header, and a header stays out of URLs, server logs and screenshots.
+    * ``/mcp/<token>`` -- for a client that cannot set headers.
+
+    A missing or wrong token is refused with 403, not 401: a 401 tells an
+    OAuth-aware client such as claude.ai to start a sign-in flow, which this
+    server does not offer, and the student would see a broken sign-in rather
+    than the message.
+    """
 
     def __init__(self, registry: CourseRegistry):
         self.registry = registry
+        self.token = configured_token()
+        if self.token and len(self.token) < MIN_TOKEN_CHARS:
+            print(f"[CourseMCP] Warning: {TOKEN_ENV} is under {MIN_TOKEN_CHARS} "
+                  "characters; use a long random value.")
         self._lock = threading.Lock()
         self._pid: int | None = None
         self._wsgi = None
@@ -65,7 +109,7 @@ class CourseMCPRunner:
         )
 
     def _start(self) -> None:
-        mcp = build_course_mcp(self.registry)
+        mcp = build_course_mcp(self.registry, content=self.token is not None)
         asgi_app = mcp.streamable_http_app(  # creates mcp.session_manager
             # Mounted at /mcp by the dispatcher, so the app serves its root.
             streamable_http_path="/",
@@ -121,6 +165,7 @@ class CourseMCPRunner:
         # redirected POST is not something to depend on.
         if not environ.get("PATH_INFO"):
             environ["PATH_INFO"] = "/"
+        token_in_path = self._take_path_token(environ)
         # Only POST reaches the MCP app.  A GET is a request for a standing
         # server-to-client event stream, which mcp 2 opens and never closes
         # for any client accepting */* -- so a browser, or a crawler, visiting
@@ -134,6 +179,12 @@ class CourseMCPRunner:
                 ("Content-Type", "text/plain; charset=utf-8"),
             ])
             return [NOT_POST_MESSAGE]
+        if self.token and not (token_in_path or self._bearer_matches(environ)):
+            start_response("403 Forbidden", [("Content-Type", "application/json")])
+            return [_refusal(
+                "This course MCP needs the course access token. Add it to the "
+                "connector as the request header 'Authorization: Bearer <token>', "
+                "using the token your instructor posted.")]
         try:
             mcp_wsgi = self.wsgi()
         except Exception as exc:
@@ -142,6 +193,22 @@ class CourseMCPRunner:
                            [("Content-Type", "text/plain; charset=utf-8")])
             return [b"The course MCP could not start on this server.\n"]
         return mcp_wsgi(environ, start_response)
+
+
+    def _take_path_token(self, environ) -> bool:
+        """Whether the path is ``/<token>``; if so, rewrite it to ``/``."""
+        if not self.token:
+            return False
+        segment = environ["PATH_INFO"].strip("/")
+        if segment and _same(segment, self.token):
+            environ["PATH_INFO"] = "/"
+            return True
+        return False
+
+    def _bearer_matches(self, environ) -> bool:
+        header = environ.get("HTTP_AUTHORIZATION", "")
+        scheme, _, value = header.partition(" ")
+        return scheme.lower() == "bearer" and _same(value.strip(), self.token)
 
 
 def mount_course_mcp(app: Flask, registry: CourseRegistry) -> None:

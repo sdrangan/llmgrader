@@ -759,7 +759,10 @@ class APIController:
                 "course": self.banner_context(),
             })
 
-        STUDENT_EXCLUDED_FIELDS = {"solution", "solution_images", "grading_notes"}
+        # variation_guidance is for an AI generating practice variants, served
+        # by the course MCP; the portal page has no use for it.
+        STUDENT_EXCLUDED_FIELDS = {"solution", "solution_images", "grading_notes",
+                                   "variation_guidance"}
 
         def _strip_solution_fields(question: dict) -> dict:
             return {k: v for k, v in question.items() if k not in STUDENT_EXCLUDED_FIELDS}

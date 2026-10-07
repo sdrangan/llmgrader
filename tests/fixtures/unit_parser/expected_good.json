@@ -7,6 +7,7 @@
         "solution": "<p>Use Euler.</p>",
         "solution_images": [],
         "grading_notes": "Accept equivalent implementations.",
+        "variation_guidance": "",
         "parts": [
           {
             "part_label": "all",
@@ -37,6 +38,7 @@
         "solution": "<p>The derivative is <code>a^x \\ln(a)</code>.</p>",
         "solution_images": [],
         "grading_notes": "Any valid method is acceptable.",
+        "variation_guidance": "",
         "parts": [
           {
             "part_label": "all",

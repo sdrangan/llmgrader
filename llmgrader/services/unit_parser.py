@@ -1257,6 +1257,12 @@ class UnitParser:
                         grading_notes_elem = question.find("grading_notes")
                         grading_notes = element_text(grading_notes_elem)
 
+                        # What an AI may vary when making practice variants.
+                        # Ignored by the grader; served by the course MCP's
+                        # get_question (plans/course_mcp.md, decision 11).
+                        variation_elem = question.find("variation_guidance")
+                        variation_guidance = element_text(variation_elem)
+
                         required_elem = question.find("required")
                         if required_elem is None:
                             required_elem = question.find("grade")
@@ -1363,6 +1369,7 @@ class UnitParser:
                             "solution": solution,
                             "solution_images": solution_images,
                             "grading_notes": grading_notes,
+                            "variation_guidance": variation_guidance,
                             "parts": parts,
                             "required": required,
                             "partial_credit": partial_credit,
