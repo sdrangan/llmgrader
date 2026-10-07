@@ -65,21 +65,23 @@ most from it, try asking things like:
 
 ---
 
-## What you need: an address and a token
+## What you need: the address
 
-Your instructor will post two things:
+The course MCP's address is the course portal's address followed by `/mcp`:
 
-- **the address** of the course MCP, which is the course portal's address
-  followed by `/mcp`:
+```
+https://<portal>/mcp
+```
 
-  ```
-  https://<portal>/mcp
-  ```
+Your instructor will post it. That is usually all you need: skip every mention
+of a token below.
 
-- **a course access token**, a long string of letters and digits.
+### Only if your course uses a token
 
-Every connection below sends the token as a request header named
-`Authorization`, with the value `Bearer` followed by a space and the token:
+Some courses also require a **course access token**, a long string of letters
+and digits your instructor gives you. If yours does, send it as a request
+header named `Authorization`, with the value `Bearer` followed by a space and
+the token:
 
 ```
 Authorization: Bearer <token>
@@ -119,9 +121,10 @@ browser, so the page you see is short -- what matters is what it says:
    (ending in `/mcp`).
 5. Under **Authentication**, leave **No sign-in** selected. Claude detects
    this on its own and marks it **Detected**.
-6. Under **Request headers**, click **Add header**. Enter `Authorization` as
-   the name and `Bearer <token>` as the value -- the word `Bearer`, a space,
-   then the token.
+6. *Only if your course uses a token:* under **Request headers**, click **Add
+   header**. Enter `Authorization` as the name and `Bearer <token>` as the
+   value -- the word `Bearer`, a space, then the token. Otherwise leave it
+   empty.
 7. Click **Add**.
 
 If Claude will not accept `Authorization` as a header name, remove the header
@@ -130,8 +133,7 @@ and use the address with the token at the end instead (see above).
 {: .note }
 With **No sign-in**, Claude shows a warning: *"Without sign-in, anyone with the
 server URL can use this connector."* **That is expected, and safe to accept.**
-The token you added is what the course MCP checks; "sign-in" here means a
-personal account, which it does not use. The course MCP is read-only: it only
+"Sign-in" here means a personal account, which the course MCP does not use. The course MCP is read-only: it only
 hands out course material, and it never sees your Claude account, your chats or
 your grades. Nothing you do through it is linked to you.
 
@@ -154,8 +156,9 @@ Copilot Chat in **agent mode** can use MCP servers.
 3. Choose **HTTP** and paste the address (ending in `/mcp`).
 4. Give it a name, such as `hwdesign`, and choose whether to add it for this
    workspace or for all of your workspaces.
-5. VS Code opens the `mcp.json` file it wrote. Add the token as a `headers`
-   entry, so the server's entry looks like this:
+5. *Only if your course uses a token:* VS Code opens the `mcp.json` file it
+   wrote. Add the token as a `headers` entry, so the server's entry looks like
+   this:
 
 ```json
 {
@@ -182,8 +185,10 @@ tools are ticked in the tools picker.
 ## Connecting Claude Code (terminal or VS Code extension)
 
 ```bash
-claude mcp add --transport http hwdesign https://<portal>/mcp   --header "Authorization: Bearer <token>"
+claude mcp add --transport http hwdesign https://<portal>/mcp
 ```
+
+If your course uses a token, add `--header "Authorization: Bearer <token>"`.
 
 `claude mcp list` shows whether it connected, and
 `claude mcp remove hwdesign` removes it.

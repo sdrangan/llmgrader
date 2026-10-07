@@ -67,6 +67,9 @@ def build_app(tmp_path: Path, monkeypatch, *, enabled: bool, archived=()):
         monkeypatch.setenv("LLMGRADER_MCP_ENABLED", "1")
     else:
         monkeypatch.delenv("LLMGRADER_MCP_ENABLED", raising=False)
+    # This file tests the title tier; access settings from the shell must not leak in.
+    monkeypatch.delenv("LLMGRADER_MCP_TOKEN", raising=False)
+    monkeypatch.delenv("LLMGRADER_MCP_PUBLIC", raising=False)
 
     courses_root = storage / "courses"
     for course_id, spec in COURSES.items():

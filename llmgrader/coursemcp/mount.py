@@ -50,7 +50,13 @@ NOT_POST_MESSAGE = (
 
 
 TOKEN_ENV = "LLMGRADER_MCP_TOKEN"
+PUBLIC_ENV = "LLMGRADER_MCP_PUBLIC"
 MIN_TOKEN_CHARS = 16
+
+
+def configured_public() -> bool:
+    """``LLMGRADER_MCP_PUBLIC`` is set to a true value: serve content openly."""
+    return os.environ.get(PUBLIC_ENV, "").strip().lower() in {"1", "true", "yes"}
 
 
 def configured_token() -> str | None:
@@ -74,10 +80,18 @@ def _refusal(message: str) -> bytes:
 class CourseMCPRunner:
     """The course MCP as a WSGI app, started on first use in each process.
 
-    **The course token.**  With ``LLMGRADER_MCP_TOKEN`` set, every MCP request
-    must carry it, and the question, rubric and solution tools are served;
-    unset, the endpoint is open and serves titles only.  The token is accepted
-    two ways:
+    **Access.**  Three modes, from the environment:
+
+    * ``LLMGRADER_MCP_PUBLIC`` set -- everything is served, to anyone, with no
+      token.  For a course whose problems are study material and whose answer
+      key it does not mind being readable: students then need only the
+      portal's address.  A token, if also set, is ignored.
+    * ``LLMGRADER_MCP_TOKEN`` set -- every MCP request must carry it, and the
+      question, rubric, solution and slide tools are served.
+    * Neither -- open, but titles only.  The safe default: an answer key is
+      never published without the instructor choosing one of the above.
+
+    The token is accepted two ways:
 
     * ``Authorization: Bearer <token>`` -- preferred.  claude.ai's connector
       form, VS Code's ``mcp.json`` and ``claude mcp add --header`` can all send
@@ -92,7 +106,12 @@ class CourseMCPRunner:
 
     def __init__(self, registry: CourseRegistry):
         self.registry = registry
-        self.token = configured_token()
+        self.public = configured_public()
+        # Public mode wants no token: requiring one would defeat the point.
+        self.token = None if self.public else configured_token()
+        if self.public and configured_token():
+            print(f"[CourseMCP] {PUBLIC_ENV} is set, so {TOKEN_ENV} is ignored: "
+                  "content is served without a token.")
         # The portal's public address, for links a student can open (a
         # slide's image).  LLMGRADER_PUBLIC_URL if set; otherwise taken from
         # each request -- behind Render's proxy, X-Forwarded-Proto says https.
@@ -114,7 +133,7 @@ class CourseMCPRunner:
         )
 
     def _start(self) -> None:
-        mcp = build_course_mcp(self.registry, content=self.token is not None,
+        mcp = build_course_mcp(self.registry, content=self.public or self.token is not None,
                                public_url=lambda: self.public_url)
         asgi_app = mcp.streamable_http_app(  # creates mcp.session_manager
             # Mounted at /mcp by the dispatcher, so the app serves its root.

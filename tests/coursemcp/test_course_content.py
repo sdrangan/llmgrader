@@ -89,7 +89,7 @@ UNIT_XML = f"""<unit id="u1" title="Basics" version="1.0">
 HEADERS = {"Accept": "application/json, text/event-stream"}
 
 
-def build_app(tmp_path: Path, monkeypatch, *, token: str | None):
+def build_app(tmp_path: Path, monkeypatch, *, token: str | None, public: bool = False):
     storage = tmp_path / "storage"
     monkeypatch.setenv("LLMGRADER_STORAGE_PATH", str(storage))
     monkeypatch.setenv("LLMGRADER_SECRET_KEY", "test-secret-key")
@@ -99,6 +99,10 @@ def build_app(tmp_path: Path, monkeypatch, *, token: str | None):
         monkeypatch.setenv("LLMGRADER_MCP_TOKEN", token)
     else:
         monkeypatch.delenv("LLMGRADER_MCP_TOKEN", raising=False)
+    if public:
+        monkeypatch.setenv("LLMGRADER_MCP_PUBLIC", "1")
+    else:
+        monkeypatch.delenv("LLMGRADER_MCP_PUBLIC", raising=False)
 
     courses_root = storage / "courses"
     pkg = courses_root / "alpha" / "soln_pkg"
@@ -167,6 +171,21 @@ def test_without_a_token_only_titles_are_served(tmp_path, monkeypatch) -> None:
     names = tool_names(client, auth=None)
     assert names == {"list_courses", "list_units"}
     assert not names & CONTENT_TOOLS
+
+
+def test_public_mode_serves_content_without_a_token(tmp_path, monkeypatch) -> None:
+    """LLMGRADER_MCP_PUBLIC: students need only the address."""
+    client = build_app(tmp_path, monkeypatch, token=None, public=True).test_client()
+    assert tool_names(client, auth=None) == {"list_courses", "list_units"} | CONTENT_TOOLS
+    body = payload(call(client, "get_solution",
+                        {"course_id": "alpha", "unit": UNIT, "qtag": "Bouncing ball"}, auth=None))
+    assert SOLUTION_SENTINEL in body["solution"]
+
+
+def test_public_mode_ignores_a_leftover_token(tmp_path, monkeypatch) -> None:
+    """Switching to public must not leave students locked out by an old token."""
+    client = build_app(tmp_path, monkeypatch, token=TOKEN, public=True).test_client()
+    assert rpc(client, "tools/list", auth=None).status_code == 200
 
 
 def test_with_a_token_content_tools_are_served(client) -> None:
