@@ -1,9 +1,16 @@
 <div id="analytics-view" class="app-view analytics-view">
 
-    <h2>Database Viewer</h2>
+    <h2>Database Viewer &mdash; <span id="analytics-db-name">Grade DB</span></h2>
 
     <div class="query-section">
         <h3>SQL Query</h3>
+
+        <div class="preset-row">
+            <label for="analytics-preset-select">Preset:</label>
+            <select id="analytics-preset-select">
+                <option value="">Choose a preset query&hellip;</option>
+            </select>
+        </div>
 
         <div id="analytics-error" class="error" style="display:none;"></div>
 

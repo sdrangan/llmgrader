@@ -250,6 +250,36 @@ remove or rename `llmgrader_mcp_config.xml`.
 
 ---
 
+## Package versions
+
+Every package `create_soln_pkg` builds carries a version, written into it as
+`package_info.json` and printed at the end of the build:
+
+```text
+Package version: 2026-10-07.3f9c2a1
+  hwdesign-soln: 54cc4a3 (clean)
+  hwdesign: 089706c (6 uncommitted changes, 4 files not in git)
+```
+
+The version is the build date and the start of a hash over every file in the
+package, so it is never typed by hand and two different packages never share
+one. After you upload it, **Manage Courses** shows it beside the course, and
+every grade and every MCP call records the version that answered, so either
+can be traced back to the exact rubric, solution or slide.
+
+Below it is each repository the package was built from, at its commit, with
+a count of what that commit alone would not reproduce. Only the files the
+package is built from are counted: unit files and their images, assets, the
+slide decks and PDFs, and the configuration files. A stray file elsewhere in
+the repository is not. `uncommitted changes` are edited files; `files not in
+git` are new or ignored ones. Commit them before building if you want the
+package to be reproducible from the repositories.
+
+A package built before versions existed, or by hand, is given one when the
+portal loads it: `computed.` and the start of the same hash.
+
+---
+
 ## Planned
 
 - **Lab instructions and other documents**, listed in the same file.

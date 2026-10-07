@@ -19,6 +19,8 @@ provide a real‑time window into all grading activity performed on the portal. 
 We are hoping that we can learn from this data to improve
 future LLM-based teaching systems.
 
-Right now we just a have a single page:
+There are two pages:
 
-* [Database viewer](./dbviewer.md)
+* [Database viewer](./dbviewer.md) -- the query view, over the grading database
+* [MCP usage](./mcp_usage.md) -- the same view over the course MCP's usage
+  database, with its presets

@@ -72,6 +72,20 @@ def test_admin_route_requires_admin_role(app_factory):
         assert resp.status_code == 403
 
 
+def test_mcp_usage_routes_require_admin_role(app_factory):
+    """Usage counts are the instructor's, and trimming them is irreversible."""
+    create, _ = app_factory
+    app = create(LLMGRADER_AUTH_MODE="normal", LLMGRADER_INITIAL_ADMIN_EMAIL=None)
+
+    with app.test_client() as client:
+        assert client.post("/admin/dbviewer", json={
+            "sql_query": "SELECT * FROM mcp_calls", "db": "mcp"}).status_code == 403
+        assert client.get("/admin/dbviewer/schema?db=mcp").status_code == 403
+        assert client.get("/admin/dbviewer/download?db=mcp").status_code == 403
+        assert client.post("/admin/dbviewer/mcp/delete_before",
+                           json={"before": "2030-01-01"}).status_code == 403
+
+
 def test_dev_open_mode_allows_admin_routes_without_login(app_factory):
     create, _ = app_factory
     app = create(LLMGRADER_AUTH_MODE="dev-open", LLMGRADER_INITIAL_ADMIN_EMAIL=None)

@@ -257,3 +257,32 @@ admin only, for the MCP database only.
 - **`rubric_eval`.** Grading still drops the per-item rubric results
   (`course_mcp.md` decision 8). It is the natural companion to
   `submissions.package_version`, but a separate change.
+
+## Status
+
+All four phases are implemented (2026-10-07), not yet merged.
+
+Departures from the text above, and the open questions settled on the way:
+
+- **`sources` counts only the package's inputs.** `create_soln_pkg` collects
+  every file and directory it copies or builds from (config, units and their
+  `images/`, assets, the MCP config, the descriptions cache, each deck's pptx
+  and pdf) and runs `git status` restricted to those paths. A stray file
+  elsewhere in a repository is not counted; an untracked or ignored input is,
+  as "files not in git".
+- **A computed version** is `computed.<hash head>`: there is no build date to
+  put in front of it.
+- **The client is carried in the minted session id** (`claude.ai.<hex>`).
+  2025 clients name themselves only in `initialize`, and the server is
+  stateless, so this is how a later call knows its client.
+- **Rows are written from the response's `close()`**, after the answer has
+  been sent, rather than before it.
+- **Unlisted arguments are redacted**, in addition to the test that fails on
+  one: safe by default, and visible in review.
+- **The viewer opens both databases read-only** (`mode=ro`), a second guard
+  behind the keyword check.
+- **The grading database got presets too**: latest submissions, per day by
+  unit, by package version, and timeouts/errors.
+- **Top search hit** (open question): not recorded; only the hit count.
+- **The database choice** is remembered in `localStorage`; the per-database
+  queries are remembered for the page's lifetime, as the query was before.

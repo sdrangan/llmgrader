@@ -52,6 +52,9 @@ class PortalStorage:
         # replay tool -- writes NULL rather than guessing, and rows that
         # predate the column are stamped once by backfill_course_id.
         "course_id": "TEXT",
+        # The version of the course package the grade was made against
+        # (services/package_info.py), so a grade traces to its rubric.
+        "package_version": "TEXT",
         "unit_name": "TEXT",
         "qtag": "TEXT",
         "part_label": "TEXT",
@@ -92,6 +95,7 @@ class PortalStorage:
         "question_text": "html",
         "ref_soln": "html",
         "course_id": "text",
+        "package_version": "text",
         "unit_name": "text",
         "qtag": "text",
         "required": "bool",
@@ -204,6 +208,7 @@ class PortalStorage:
             "max_points": "REAL",
             "client_id": "TEXT",
             "course_id": "TEXT",
+            "package_version": "TEXT",
         }
 
         # Add each column if missing

@@ -16,6 +16,7 @@ import xml.etree.ElementTree as ET
 import argparse
 from pathlib import Path, PurePosixPath
 
+from llmgrader.services.package_info import write_package_info
 from llmgrader.services.unit_parser import UnitParser
 
 
@@ -113,6 +114,9 @@ def main():
     config_dest = output_dir / 'llmgrader_config.xml'
     shutil.copy2(config_path, config_dest)
     print(f"Copied config: {config_path} -> {config_dest}")
+    # Every file and directory the package is built from, for the source
+    # state recorded in package_info.json.
+    inputs = [config_path]
     print()
 
     # Get the directory containing the config file (for resolving relative paths)
@@ -163,8 +167,10 @@ def main():
         if images_source.is_dir():
             images_dest = output_dir / f"{dest_stem}_images"
             shutil.copytree(images_source, images_dest, dirs_exist_ok=True)
+            inputs.append(images_source)
             print(f"    Images: {images_source} -> {images_dest.relative_to(output_dir)}")
 
+        inputs.append(source_full)
         copied_files.append((unit_name, source_path, dest_filename))
         print(f"  [{unit_name}]")
         print(f"    Source: {source_path}")
@@ -194,6 +200,7 @@ def main():
             if source_full.is_dir() and directory_is_empty(source_full):
                 print(f"Warning: Asset directory is empty: {source_full}")
 
+            inputs.append(source_full)
             destination_rel = copy_asset_entry(
                 source_full=source_full,
                 destination_path=destination_path,
@@ -213,14 +220,24 @@ def main():
         try:
             # Slide descriptions are read from the cache llmgrader_mcp_build
             # --describe writes; this build itself never calls a model.
-            build_materials(read_config(mcp_config), output_dir,
+            decks = read_config(mcp_config)
+            build_materials(decks, output_dir,
                             descriptions=load_descriptions(descriptions_dir(mcp_config)))
         except (MaterialsError, ImportError) as exc:
             print(f"Error: {exc}")
             if isinstance(exc, ImportError):
                 print('Install the build dependencies: pip install "llmgrader[mcp-build]"')
             return 1
+        inputs += [mcp_config, descriptions_dir(mcp_config)]
+        inputs += [path for deck in decks for path in (deck.pptx, deck.pdf) if path]
         print()
+
+    # Version the package, last, so the hash covers everything above.
+    info = write_package_info(output_dir, inputs)
+    print(f"Package version: {info['version']}")
+    for repo, state in info['sources'].items():
+        print(f"  {repo}: {state}")
+    print()
 
     # Create ZIP archive
     zip_filename = 'soln_package.zip'
@@ -236,6 +253,7 @@ def main():
     print("=" * 60)
     print("Summary:")
     print(f"  Total units packaged: {len(copied_files)}")
+    print(f"  Package version: {info['version']}")
     print(f"  Output directory: {output_dir}")
     print(f"  ZIP archive: {zip_filename}")
     print("=" * 60)

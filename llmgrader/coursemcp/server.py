@@ -32,7 +32,9 @@ CONTENT_INSTRUCTIONS = (
     "the answer -- use the rubric to see what counts, and the worked solution "
     "to check their reasoning or build a hint -- rather than reproducing the "
     "solution, unless they ask for it. The portal grades their submitted "
-    "answers; nothing done through these tools is graded or recorded."
+    "answers; nothing done through these tools is graded. The portal counts "
+    "which tools are called and on which questions and slides, anonymously "
+    "and without the student's words."
 )
 
 
@@ -83,12 +85,16 @@ def build_course_mcp(registry: CourseRegistry, *, content: bool = False,
 
     @mcp.tool()
     def list_courses() -> list[dict]:
-        """List the courses this portal serves: id, name and semester.
+        """List the courses this portal serves: id, name, semester and the
+        version of the course material being served.
 
         Use the id as course_id in every other tool.
         """
+        # The version is here and in no other tool's result: an assistant
+        # reads every result, and on any other call it would be noise.
         return [
-            {"course_id": entry.id, "name": entry.name, "semester": entry.semester}
+            {"course_id": entry.id, "name": entry.name, "semester": entry.semester,
+             "package_version": registry.grader_for(entry.id).package_version}
             for entry in registry.courses()
         ]
 

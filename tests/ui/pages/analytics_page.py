@@ -59,3 +59,39 @@ class AnalyticsPage:
             "document.getElementById('analytics-error')?.style.display !== 'none'",
             timeout=timeout,
         )
+
+    # --- The database choice (plans/mcp_usage.md, decision 8) ---------------
+
+    def open_menu(self) -> None:
+        self._page.locator("#analytics-menu-group .menu-button").hover()
+        self._page.wait_for_selector("#analytics-db-grade-item", state="visible", timeout=5_000)
+
+    def choose_db(self, db: str) -> None:
+        """Pick Grade DB or MCP DB from the Analytics menu."""
+        self.open_menu()
+        self._page.click(f"#analytics-db-{db}-item")
+
+    def checked_db(self) -> str:
+        return self._page.locator(".analytics-db-item[aria-checked='true']").get_attribute("data-db")
+
+    def db_name(self) -> str:
+        return self._page.locator("#analytics-db-name").inner_text().strip()
+
+    def schema_tables(self) -> list[str]:
+        """Table names in the column reference, once it has loaded."""
+        self._page.wait_for_selector("#analytics-schema-body .schema-table-name", timeout=8_000)
+        names = self._page.locator("#analytics-schema-body .schema-table-name").all_inner_texts()
+        return [name.lstrip("▸▾ ").strip() for name in names]
+
+    def wait_for_schema_table(self, name: str, timeout: int = 8_000) -> None:
+        self._page.wait_for_function(
+            "name => Array.from(document.querySelectorAll('#analytics-schema-body .schema-table-name'))"
+            ".some(b => b.textContent.replace(/^[▸▾]\s*/, '').trim() === name)",
+            arg=name, timeout=timeout,
+        )
+
+    def result_rows(self) -> int:
+        return self.results_table.locator("tbody tr").count()
+
+    def presets(self) -> list[str]:
+        return self._page.locator("#analytics-preset-select option").all_inner_texts()[1:]

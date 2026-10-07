@@ -137,6 +137,16 @@
     <div class="menu-group view-menu" role="none" data-view="analytics" id="analytics-menu-group">
         <button class="menu-button" role="menuitem" aria-haspopup="true" aria-expanded="false">Analytics</button>
         <div class="menu-dropdown" role="menu">
+            <!-- Which database the view queries (plans/mcp_usage.md, decision 8).
+                 analytics.js sets the check mark and aria-checked. -->
+            <button class="menu-item analytics-db-item" role="menuitemradio" type="button"
+                    id="analytics-db-grade-item" data-db="grade" aria-checked="true"
+                    onclick="switchAnalyticsDb('grade')"><span class="analytics-db-check">✓</span> Grade DB</button>
+            <button class="menu-item analytics-db-item" role="menuitemradio" type="button"
+                    id="analytics-db-mcp-item" data-db="mcp" aria-checked="false"
+                    onclick="switchAnalyticsDb('mcp')"><span class="analytics-db-check"></span> MCP DB</button>
+            <div class="menu-separator" role="separator"></div>
+
             <button class="menu-item" role="menuitem" type="button"
                     onclick="runAnalyticsQuery()">
                 Run Query
@@ -147,6 +157,15 @@
                     disabled
                     onclick="downloadAnalyticsCSV()">
                 Download CSV
+            </button>
+
+            <!-- MCP DB only: usage is disposable, grades are not. -->
+            <div class="menu-separator analytics-mcp-only" role="separator" style="display:none;"></div>
+            <button class="menu-item analytics-mcp-only" role="menuitem" type="button"
+                    id="analytics-delete-usage-menu-item"
+                    style="display:none;"
+                    onclick="deleteMcpUsageBefore()">
+                Delete Usage Before…
             </button>
         </div>
     </div>

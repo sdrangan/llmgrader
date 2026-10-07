@@ -25,6 +25,16 @@ The page provides:
 
 This tool is the foundation of the system’s analytics and observability layer.
 
+The view queries one database at a time, chosen in the **Analytics** menu:
+**Grade DB** (this page) or **MCP DB**, the course MCP's usage log (see
+[MCP usage](./mcp_usage.md)). A **Preset** list above the query box offers
+ready-made queries for whichever is active.
+
+Each submission row also records `package_version`, the version of the course
+package it was graded against, so a grade can be traced to the rubric that
+produced it. The **Submissions by package version** preset shows when each
+version was in use.
+
 ---
 
 ## Default Table Columns

@@ -157,11 +157,57 @@ announce it.
 
 ---
 
+## What is recorded
+
+Every MCP request is recorded as one row in its own database,
+`<storage>/db/mcp_usage.db`, beside the grading database and separate from it.
+Read it in **Analytics ▸ MCP DB** ([MCP usage](../../analytics/mcp_usage.md)).
+
+**Recorded:**
+
+- when, which tool, and whether it succeeded, failed or was refused;
+- the course, unit, question, deck and slide asked about -- as the tool
+  resolved them, so *"unit 2"* is recorded as the unit's real name;
+- how big the answer was: its size in bytes, how many items a list held, how
+  many images it carried;
+- which kind of assistant made the call -- `claude.ai`, `vscode`,
+  `claude-code` or `other` -- and the MCP protocol version;
+- an anonymous session id, so calls from one chat can be grouped (below);
+- the version of the course package that answered (see
+  [package versions](./package.md#package-versions)).
+
+**Never recorded:**
+
+- **the student's words.** A slide search is recorded with its query replaced
+  by `<redacted>`; it is the only tool that takes free text.
+- **who the student is.** No name, email, IP address or browser string. The
+  MCP has no sign-in, so there is no identity to record; with a course token
+  set, every student sends the same token, and it is not recorded either.
+- **the answer itself.** Only its size: a slide image or a worked solution
+  would grow the file by megabytes, and the package version already says what
+  it was.
+
+**Sessions.** Assistants on the 2025 protocol open a connection with a
+handshake, and the server gives that connection a random id, which the
+assistant sends back with each call. The id lasts one connection -- roughly
+one chat -- and is linked to nothing else. Assistants on the 2026 protocol
+have no handshake; their calls are grouped into sessions when you query, by
+assistant kind and a gap of more than 10 minutes. That can merge two students
+using the same assistant at the same time.
+
+Recording never fails a student's call: if the row cannot be written, the
+student still gets the answer and the server logs `[McpUsage] Dropped a usage
+row`. Rows are kept until you delete them, with **Analytics ▸ Delete Usage
+Before…** (MCP DB only). Grades are never touched by it.
+
+---
+
 ## Notes for operators
 
-- **What is logged.** One line per tool call: the tool, the course, and the
-  unit, question, deck or slide asked about -- never the student's words. A
-  slide search logs its course and unit, not its query.
+- **What is logged.** Besides the usage database, one log line per tool call:
+  the tool, the course, and the unit, question, deck or slide asked about --
+  never the student's words. A slide search logs its course and unit, not its
+  query.
 - **`/mcp` is not behind Google sign-in.** MCP requests go to the MCP directly,
   not through the portal's login; the token is what protects it.
 - **A bad token gets 403, not 401.** A 401 would make claude.ai start an OAuth

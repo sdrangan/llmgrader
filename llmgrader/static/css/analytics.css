@@ -223,3 +223,23 @@
         flex-basis: auto;
     }
 }
+
+/* Preset queries for the active database. */
+.analytics-view .preset-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 0 0 10px 0;
+}
+.analytics-view .preset-row select {
+    padding: 6px 8px;
+    font-size: 14px;
+    max-width: 100%;
+}
+
+/* Grade DB / MCP DB in the Analytics menu: the check column keeps both
+   labels aligned whichever one is marked. */
+.analytics-db-check {
+    display: inline-block;
+    width: 1.1em;
+}

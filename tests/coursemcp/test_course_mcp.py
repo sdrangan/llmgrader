@@ -264,6 +264,20 @@ def test_list_courses_returns_every_live_course(client) -> None:
     assert {c["name"] for c in courses} == {"Alpha Course", "Beta Course"}
 
 
+def test_list_courses_reports_each_package_version(client) -> None:
+    """These packages carry no package_info.json, so each version is computed."""
+    courses = tool_items(call_tool(client, "list_courses"))
+    versions = {c["course_id"]: c["package_version"] for c in courses}
+    assert all(v and v.startswith("computed.") for v in versions.values())
+    assert versions["alpha"] != versions["beta"]
+
+
+def test_package_version_is_only_in_list_courses(client) -> None:
+    """Any other tool's result is read on every call; the version there is noise."""
+    result = call_tool(client, "list_units", {"course_id": "alpha"})
+    assert "package_version" not in json.dumps(result)
+
+
 def test_archived_course_is_neither_listed_nor_served(tmp_path, monkeypatch) -> None:
     client = build_app(tmp_path, monkeypatch, enabled=True, archived=("beta",)).test_client()
     assert [c["course_id"] for c in tool_items(call_tool(client, "list_courses"))] == ["alpha"]
