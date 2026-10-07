@@ -287,7 +287,8 @@ def _add_content_tools(mcp: MCPServer, require_course) -> None:
         found = require_deck(require_materials(require_course(course_id)), deck)
         outline = []
         for slide in found["slides"]:
-            excerpt = " ".join(slide["text"].split())
+            # A figure-only slide has no text; its description says what it shows.
+            excerpt = " ".join((slide["text"] or slide.get("description", "")).split())
             outline.append({"slide": slide["n"], "title": slide["title"],
                             "excerpt": excerpt[:100] + ("…" if len(excerpt) > 100 else "")})
         return outline
@@ -296,11 +297,11 @@ def _add_content_tools(mcp: MCPServer, require_course) -> None:
     def search_slides(course_id: str, query: str, unit: str | None = None) -> list[dict]:
         """Find the slides that mention a topic: deck, slide number, title, snippet.
 
-        A keyword search over slide titles, text and speaker notes, best match
-        first.  It matches words, not meanings, so if the first search misses,
-        try the course's own terms and synonyms (e.g. "FSM", "state machine",
-        "next-state logic").  Text only: a topic shown only in a figure may
-        not be found, and get_outline can help there.
+        A keyword search over slide titles, text, speaker notes and (where the
+        instructor has generated them) descriptions of each slide's figures,
+        best match first.  It matches words, not meanings, so if the first
+        search misses, try the course's own terms and synonyms (e.g. "FSM",
+        "state machine", "next-state logic"), or browse get_outline.
         """
         log_call("search_slides", course=course_id, unit=unit)  # not the query: student words
         materials = require_materials(require_course(course_id))
@@ -324,6 +325,8 @@ def _add_content_tools(mcp: MCPServer, require_course) -> None:
         payload = {"deck": found["id"], "unit": found["unit"], "deck_title": found["title"],
                    "slide": entry["n"], "of": len(slides), "title": entry["title"],
                    "text": entry["text"], "notes": entry["notes"]}
+        if entry.get("description"):
+            payload["figure_description"] = entry["description"]
         blocks: list = []
         image = materials.image_path(found["id"], entry["image"]) if entry.get("image") else None
         if image is None:

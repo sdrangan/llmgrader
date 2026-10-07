@@ -169,13 +169,29 @@ def pdf_page_count(pdf_path: Path) -> int:
         return doc.page_count
 
 
-def build_materials(specs: list[DeckSpec], package_dir: str | Path, *, log=print) -> dict:
+def image_key(data: bytes) -> str:
+    """A slide image's identity for the description cache: its content hash.
+
+    Content, not deck and number: inserting a slide renumbers every one after
+    it, and re-exporting an unchanged deck must not pay to describe it again.
+    """
+    import hashlib
+    return hashlib.sha256(data).hexdigest()
+
+
+def build_materials(specs: list[DeckSpec], package_dir: str | Path, *, log=print,
+                    descriptions: dict | None = None) -> dict:
     """Write every deck under ``<package_dir>/mcp_materials``; return the manifest.
 
     A PDF whose page count differs from the deck's slide count is stale --
     its images would sit beside the wrong slides' text -- so it is skipped,
     loudly, and that deck is served as text alone.
+
+    *descriptions* is the cache ``describe_slides`` writes, keyed by
+    ``image_key``; a slide whose image is in it gets its description.  Reading
+    it costs nothing, so every build uses whatever has been described.
     """
+    descriptions = descriptions or {}
     out_root = Path(package_dir) / MATERIALS_DIR
     if out_root.exists():
         import shutil
@@ -198,8 +214,15 @@ def build_materials(specs: list[DeckSpec], package_dir: str | Path, *, log=print
                            f"{len(slides)} slides -- re-export the PDF; slides are served as text only")
             else:
                 images = render_pages(spec.pdf, deck_dir)
+        described = 0
         for slide, image in zip(slides, images or [None] * len(slides)):
             slide["image"] = image
+            slide["description"] = ""
+            if image:
+                entry = descriptions.get(image_key((deck_dir / image).read_bytes()))
+                if entry:
+                    slide["description"] = entry.get("description", "")
+                    described += 1
         # The deck's own title slide names it better than its file name does.
         title = spec.title or (slides[0]["title"] if slides and slides[0]["title"] else spec.pptx.stem)
         (deck_dir / "deck.json").write_text(json.dumps({
@@ -212,9 +235,146 @@ def build_materials(specs: list[DeckSpec], package_dir: str | Path, *, log=print
         })
         log(f"  [{spec.id}] {len(slides)} slides, "
             f"{'with images' if images else 'text only'}"
+            + (f", {described} described" if images else "")
             + (f"  WARNING: {warning}" if warning else ""))
     (out_root / MANIFEST).write_text(json.dumps(manifest, indent=1), encoding="utf-8")
     return manifest
+
+
+# ---------------------------------------------------------------------------
+# Describe (the one step that costs money)
+# ---------------------------------------------------------------------------
+
+DESCRIPTIONS_FILE = "llmgrader_mcp_descriptions.json"
+# Rough per-slide token use, for the estimate --dry-run prints before anything
+# is spent: a 1280-px slide image plus its text in, a few sentences out.
+EST_TOKENS_IN = 1500
+EST_TOKENS_OUT = 200
+TEXT_ONLY = "TEXT ONLY"
+
+DESCRIBE_PROMPT = """\
+This is slide {n} of the lecture deck "{title}", from the course unit "{unit}".
+The slide's own text is below the image.
+
+Describe what the slide shows that its text alone does not: diagrams, block
+diagrams, timing waveforms, state diagrams, plots, equations, code and tables
+-- what each depicts, its labels and values, and the point it makes.  Use the
+technical terms a student would search for (for example "Moore machine",
+"handshake", "two's complement").  2 to 5 sentences of plain text, no preamble.
+
+If the slide has no figure and its text says everything, reply with exactly:
+{text_only}
+
+Slide text:
+{text}
+"""
+
+
+def descriptions_path(config_path: str | Path) -> Path:
+    """The description cache: beside the MCP config, and meant to be committed."""
+    return Path(config_path).resolve().parent / DESCRIPTIONS_FILE
+
+
+def load_descriptions(path: str | Path) -> dict:
+    try:
+        return json.loads(Path(path).read_text(encoding="utf-8")).get("slides", {})
+    except (OSError, ValueError):
+        return {}
+
+
+def _save_descriptions(path: Path, slides: dict) -> None:
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps({"version": 1, "slides": slides}, indent=1,
+                              ensure_ascii=False, sort_keys=True), encoding="utf-8")
+    tmp.replace(path)
+
+
+@dataclass
+class DescribePlan:
+    todo: list            # (deck_meta, slide, image_bytes, key) to describe
+    cached: int           # slides with an image already in the cache
+    text_only_decks: list  # deck ids with no usable images, so nothing to describe
+
+
+def plan_descriptions(specs: list[DeckSpec], cache: dict, work_dir: Path) -> DescribePlan:
+    """Render every deck into *work_dir* and work out which slides need a call."""
+    build_materials(specs, work_dir, log=lambda *_: None, descriptions=cache)
+    todo, cached, text_only = [], 0, []
+    root = Path(work_dir) / MATERIALS_DIR
+    manifest = json.loads((root / MANIFEST).read_text(encoding="utf-8"))
+    for meta in manifest["decks"]:
+        if not meta["images"]:
+            text_only.append(meta["id"])
+            continue
+        deck_dir = root / "slides" / meta["id"]
+        deck = json.loads((deck_dir / "deck.json").read_text(encoding="utf-8"))
+        for slide in deck["slides"]:
+            data = (deck_dir / slide["image"]).read_bytes()
+            key = image_key(data)
+            if key in cache:
+                cached += 1
+            else:
+                todo.append((meta, slide, data, key))
+    return DescribePlan(todo, cached, text_only)
+
+
+def estimate_cost(model_spec, slides: int) -> float:
+    return slides * (EST_TOKENS_IN * model_spec.usd_per_mtok_in
+                     + EST_TOKENS_OUT * model_spec.usd_per_mtok_out) / 1e6
+
+
+def describe_slides(plan: DescribePlan, cache_path: Path, *, model_spec, api_key: str,
+                    workers: int = 8, timeout: float = 120, log=print) -> tuple[int, float]:
+    """Describe every slide in *plan*; returns ``(described, usd_spent)``.
+
+    The cache is saved after every slide, so an interruption -- or a failed
+    call -- loses nothing already paid for, and re-running picks up where it
+    stopped.
+    """
+    import base64
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    from llmgrader.services.answers import make_openai_answer_caller
+
+    cache = load_descriptions(cache_path)
+    lock = threading.Lock()
+    spent = [0.0]
+    done = [0]
+
+    def describe(item):
+        meta, slide, data, key = item
+        prompt = DESCRIBE_PROMPT.format(
+            n=slide["n"], title=meta["title"], unit=meta["unit"],
+            text=slide["text"] or "(none)", text_only=TEXT_ONLY)
+        uri = "data:image/jpeg;base64," + base64.b64encode(data).decode("ascii")
+        call = make_openai_answer_caller(model=model_spec.id, api_key=api_key,
+                                         prompt=prompt, timeout=timeout, images=[uri])
+        text, tokens_in, tokens_out = call()
+        text = " ".join(text.split())
+        description = "" if text.upper().startswith(TEXT_ONLY) else text
+        cost = (tokens_in * model_spec.usd_per_mtok_in + tokens_out * model_spec.usd_per_mtok_out) / 1e6
+        with lock:
+            cache[key] = {"description": description, "model": model_spec.id,
+                          "deck": meta["id"], "slide": slide["n"]}
+            spent[0] += cost
+            done[0] += 1
+            _save_descriptions(cache_path, cache)
+            if done[0] % 25 == 0 or done[0] == len(plan.todo):
+                log(f"  {done[0]}/{len(plan.todo)} described, ${spent[0]:.2f} so far")
+
+    failures = 0
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = {pool.submit(describe, item): item for item in plan.todo}
+        for future in as_completed(futures):
+            try:
+                future.result()
+            except Exception as exc:  # one bad call must not cost the rest
+                failures += 1
+                meta, slide, _, _ = futures[future]
+                log(f"  failed: {meta['id']} slide {slide['n']}: {exc}")
+    if failures:
+        log(f"  {failures} slide(s) failed; re-run to retry them -- the rest are saved.")
+    return done[0], spent[0]
 
 
 # ---------------------------------------------------------------------------
@@ -255,7 +415,7 @@ class Materials:
             return None
         return path
 
-    # BM25 over title (counted twice), text and notes.
+    # BM25 over title (counted twice), text, notes and figure description.
     K1, B = 1.5, 0.75
 
     def _build_index(self) -> list:
@@ -263,7 +423,8 @@ class Materials:
         for meta in self.decks:
             deck = self.deck(meta["id"])
             for slide in deck["slides"]:
-                terms = tokenize(slide["title"]) * 2 + tokenize(slide["text"]) + tokenize(slide["notes"])
+                terms = (tokenize(slide["title"]) * 2 + tokenize(slide["text"])
+                         + tokenize(slide["notes"]) + tokenize(slide.get("description", "")))
                 docs.append((meta, slide, Counter(terms), len(terms)))
         return docs
 
@@ -300,7 +461,7 @@ class Materials:
 
 
 def _snippet(slide: dict, terms: list[str], width: int = 160) -> str:
-    text = " ".join((slide["text"] + " " + slide["notes"]).split())
+    text = " ".join(" ".join([slide["text"], slide["notes"], slide.get("description", "")]).split())
     lower = text.lower()
     hits = [lower.find(t) for t in terms if lower.find(t) >= 0]
     start = max(0, min(hits) - 40) if hits else 0

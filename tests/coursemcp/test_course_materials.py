@@ -210,8 +210,9 @@ def make_deck(path: Path, titles: list[str]) -> None:
 def make_pdf(path: Path, pages: int) -> None:
     pymupdf = pytest.importorskip("pymupdf")
     doc = pymupdf.open()
-    for _ in range(pages):
-        doc.new_page(width=720, height=405)
+    for number in range(1, pages + 1):
+        # Distinct content per page: identical images share a description key.
+        doc.new_page(width=720, height=405).insert_text((72, 72), f"Page {number}", fontsize=40)
     doc.save(str(path))
 
 
@@ -233,7 +234,8 @@ def test_build_uses_the_pdf_only_when_it_matches_the_deck(tmp_path, pages, expec
     assert deck["title"] == "First Title"  # from the title slide, soft break removed
     assert deck["slides"][1] == {"n": 2, "title": "Second", "text": "Body of Second",
                                  "notes": "Notes for Second",
-                                 "image": "slide-002.jpg" if expect_images else None}
+                                 "image": "slide-002.jpg" if expect_images else None,
+                                 "description": ""}
     jpgs = sorted(p.name for p in (package / "mcp_materials" / "slides" / "d").glob("*.jpg"))
     assert jpgs == (["slide-001.jpg", "slide-002.jpg"] if expect_images else [])
 
@@ -270,3 +272,92 @@ def test_create_soln_pkg_builds_slides_into_the_zip(tmp_path, monkeypatch) -> No
     names = set(zipfile.ZipFile(out / "soln_package.zip").namelist())
     assert "mcp_materials/manifest.json" in names
     assert "mcp_materials/slides/d/deck.json" in names
+
+
+# ---------------------------------------------------------------------------
+# Describe: the paid step, exercised with a fake model
+# ---------------------------------------------------------------------------
+
+
+def fake_caller(replies: dict, calls: list):
+    """Stands in for answers.make_openai_answer_caller; replies keyed by slide number."""
+    def make(*, model, api_key, prompt, timeout, images):
+        number = int(prompt.split("This is slide ", 1)[1].split(" ", 1)[0])
+        calls.append(number)
+
+        def call():
+            reply = replies[number]
+            if isinstance(reply, Exception):
+                raise reply
+            return reply, 1000, 100
+        return call
+    return make
+
+
+def described_deck(tmp_path, monkeypatch, replies):
+    from llmgrader.coursemcp import materials
+    from llmgrader.services import answers, models
+
+    pub = tmp_path / "pub"
+    pub.mkdir()
+    make_deck(pub / "deck.pptx", ["Waveforms", "Summary"])
+    make_pdf(pub / "deck.pdf", 2)
+    config = write_config(tmp_path, '<deck id="d" root="pub" unit="U" pdf="deck.pdf">deck.pptx</deck>')
+    specs = read_config(config)
+    cache = materials.descriptions_path(config)
+    calls = []
+    monkeypatch.setattr(answers, "make_openai_answer_caller", fake_caller(replies, calls))
+    model = models.default_for_tier("simple")
+    return materials, specs, cache, model, calls
+
+
+def test_describe_caches_by_image_and_is_paid_once(tmp_path, monkeypatch) -> None:
+    materials, specs, cache, model, calls = described_deck(tmp_path, monkeypatch, {
+        1: "A timing diagram of a valid/ready handshake.", 2: "TEXT ONLY"})
+
+    plan = materials.plan_descriptions(specs, materials.load_descriptions(cache), tmp_path / "w1")
+    assert (len(plan.todo), plan.cached) == (2, 0)
+    described, spent = materials.describe_slides(plan, cache, model_spec=model, api_key="k",
+                                                 log=lambda *_: None)
+    assert described == 2 and spent > 0
+
+    saved = materials.load_descriptions(cache)
+    assert sorted(v["description"] for v in saved.values()) == [
+        "", "A timing diagram of a valid/ready handshake."]  # TEXT ONLY stores nothing
+
+    again = materials.plan_descriptions(specs, saved, tmp_path / "w2")
+    assert (len(again.todo), again.cached) == (0, 2)
+    assert sorted(calls) == [1, 2]  # never asked twice
+
+
+def test_one_failed_call_keeps_the_others(tmp_path, monkeypatch) -> None:
+    materials, specs, cache, model, _ = described_deck(tmp_path, monkeypatch, {
+        1: RuntimeError("rate limited"), 2: "A block diagram."})
+    plan = materials.plan_descriptions(specs, {}, tmp_path / "w")
+    materials.describe_slides(plan, cache, model_spec=model, api_key="k", log=lambda *_: None)
+    assert [v["description"] for v in materials.load_descriptions(cache).values()] == ["A block diagram."]
+
+
+def test_build_includes_descriptions_and_search_finds_them(tmp_path, monkeypatch) -> None:
+    materials, specs, cache, model, _ = described_deck(tmp_path, monkeypatch, {
+        1: "A Moore machine state diagram with three states.", 2: "TEXT ONLY"})
+    plan = materials.plan_descriptions(specs, {}, tmp_path / "w")
+    materials.describe_slides(plan, cache, model_spec=model, api_key="k", log=lambda *_: None)
+
+    package = tmp_path / "pkg"
+    build_materials(specs, package, log=lambda *_: None,
+                    descriptions=materials.load_descriptions(cache))
+    loaded = load_materials(str(package))
+    hits = loaded.search("moore")  # the word is in no slide's text, only the description
+    assert [(h["deck"], h["slide"]) for h in hits] == [("d", 1)]
+
+
+def test_describe_dry_run_spends_nothing(tmp_path, monkeypatch, capsys) -> None:
+    from llmgrader.scripts import llmgrader_mcp_build
+
+    materials, specs, cache, model, calls = described_deck(tmp_path, monkeypatch, {})
+    config = tmp_path / "llmgrader_mcp_config.xml"
+    assert llmgrader_mcp_build.main(["--config", str(config), "--describe", "--dry-run"]) == 0
+    out = capsys.readouterr().out
+    assert "2 slide(s) to describe" in out and "estimated $" in out
+    assert calls == [] and not cache.exists()

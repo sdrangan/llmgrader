@@ -4,19 +4,41 @@
     llmgrader_mcp_build --package soln_package          # build into an extracted package
     llmgrader_mcp_build --root pub=../hwdesign ...      # override a <root> path
 
+    llmgrader_mcp_build --describe --dry-run            # count slides to describe, estimate cost
+    llmgrader_mcp_build --describe                      # describe them (OpenAI; costs money)
+
 ``create_soln_pkg`` runs the same build when ``llmgrader_mcp_config.xml`` sits
 beside ``llmgrader_config.xml``, so this is mostly for checking what will be
-published, and for rebuilding the slides of an existing package.
+published, and for --describe.
 
-Needs python-pptx and PyMuPDF: ``pip install "llmgrader[mcp-build]"``.
+--describe asks a vision model to describe each slide's figures, so that
+search_slides can find a topic that appears only in a diagram.  The results
+go to llmgrader_mcp_descriptions.json beside the config -- commit it -- keyed
+by each slide image's content, so a slide is paid for once, and every later
+build (including create_soln_pkg) reads it for free.  Only slides with an
+image can be described: a deck with no PDF, or a stale one, is skipped.
+
+Needs python-pptx and PyMuPDF: ``pip install "llmgrader[mcp-build]"``;
+--describe also needs OPENAI_API_KEY.
 """
 
 from __future__ import annotations
 
 import argparse
+import os
 import sys
+import tempfile
 
-from llmgrader.coursemcp.materials import MaterialsError, build_materials, read_config
+from llmgrader.coursemcp.materials import (
+    MaterialsError,
+    build_materials,
+    describe_slides,
+    descriptions_path,
+    estimate_cost,
+    load_descriptions,
+    plan_descriptions,
+    read_config,
+)
 
 DEFAULT_CONFIG = "llmgrader_mcp_config.xml"
 
@@ -31,6 +53,46 @@ def parse_roots(values: list[str]) -> dict[str, str]:
     return roots
 
 
+def resolve_model(value: str):
+    from llmgrader.services.models import resolve_preferred_model
+
+    spec = resolve_preferred_model(value)
+    if spec is None:
+        raise MaterialsError(f"--model {value!r} is neither a tier nor a supported model id")
+    if not spec.supports_images:
+        raise MaterialsError(f"--model {spec.id} does not accept images")
+    return spec
+
+
+def run_describe(args, specs) -> int:
+    model = resolve_model(args.model)
+    cache_path = descriptions_path(args.config)
+    with tempfile.TemporaryDirectory() as work:
+        print("Rendering slides to find the ones not yet described...")
+        plan = plan_descriptions(specs, load_descriptions(cache_path), work)
+        for deck_id in plan.text_only_decks:
+            print(f"  [{deck_id}] skipped: no usable PDF, so no images to describe")
+        cost = estimate_cost(model, len(plan.todo))
+        print(f"\n{len(plan.todo)} slide(s) to describe, {plan.cached} already in "
+              f"{cache_path.name}.")
+        print(f"Model {model.id}: estimated ${cost:.2f} "
+              f"(~{len(plan.todo)} calls; the estimate assumes a typical slide).")
+        if args.dry_run or not plan.todo:
+            return 0
+        api_key = os.environ.get("OPENAI_API_KEY")
+        if not api_key:
+            raise MaterialsError("OPENAI_API_KEY is not set")
+        if not args.yes:
+            answer = input(f"Spend about ${cost:.2f} describing {len(plan.todo)} slide(s)? [y/N] ")
+            if answer.strip().lower() not in {"y", "yes"}:
+                print("Nothing spent.")
+                return 0
+        described, spent = describe_slides(plan, cache_path, model_spec=model, api_key=api_key)
+        print(f"\nDescribed {described} slide(s) for ${spent:.2f}; saved to {cache_path}.")
+        print("Commit that file, then rebuild the package (create_soln_pkg) to include them.")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--config", default=DEFAULT_CONFIG,
@@ -40,11 +102,19 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--root", action="append", default=[], metavar="ID=PATH",
                         help="override a <root> path; may be repeated")
     parser.add_argument("--dry-run", action="store_true",
-                        help="list every file that would be published, and build nothing")
+                        help="report what would happen, and build or spend nothing")
+    parser.add_argument("--describe", action="store_true",
+                        help="describe each slide's figures with a vision model (costs money)")
+    parser.add_argument("--model", default="simple",
+                        help="model for --describe: a tier or a model id (default: simple)")
+    parser.add_argument("--yes", action="store_true",
+                        help="with --describe, do not ask before spending")
     args = parser.parse_args(argv)
 
     try:
         specs = read_config(args.config, parse_roots(args.root))
+        if args.describe:
+            return run_describe(args, specs)
         if args.dry_run:
             print(f"Would publish {len(specs)} slide deck(s):")
             for spec in specs:
@@ -55,7 +125,8 @@ def main(argv: list[str] | None = None) -> int:
             print("\nNothing else from these repositories is published.")
             return 0
         print(f"Building slide material into {args.package}:")
-        build_materials(specs, args.package)
+        build_materials(specs, args.package,
+                        descriptions=load_descriptions(descriptions_path(args.config)))
     except MaterialsError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
