@@ -60,6 +60,10 @@ The `<unit>` element is the root.  Each `<question>` element defines one questio
 without appearing on the portal; see
 [Past Exams and Unit Types](../mcp/units.md).
 
+After its questions, a unit may also hold `<print>` blocks saying how it
+prints as a paper exam or handout; the portal ignores them. See
+[Printing a Unit as an Exam](./print.md).
+
 The `<unit>` element contains one or more `<question>` elements.
 
 ---

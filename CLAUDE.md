@@ -29,6 +29,9 @@ llmgrader_test check example_repo/unit1/tests/calculus_tests.xml
 # Grade those cases for real (costs money; --dry-run prints the call count)
 llmgrader_test run example_repo/unit1/tests/calculus_tests.xml --repeat 3 --html report.html
 
+# Print a unit's <print> block as an exam (title page, answer pages, Page n of N)
+create_qfile --input exams/midterm.xml --print exam --pdf      # --soln for the key
+
 # Have a model answer a unit blind, as a rubric stress test (--dry-run is free)
 llmgrader_answer example_repo/unit1/calculus.xml --dry-run --cost
 llmgrader_answer example_repo/unit1/calculus.xml --out ai_answers.xml

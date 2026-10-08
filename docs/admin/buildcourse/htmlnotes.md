@@ -30,6 +30,8 @@ Where:
 - `--config` (optional) points to `llmgrader_config.xml` so `/pkg_assets/...` URLs can be rewritten for standalone HTML/PDF output
 - `--soln` (optional) generates a **solution** version
 - `--pdf` (optional) also generates a **PDF** from the HTML
+- `--print [<id>]` (optional) prints the unit as an exam or handout, from a
+  `<print>` block in the unit: see [Printing a Unit as an Exam](./print.md)
 
 If the `--soln` option is not selected, the program will generate
 a **student-facing** HTML (no solutions shown). For example,

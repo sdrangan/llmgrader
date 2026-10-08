@@ -4,17 +4,22 @@ Create a simple HTML file from a unit XML file containing all questions.
 
 This script reads a unit XML file (e.g., unit1_basic_logic.xml) and produces
 an HTML file with all questions from the unit.
+
+``--print [ID]`` renders one of the unit's ``<print>`` blocks instead: a
+paper exam with a title page and answer pages, or a handout
+(plans/exam_units.md, decision 5; docs/admin/buildcourse/print.md).
 """
 
 import argparse
 import asyncio
+import html
 import os
 import re
 import textwrap
 import xml.etree.ElementTree as ET
 from pathlib import Path, PurePosixPath
 
-from llmgrader.services.unit_parser import UnitParser
+from llmgrader.services.unit_parser import UnitParser, element_text
 
 
 def dedent_code_blocks(html_text):
@@ -203,6 +208,23 @@ def rewrite_pkg_asset_urls(html_text, *, xml_file, output_file, config_context, 
     return re.sub(pattern, replace_match, html_text)
 
 
+def question_points(question):
+    """A question's total points: the sum of its parts, read as UnitParser reads them."""
+    total = 0.0
+    parts_elem = question.find('parts')
+    for part in parts_elem.findall('part') if parts_elem is not None else []:
+        value = part.findtext('points') or part.get('points') or '0'
+        try:
+            total += float(value.strip())
+        except ValueError:
+            pass
+    return total
+
+
+def format_points(points):
+    return f'{points:g}'
+
+
 def parse_xml_file(xml_file, *, output_file=None, config_context=None, errors=None):
     """
     Parse the XML file and extract questions.
@@ -263,10 +285,25 @@ def parse_xml_file(xml_file, *, output_file=None, config_context=None, errors=No
         questions.append({
             'qtag': qtag,
             'text': text_content,
-            'solution': solution_content
+            'solution': solution_content,
+            'points': question_points(question),
         })
     
     return unit_title, questions
+
+
+# MathJax with \( \) and \[ \] delimiters, as the portal renders them.
+MATHJAX_HEAD = [
+    '    <script>',
+    '    window.MathJax = {',
+    '      tex: {',
+    '        inlineMath: [["\\\\(", "\\\\)"]],',
+    '        displayMath: [["\\\\[", "\\\\]"]]',
+    '      }',
+    '    };',
+    '    </script>',
+    '    <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>',
+]
 
 
 def generate_html(questions, output_file, unit_title='Questions', include_solutions=False):
@@ -312,15 +349,7 @@ def generate_html(questions, output_file, unit_title='Questions', include_soluti
         '            display: block;',
         '        }',
         '    </style>',
-        '    <script>',
-        '    window.MathJax = {',
-        '      tex: {',
-        '        inlineMath: [["\\\\(", "\\\\)"]],',
-        '        displayMath: [["\\\\[", "\\\\]"]]',
-        '      }',
-        '    };',
-        '    </script>',
-        '    <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>',
+        *MATHJAX_HEAD,
         '</head>',
         '<body>',
         f'    <h1>{page_title}</h1>',
@@ -357,13 +386,200 @@ def generate_html(questions, output_file, unit_title='Questions', include_soluti
         f.write('\n'.join(html_parts))
 
 
-async def generate_pdf_from_html(html_file, pdf_file):
+class PrintError(Exception):
+    """A --print request that cannot be met, with a message for the author."""
+
+
+def read_print_block(xml_file, print_id=None):
+    """The ``<print>`` block to render, with every default filled in.
+
+    *print_id* None picks the only block; a unit with no block prints as a
+    plain heading and every question.  Returns a dict: ``id``,
+    ``title_page`` (dict or None), ``page_per_question`` and ``questions``,
+    a list of ``(qtag, answer_pages)`` in printed order.
+    """
+    root = ET.parse(xml_file).getroot()
+    blocks = root.findall('print')
+    if print_id is None:
+        if len(blocks) > 1:
+            ids = ', '.join(b.get('id', '') for b in blocks)
+            raise PrintError(f'This unit has several <print> blocks ({ids}); name one: --print <id>.')
+        block = blocks[0] if blocks else ET.Element('print')
+    else:
+        matches = [b for b in blocks if b.get('id') == print_id]
+        if not matches:
+            ids = ', '.join(b.get('id', '') for b in blocks) or 'none'
+            raise PrintError(f'No <print id="{print_id}"> in this unit (its blocks: {ids}).')
+        block = matches[0]
+
+    title_page = None
+    title_elem = block.find('title_page')
+    if title_elem is not None:
+        def text(tag):
+            return (title_elem.findtext(tag) or '').strip()
+
+        title_page = {
+            'title': text('title') or root.get('title', ''),
+            'course': text('course'),
+            'instructors': text('instructors'),
+            'date': text('date'),
+            'duration': text('duration'),
+            'fields': [(f.text or '').strip() for f in title_elem.findall('fields/field')],
+            'instructions': [element_text(i) for i in title_elem.findall('instructions/item')],
+        }
+
+    # Defaults: an exam (a block with a title page) gets a page per question
+    # and one answer page after each; a handout gets neither.
+    default_pages = int(block.get('answer_pages', 1 if title_page else 0))
+    page_per_question = (block.get('page_per_question', 'true' if title_page else 'false') == 'true')
+    entries = block.findall('question')
+    if entries:
+        questions = [(e.get('qtag', '').strip(), int(e.get('answer_pages', default_pages)))
+                     for e in entries]
+    else:
+        questions = [(q.get('qtag', ''), default_pages) for q in root.findall('question')]
+    return {'id': block.get('id', ''), 'title_page': title_page,
+            'page_per_question': page_per_question, 'questions': questions}
+
+
+PRINT_STYLE = """
+@page { size: Letter; margin: 0.8in 0.85in 0.9in 0.85in; }
+body {
+    font-family: "Computer Modern Serif", "Latin Modern Roman", "CMU Serif", Georgia, serif;
+    font-size: 11.5pt;
+    line-height: 1.4;
+    color: #000;
+    margin: 0;
+}
+h1 { font-size: 20pt; font-weight: normal; margin: 0 0 0.4em; }
+.newpage { break-before: page; }
+.problem-head { font-weight: bold; margin: 0 0 0.6em; }
+.problem-head .points { font-weight: normal; }
+pre code, code {
+    font-family: "Computer Modern Typewriter", "CMU Typewriter Text", "Courier New", monospace;
+}
+pre { border-left: 2px solid #999; padding: 0.3em 0.8em; margin: 0.6em 0; }
+pre code { display: block; white-space: pre; font-size: 10pt; }
+img { max-width: 100%; }
+.solution { margin-top: 1em; border-top: 1px solid #000; padding-top: 0.6em; }
+.answer-page .answer-head { font-style: italic; color: #333; }
+.title-page { text-align: center; padding-top: 1.2in; }
+.title-page .course { font-size: 13pt; margin-bottom: 0.2em; }
+.title-page .instructors, .title-page .when { margin-bottom: 0.2em; }
+.title-page .fields { width: 75%; margin: 0.6in auto 0.4in; text-align: left; }
+.title-page .field { display: flex; align-items: flex-end; margin-bottom: 0.35in; }
+.title-page .field span { white-space: nowrap; margin-right: 0.6em; }
+.title-page .field .line { flex: 1; border-bottom: 1px solid #000; }
+.title-page .instructions { width: 85%; margin: 0 auto; text-align: left; }
+.title-page table { margin: 0.4in auto 0; border-collapse: collapse; }
+.title-page td, .title-page th { border: 1px solid #000; padding: 0.25em 1.2em; text-align: center; }
+"""
+
+# Computer Modern for text: the same family as MathJax's TeX math.
+CM_FONTS = 'https://cdn.jsdelivr.net/gh/aaaakshat/cm-web-fonts@latest/fonts.css'
+
+
+def _starts_with_qtag(text_html, qtag):
+    """Whether the question text already opens with its own title."""
+    plain = ' '.join(html.unescape(re.sub(r'<[^>]+>', ' ', text_html)).split()).lower()
+    return plain.startswith(qtag.strip().lower().rstrip('.'))
+
+
+def generate_print_html(questions, output_file, block, unit_title='Questions',
+                        include_solutions=False):
+    """Write *block* (``read_print_block``) of *questions* as print-styled HTML.
+
+    Answer pages are headed "Use this page for Problem n" -- generated, so
+    the header cannot go stale when questions move.  With
+    *include_solutions*, each question is followed by its solution and the
+    answer pages are left out: it is the key.
+    """
+    by_tag = {q['qtag']: q for q in questions}
+    printed = [(by_tag[qtag], pages) for qtag, pages in block['questions']]
+    title_page = block['title_page']
+    heading = (title_page or {}).get('title') or unit_title
+    if include_solutions:
+        heading += ' (Solutions)'
+
+    out = [
+        '<!DOCTYPE html>', '<html>', '<head>', '    <meta charset="UTF-8">',
+        f'    <title>{html.escape(heading)}</title>',
+        f'    <link rel="stylesheet" href="{CM_FONTS}">',
+        f'    <style>{PRINT_STYLE}</style>',
+        *MATHJAX_HEAD,
+        '</head>', '<body>',
+    ]
+
+    if title_page:
+        out.append('<div class="title-page">')
+        out.append(f'  <h1>{html.escape(heading)}</h1>')
+        for key, cls in (('course', 'course'), ('instructors', 'instructors')):
+            if title_page[key]:
+                out.append(f'  <div class="{cls}">{html.escape(title_page[key])}</div>')
+        when = ', '.join(v for v in (title_page['date'], title_page['duration']) if v)
+        if when:
+            out.append(f'  <div class="when">{html.escape(when)}</div>')
+        if title_page['fields']:
+            out.append('  <div class="fields">')
+            for field in title_page['fields']:
+                out.append(f'    <div class="field"><span>{html.escape(field)}:</span>'
+                           '<div class="line"></div></div>')
+            out.append('  </div>')
+        if title_page['instructions']:
+            out.append('  <div class="instructions"><p><em>Instructions:</em></p><ul>')
+            out.extend(f'    <li>{item}</li>' for item in title_page['instructions'])
+            out.append('  </ul></div>')
+        total = sum(q['points'] for q, _ in printed)
+        if total:
+            out.append('  <table><tr><th>Problem</th><th>Points</th><th>Score</th></tr>')
+            for number, (question, _) in enumerate(printed, start=1):
+                out.append(f'    <tr><td>{number}</td><td>{format_points(question["points"])}</td>'
+                           '<td></td></tr>')
+            out.append(f'    <tr><th>Total</th><th>{format_points(total)}</th><td></td></tr>')
+            out.append('  </table>')
+        out.append('</div>')
+    else:
+        out.append(f'<h1>{html.escape(heading)}</h1>')
+
+    previous_pages = 0
+    for number, (question, pages) in enumerate(printed, start=1):
+        if include_solutions:
+            pages = 0
+        new_page = (title_page is not None if number == 1
+                    else block['page_per_question'] or previous_pages > 0)
+        out.append(f'<div class="question{" newpage" if new_page else ""}">')
+        head = f'Problem {number}'
+        if not _starts_with_qtag(question['text'], question['qtag']):
+            head += f'. {html.escape(question["qtag"])}'
+        if question['points']:
+            plural = '' if question['points'] == 1 else 's'
+            head += f' <span class="points">({format_points(question["points"])} point{plural})</span>'
+        out.append(f'  <div class="problem-head">{head}</div>')
+        out.append(question['text'])
+        if include_solutions and question.get('solution'):
+            out.append(f'  <div class="solution"><p><strong>Solution.</strong></p>'
+                       f'{question["solution"]}</div>')
+        out.append('</div>')
+        for _ in range(pages):
+            out.append(f'<div class="answer-page newpage"><p class="answer-head">'
+                       f'Use this page for Problem {number}.</p></div>')
+        previous_pages = pages
+
+    out.extend(['</body>', '</html>'])
+    with open(output_file, 'w', encoding='utf-8') as f:
+        f.write('\n'.join(out))
+    return len(printed)
+
+
+async def generate_pdf_from_html(html_file, pdf_file, *, page_footer=False):
     """
     Generate a PDF from an HTML file using Playwright.
     
     Args:
         html_file: Path to the input HTML file
         pdf_file: Path to the output PDF file
+        page_footer: Number every page "Page n of N", and let the HTML's own
+            @page rule set the margins (the --print layout)
         
     Returns:
         True if successful, False otherwise
@@ -403,12 +619,27 @@ async def generate_pdf_from_html(html_file, pdf_file):
             await page.wait_for_timeout(500)
             
             # Generate PDF
-            await page.pdf(
-                path=pdf_file,
-                format='Letter',
-                margin={'top': '0.75in', 'right': '0.75in', 'bottom': '0.75in', 'left': '0.75in'},
-                print_background=True
-            )
+            if page_footer:
+                await page.pdf(
+                    path=pdf_file,
+                    format='Letter',
+                    prefer_css_page_size=True,
+                    print_background=True,
+                    display_header_footer=True,
+                    header_template='<span></span>',
+                    footer_template=(
+                        '<div style="width:100%; text-align:center; font-size:9pt; '
+                        'font-family: Georgia, serif;">Page <span class="pageNumber"></span> '
+                        'of <span class="totalPages"></span></div>'
+                    ),
+                )
+            else:
+                await page.pdf(
+                    path=pdf_file,
+                    format='Letter',
+                    margin={'top': '0.75in', 'right': '0.75in', 'bottom': '0.75in', 'left': '0.75in'},
+                    print_background=True
+                )
             
             await browser.close()
             return True
@@ -447,6 +678,16 @@ def main():
         action='store_true',
         help='Generate a PDF file from the HTML output'
     )
+    parser.add_argument(
+        '--print',
+        dest='print_id',
+        nargs='?',
+        const='',
+        default=None,
+        metavar='ID',
+        help='Render the unit\'s <print> block ID (the only block when ID is omitted) '
+             'as an exam or handout: title page, points, answer pages'
+    )
     
     args = parser.parse_args()
 
@@ -468,6 +709,8 @@ def main():
     else:
         # Derive output filename from input: replace .xml with .html
         base_name = os.path.splitext(args.input)[0]
+        if args.print_id:
+            base_name += f'_{args.print_id}'
         if args.soln:
             output_file = base_name + '_soln.html'
         else:
@@ -507,15 +750,26 @@ def main():
         return 1
     
     # Generate HTML output
-    generate_html(questions, output_file, unit_title=unit_title, include_solutions=args.soln)
+    if args.print_id is not None:
+        try:
+            block = read_print_block(input_path, args.print_id or None)
+        except PrintError as exc:
+            print(f'Error: {exc}')
+            return 1
+        count = generate_print_html(questions, output_file, block, unit_title=unit_title,
+                                    include_solutions=args.soln)
+    else:
+        generate_html(questions, output_file, unit_title=unit_title, include_solutions=args.soln)
+        count = len(questions)
 
-    print(f'Successfully created {output_file} with {len(questions)} question(s).')
-    
+    print(f'Successfully created {output_file} with {count} question(s).')
+
     # Generate PDF if requested
     if args.pdf:
         pdf_file = os.path.splitext(output_file)[0] + '.pdf'
         print(f'Generating PDF: {pdf_file}...')
-        success = asyncio.run(generate_pdf_from_html(output_file, pdf_file))
+        success = asyncio.run(generate_pdf_from_html(
+            output_file, pdf_file, page_footer=args.print_id is not None))
         if success:
             print(f'Successfully created {pdf_file}')
         else:

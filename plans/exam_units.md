@@ -213,6 +213,20 @@ developer and student pages. Choices the plan left open:
   (a `final` description before any past final exists).
 - `list_units` gives `semester` only when it is set.
 
+Phase 4 is built (branch `feature/exam-print`), with
+`docs/admin/buildcourse/print.md`. Choices the plan left open:
+
+- `--soln` prints the key: each solution after its question, and no answer
+  pages.
+- The title page carries a points table (problem, points, an empty score
+  column, the total) -- that is where the total is shown.
+- A problem is headed *Problem n*, plus its qtag unless the question text
+  already opens with it, so a text that starts `<strong>FIFO.</strong>` is
+  not titled twice.
+- `--print` on a unit with no block prints the unit's title and every
+  question; with several blocks it asks for an id.
+- The S2026 midterm carries an `exam` block reproducing its paper title page.
+
 ## Phases
 
 1. **Unit attributes.** `unit_type` and `semester` in `unit.xsd`, parsed by

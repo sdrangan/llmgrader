@@ -38,7 +38,7 @@ documents are next.
 | Descriptions of slide figures for search (optional, paid once) | Done |
 | `llmgrader_mcp_config.xml` and the slide build | Done |
 | Unit types, MCP-only units (past exams), `list_unit_types` | Done |
-| Printing a unit as a paper exam (`create_qfile --print`) | Planned |
+| Printing a unit as a paper exam (`create_qfile --print`) | Done |
 | Lab instructions and other documents | Planned |
 | Skill tags in rubrics and a skill list | Planned |
 
