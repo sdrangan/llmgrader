@@ -52,6 +52,13 @@ The `<unit>` element is the root.  Each `<question>` element defines one questio
 | Attribute | Required | Description |
 |----------|----------|-------------|
 | `id` | Yes | A unique identifier for the unit (e.g., `calculus`) |
+| `title` | No | The unit's title |
+| `unit_type` | No | What kind of unit this is: `problem_set` (the default), or a key you choose such as `midterm`, `final` or `quiz` -- lowercase letters, digits, `-` and `_`. Reported by the course MCP; the grader ignores it. |
+| `semester` | No | When past material was given, as free text (`Spring 2026`). Reported by the course MCP. |
+
+`unit_type` and `semester` matter for a past exam published to the course MCP
+without appearing on the portal; see
+[Past Exams and Unit Types](../mcp/units.md).
 
 The `<unit>` element contains one or more `<question>` elements.
 

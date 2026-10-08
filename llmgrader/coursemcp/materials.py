@@ -1,4 +1,8 @@
-"""Lecture slides for the course MCP: built into the package, served from it.
+"""Course MCP material: built into the package, served from it.
+
+Lecture slides, and units published to the MCP alone -- past exams, which
+the portal must not list (``plans/exam_units.md``) -- with a description of
+each kind of unit.
 
 **Build** (instructor's machine, ``llmgrader_mcp_build`` or ``create_soln_pkg``):
 ``llmgrader_mcp_config.xml`` lists the decks; each ``.pptx`` gives every
@@ -54,8 +58,21 @@ class DeckSpec:
     pdf: Path | None
 
 
-def read_config(config_path: str | Path, root_overrides: dict[str, str] | None = None) -> list[DeckSpec]:
-    """The decks *config_path* lists, with every path resolved and checked."""
+@dataclass
+class UnitSpec:
+    """A unit published to the course MCP only (plans/exam_units.md, decision 2)."""
+    name: str
+    section: str
+    path: Path            # the unit XML
+    images: Path | None   # the images/ folder beside it, if any
+
+    @property
+    def stem(self) -> str:
+        return self.path.stem
+
+
+def _load_config(config_path: str | Path, root_overrides: dict[str, str] | None):
+    """``(config_path, root element, {root id: path})``, validated."""
     import xml.etree.ElementTree as ET
 
     import xmlschema
@@ -84,7 +101,12 @@ def read_config(config_path: str | Path, root_overrides: dict[str, str] | None =
         if root_id not in roots:
             raise MaterialsError(f"--root {root_id}=...: no <root id={root_id!r}> in {config_path.name}")
         roots[root_id] = Path(path).resolve()
+    return config_path, root_elem, roots
 
+
+def read_config(config_path: str | Path, root_overrides: dict[str, str] | None = None) -> list[DeckSpec]:
+    """The decks *config_path* lists, with every path resolved and checked."""
+    config_path, root_elem, roots = _load_config(config_path, root_overrides)
     specs, problems = [], []
     for elem in root_elem.findall("slides/deck"):
         root_id = elem.get("root") or ""
@@ -104,6 +126,91 @@ def read_config(config_path: str | Path, root_overrides: dict[str, str] | None =
     if problems:
         raise MaterialsError("; ".join(problems))
     return specs
+
+
+def _portal_units(config_path: Path) -> dict[Path, str]:
+    """The units llmgrader_config.xml beside *config_path* lists: source -> name."""
+    import xml.etree.ElementTree as ET
+
+    portal_config = config_path.parent / "llmgrader_config.xml"
+    try:
+        root = ET.parse(portal_config).getroot()
+    except (OSError, ET.ParseError):
+        return {}
+    units = {}
+    for elem in root.findall("units/unit"):
+        source, name = elem.findtext("source"), elem.findtext("name")
+        if source and name:
+            units[(portal_config.parent / source.strip()).resolve()] = name.strip()
+    return units
+
+
+def read_units(config_path: str | Path, root_overrides: dict[str, str] | None = None) -> list[UnitSpec]:
+    """The MCP-only units *config_path* lists, each checked against unit.xsd.
+
+    A unit that llmgrader_config.xml also lists is refused: this list is for
+    units the portal does not have, and one in both would be served twice.
+    So is a name the portal already uses, since tools look units up by name.
+    """
+    import xml.etree.ElementTree as ET
+
+    from llmgrader.services.unit_parser import UnitParser
+
+    config_path, root_elem, roots = _load_config(config_path, root_overrides)
+    portal = _portal_units(config_path)
+    specs, problems = [], []
+    seen_names: set[str] = set()
+    seen_stems: dict[str, Path] = {}
+    for elem in root_elem.findall("units/unit"):
+        relative = (elem.text or "").strip()
+        root_id = elem.get("root") or ""
+        if root_id not in roots:
+            problems.append(f"unit {relative!r}: unknown root {root_id!r}")
+            continue
+        path = (roots[root_id] / relative).resolve()
+        if not path.is_file():
+            problems.append(f"unit {relative!r}: {path} not found")
+            continue
+        if path in portal:
+            problems.append(f"unit {relative!r} is also in llmgrader_config.xml (as "
+                            f"{portal[path]!r}); list it in one config or the other")
+            continue
+        errors = UnitParser.validate_unit_file(str(path))
+        if errors:
+            problems.append(f"unit {relative!r} is not valid: " + "; ".join(errors))
+            continue
+        unit_root = ET.parse(path).getroot()
+        name = (elem.get("name") or unit_root.get("title") or path.stem).strip()
+        if name in portal.values():
+            problems.append(f"unit {relative!r}: the portal already has a unit named {name!r}; "
+                            "give this one a different name=")
+            continue
+        if name in seen_names:
+            problems.append(f"unit {relative!r}: another unit is already named {name!r}")
+            continue
+        # The stem names the unit's file and its images folder in the package.
+        if path.stem in seen_stems:
+            problems.append(f"unit {relative!r}: same file name as {seen_stems[path.stem]}; "
+                            "rename one")
+            continue
+        seen_names.add(name)
+        seen_stems[path.stem] = path
+        images = path.parent / "images"
+        specs.append(UnitSpec(name, (elem.get("section") or "").strip(), path,
+                              images if images.is_dir() else None))
+    if problems:
+        raise MaterialsError("; ".join(problems))
+    return specs
+
+
+def read_unit_types(config_path: str | Path) -> list[dict]:
+    """The unit type descriptions *config_path* gives: id, title, description."""
+    _, root_elem, _ = _load_config(config_path, None)
+    return [
+        {"id": elem.get("id"), "title": (elem.get("title") or "").strip(),
+         "description": " ".join((elem.text or "").split())}
+        for elem in root_elem.findall("unit_types/unit_type")
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -207,7 +314,8 @@ def image_key(data: bytes) -> str:
 
 
 def build_materials(specs: list[DeckSpec], package_dir: str | Path, *, log=print,
-                    descriptions: dict | None = None) -> dict:
+                    descriptions: dict | None = None, units: list[UnitSpec] | None = None,
+                    unit_types: list[dict] | None = None) -> dict:
     """Write every deck under ``<package_dir>/mcp_materials``; return the manifest.
 
     A PDF whose page count differs from the deck's slide count is stale --
@@ -217,6 +325,10 @@ def build_materials(specs: list[DeckSpec], package_dir: str | Path, *, log=print
     *descriptions* is the cache ``describe_slides`` writes, keyed by
     ``image_key``; a slide whose image is in it gets its description.  Reading
     it costs nothing, so every build uses whatever has been described.
+
+    *units* (``read_units``) are copied to ``mcp_materials/units/``, each with
+    its images folder, and *unit_types* (``read_unit_types``) go into the
+    manifest as they are.
     """
     descriptions = descriptions or {}
     out_root = Path(package_dir) / MATERIALS_DIR
@@ -264,8 +376,35 @@ def build_materials(specs: list[DeckSpec], package_dir: str | Path, *, log=print
             f"{'with images' if images else 'text only'}"
             + (f", {described} described" if images else "")
             + (f"  WARNING: {warning}" if warning else ""))
+    manifest["units"] = [_build_unit(spec, out_root, log) for spec in units or []]
+    manifest["unit_types"] = list(unit_types or [])
     (out_root / MANIFEST).write_text(json.dumps(manifest, indent=1), encoding="utf-8")
     return manifest
+
+
+def _build_unit(spec: UnitSpec, out_root: Path, log) -> dict:
+    """Copy one MCP-only unit, and its images, into the package.
+
+    The author writes figures as on the portal, ``/pkg_assets/<stem>_images/``;
+    here they live under ``mcp_materials/units/``, so those references are
+    rewritten to the package path, and resolve through /pkg_assets exactly
+    as a portal unit's do.
+    """
+    import shutil
+
+    units_dir = out_root / "units"
+    units_dir.mkdir(exist_ok=True)
+    text = spec.path.read_text(encoding="utf-8")
+    images = 0
+    if spec.images is not None:
+        shutil.copytree(spec.images, units_dir / f"{spec.stem}_images")
+        images = sum(1 for p in spec.images.rglob("*") if p.is_file())
+        text = text.replace(f"/pkg_assets/{spec.stem}_images/",
+                            f"/pkg_assets/{MATERIALS_DIR}/units/{spec.stem}_images/")
+    (units_dir / f"{spec.stem}.xml").write_text(text, encoding="utf-8")
+    log(f"  [unit] {spec.name}" + (f" ({spec.section})" if spec.section else "")
+        + (f", {images} image(s)" if images else ""))
+    return {"name": spec.name, "section": spec.section, "file": f"units/{spec.stem}.xml"}
 
 
 # ---------------------------------------------------------------------------
@@ -556,8 +695,32 @@ class Materials:
 
     root: Path
     decks: list[dict]
+    units: list[dict] = field(default_factory=list)       # manifest entries
+    unit_types: list[dict] = field(default_factory=list)
     _deck_cache: dict = field(default_factory=dict)
     _index: list | None = None
+    _parsed_units: tuple | None = None
+    _units_lock: threading.Lock = field(default_factory=threading.Lock)
+
+    def parsed_units(self, *, scratch_dir: str, course_id: str | None) -> tuple[dict, dict]:
+        """``(units, unit_metadata)`` for the MCP-only units, parsed once.
+
+        Parsed as the portal parses its own units, so the content tools see
+        one shape.  A Materials object lives until the package changes, and
+        so does this.
+        """
+        with self._units_lock:
+            if self._parsed_units is None:
+                from llmgrader.services.unit_parser import UnitParser
+
+                parser = UnitParser(scratch_dir=scratch_dir, soln_pkg=str(self.root.parent),
+                                    course_id=course_id)
+                units, metadata, errors = parser.parse_unit_files(
+                    [(u["name"], f"{MATERIALS_DIR}/{u['file']}") for u in self.units])
+                for error in errors:
+                    print(f"[CourseMCP] unit not loaded: {error}")
+                self._parsed_units = (units, metadata)
+            return self._parsed_units
 
     def deck_ids(self) -> list[str]:
         return [d["id"] for d in self.decks]
@@ -636,7 +799,7 @@ _CACHE_LOCK = threading.Lock()
 
 
 def load_materials(soln_pkg: str | None) -> Materials | None:
-    """The package's slide material, or None if it has none.
+    """The package's MCP material, or None if it has none.
 
     Cached per package directory and reloaded when the manifest changes --
     an upload replaces the package, and with it the manifest.
@@ -655,6 +818,8 @@ def load_materials(soln_pkg: str | None) -> Materials | None:
         if cached and cached[0] == mtime:
             return cached[1]
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-        materials = Materials(root=root, decks=manifest.get("decks", []))
+        materials = Materials(root=root, decks=manifest.get("decks", []),
+                              units=manifest.get("units", []),
+                              unit_types=manifest.get("unit_types", []))
         _CACHE[key] = (mtime, materials)
         return materials

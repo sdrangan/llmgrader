@@ -83,8 +83,9 @@ packages.
 
 | Tool | Reads | Returns |
 | --- | --- | --- |
-| `list_courses`, `list_units` | `CourseRegistry`, `Grader.units_order` | titles, question counts, package version |
-| `list_questions` | `Grader.units` | per question: unit, qtag, a 100-character label, parts, points |
+| `list_courses`, `list_units` | `CourseRegistry`, `content.course_units` | titles, question counts, `unit_type` and `semester`, package version |
+| `list_unit_types` | `course_units`, the manifest's `unit_types` | each type used or described: title, description, its units |
+| `list_questions` | `content.course_units` | per question: unit, qtag, a 100-character label, parts, points; filter by `unit` or `unit_type` |
 | `get_question` | one question dict | its HTML text with `[Figure n]` placeholders, the figures as image blocks, `variation_guidance` |
 | `get_rubric` | one question dict | rubric items, grading notes |
 | `get_solution` | one question dict | the worked solution and its figures |
@@ -96,6 +97,16 @@ The code: tools in `coursemcp/server.py`; question lookups and figure
 resolution in `coursemcp/content.py`; slides in `coursemcp/materials.py`;
 the mount, access, sessions and usage hook in `coursemcp/mount.py`; usage rows
 in `coursemcp/usage.py`.
+
+**Every unit lookup goes through `content.course_units(grader)`**: the
+portal's units (`Grader.units`, `units_order`, `unit_metadata`) followed by the
+package's MCP-only units -- past exams listed in `llmgrader_mcp_config.xml`
+and never in `llmgrader_config.xml`. Those are parsed by the same
+`UnitParser._parse_unit_file` the portal uses, through `parse_unit_files`,
+once per package: the result is cached on the `Materials` object, which is
+itself replaced when an upload changes the manifest. The type is reported as
+`unit_type`, not `type`, because `list_units` already uses `type` to tell a
+section heading from a unit. See `plans/exam_units.md`.
 
 **Results are bounded by construction.** A list returns labels, never full
 text; figures travel only with a single question or slide. A whole course's
@@ -121,6 +132,7 @@ into the course package that the portal already receives:
                        │     manifest.json
                        │     slides/<deck>/deck.json   (title, text, notes, description per slide)
                        │     slides/<deck>/slide-NNN.jpg
+                       │     units/<stem>.xml, units/<stem>_images/   (MCP-only units)
                        └── package_info.json  (version: date + content hash; source commits)
         │
         ▼  Admin ▸ Load Course Package

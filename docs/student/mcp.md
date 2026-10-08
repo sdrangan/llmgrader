@@ -48,7 +48,11 @@ Once connected, your assistant can:
   mistakes it looks for;
 - **read the worked solution**, to check your reasoning or give you a hint;
 - **find where a topic is taught in the lecture slides**, and look at a slide
-  -- its image, its text and the instructor's speaker notes.
+  -- its image, its text and the instructor's speaker notes;
+- **read past exams** your instructor has published, with their rubrics and
+  solutions, and your instructor's description of what this term's exams are
+  like -- so it can write practice problems in the style of the real exam.
+  Past exams are not on the portal and are not graded there.
 
 When your assistant looks at a slide, it sees the image but cannot paste it
 into the chat. Ask it to **"give me the link to that slide"**: each slide has a
@@ -62,6 +66,7 @@ most from it, try asking things like:
 - *"Give me a hint for part (b), not the answer."*
 - *"Give me a similar problem, then check my answer."*
 - *"Which slide explains this? Show me."*
+- *"Give me a midterm-style problem on FSMs, like the past midterm."*
 
 Nothing you do through the MCP is graded. The portal counts its use
 anonymously -- which problems and slides are looked at, and how often -- so

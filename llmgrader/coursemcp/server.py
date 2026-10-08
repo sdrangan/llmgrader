@@ -1,6 +1,7 @@
 """The course MCP tools: what a student's own AI can ask the portal.
 
-Read-only: the course's titles, questions, rubrics, solutions and slides.
+Read-only: the course's titles, questions, rubrics, solutions and slides,
+and the units it publishes here alone, such as past exams.
 Who may call it -- anyone, or only holders of a course token -- is
 ``mount.py``'s business, not the tools'.
 """
@@ -15,6 +16,7 @@ from mcp.server.mcpserver.exceptions import ToolError
 from llmgrader.coursemcp import content as cc
 from llmgrader.coursemcp.materials import load_materials
 from llmgrader.services.course_registry import CourseRegistry
+from llmgrader.services.unit_parser import DEFAULT_UNIT_TYPE
 
 INSTRUCTIONS = (
     "Course material from an LLM Grader portal. Call list_courses first: "
@@ -24,7 +26,12 @@ INSTRUCTIONS = (
 
 CONTENT_INSTRUCTIONS = (
     " Units come from list_units and questions from list_questions; pass "
-    "their names exactly. Lecture slides: list_materials, then get_outline or "
+    "their names exactly. Each unit has a unit_type: problem_set for "
+    "homework, or another type such as midterm for a past exam. Before "
+    "writing a practice problem or practice exam like a midterm or another "
+    "type, read that type's description from list_unit_types -- it says what "
+    "this term's assessments of that type are like -- and model the problem "
+    "on that type's past units. Lecture slides: list_materials, then get_outline or "
     "search_slides to find where a topic is taught, and get_slide to see a "
     "slide -- most of a slide's content is in its figure, so look at the "
     "image, and cite slides by deck and number. This is practice material for a student who is "
@@ -102,19 +109,60 @@ def build_course_mcp(registry: CourseRegistry, *, content: bool = False,
     def list_units(course_id: str) -> list[dict]:
         """List a course's units in teaching order, with section headings.
 
-        Each item is a section heading or a unit; a unit carries its number of
-        questions.  course_id must come from list_courses.
+        Each item is a section heading or a unit.  A unit carries its number
+        of questions and its unit_type -- problem_set for homework, or a type
+        such as midterm for a past exam -- and, for past material, the
+        semester it was given.  list_unit_types says what each type is like.
+        course_id must come from list_courses.
         """
-        grader = require_course(course_id)
+        units = cc.course_units(require_course(course_id))
         items = []
-        for item in grader.units_order:
+        for item in units.order:
             if item["type"] == "unit":
-                questions = grader.units.get(item["name"], {})
-                items.append({"type": "unit", "name": item["name"],
-                              "questions": len(questions)})
+                meta = units.meta.get(item["name"], {})
+                entry = {"type": "unit", "name": item["name"],
+                         "questions": len(units.units.get(item["name"], {})),
+                         "unit_type": meta.get("unit_type", DEFAULT_UNIT_TYPE)}
+                if meta.get("semester"):
+                    entry["semester"] = meta["semester"]
+                items.append(entry)
             else:
                 items.append({"type": item["type"], "name": item["name"]})
         return items
+
+    @mcp.tool()
+    def list_unit_types(course_id: str) -> list[dict]:
+        """List the kinds of unit in a course, with what each is like.
+
+        Each item is a unit_type -- problem_set, midterm, final, quiz, as the
+        course names them -- with the instructor's title and description where
+        there is one, and the units of that type.  A description of an exam
+        type says what this term's exam is like: its format, length, what it
+        covers.  Read it before writing a practice problem "like the midterm".
+        """
+        log_call("list_unit_types", course=course_id)
+        grader = require_course(course_id)
+        units = cc.course_units(grader)
+        materials = load_materials(grader.soln_pkg)
+        described = {t["id"]: t for t in (materials.unit_types if materials else [])}
+        by_type: dict[str, list[str]] = {}
+        for item in units.order:
+            if item["type"] == "unit":
+                unit_type = units.meta.get(item["name"], {}).get("unit_type", DEFAULT_UNIT_TYPE)
+                by_type.setdefault(unit_type, []).append(item["name"])
+        # A described type with no unit yet still says what this term's will be.
+        for type_id in described:
+            by_type.setdefault(type_id, [])
+        result = []
+        for type_id, names in by_type.items():
+            entry = {"unit_type": type_id}
+            if described.get(type_id, {}).get("title"):
+                entry["title"] = described[type_id]["title"]
+            if described.get(type_id, {}).get("description"):
+                entry["description"] = described[type_id]["description"]
+            entry["units"] = names
+            result.append(entry)
+        return result
 
     if content:
         _add_content_tools(mcp, require_course, public_url)
@@ -150,21 +198,28 @@ def _add_content_tools(mcp: MCPServer, require_course, public_url) -> None:
 
 
     @mcp.tool()
-    def list_questions(course_id: str, unit: str | None = None) -> list[dict]:
+    def list_questions(course_id: str, unit: str | None = None,
+                       unit_type: str | None = None) -> list[dict]:
         """List a course's questions: unit, qtag, a short label, parts and points.
 
         Omit unit for every question in the course -- the whole index is small,
         so prefer this to guessing, and match the student's description against
-        the labels yourself.  Pass unit (a name from list_units) for one unit.
-        The label is the start of the question text; call get_question for the
-        full text and its figures.
+        the labels yourself.  Pass unit (a name from list_units) for one unit,
+        or unit_type (from list_units or list_unit_types) for the questions of
+        every unit of that type -- unit_type="midterm" for all past midterm
+        problems.  The label is the start of the question text; call
+        get_question for the full text and its figures.
         """
-        log_call("list_questions", course=course_id, unit=unit)
+        log_call("list_questions", course=course_id, unit=unit, unit_type=unit_type)
         grader = require_course(course_id)
+        units = cc.course_units(grader)
         names = [cc.resolve_unit(grader, unit)] if unit else cc.unit_names(grader)
+        if unit_type:
+            wanted = unit_type.strip().lower()
+            names = [n for n in names if units.meta.get(n, {}).get("unit_type") == wanted]
         index = []
         for name in names:
-            for qtag, question in grader.units.get(name, {}).items():
+            for qtag, question in units.units.get(name, {}).items():
                 parts = cc.parts_summary(question)
                 index.append({
                     "unit": name,

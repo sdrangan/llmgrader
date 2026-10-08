@@ -37,6 +37,8 @@ documents are next.
 | Lecture slides: `list_materials`, `get_outline`, `search_slides`, `get_slide` | Done |
 | Descriptions of slide figures for search (optional, paid once) | Done |
 | `llmgrader_mcp_config.xml` and the slide build | Done |
+| Unit types, MCP-only units (past exams), `list_unit_types` | Done |
+| Printing a unit as a paper exam (`create_qfile --print`) | Planned |
 | Lab instructions and other documents | Planned |
 | Skill tags in rubrics and a skill list | Planned |
 
@@ -45,8 +47,9 @@ documents are next.
 | Tool | Returns |
 | --- | --- |
 | `list_courses` | The courses on this portal |
-| `list_units` | A course's units in teaching order, with question counts |
-| `list_questions` | Every question (or one unit's): unit, qtag, a short label, parts and points |
+| `list_units` | A course's units in teaching order, with question counts, each unit's `unit_type` and, for past material, its semester |
+| `list_unit_types` | Each kind of unit (`problem_set`, `midterm`, ...) with your description of it, and its units |
+| `list_questions` | Every question (or one unit's, or one unit type's): unit, qtag, a short label, parts and points |
 | `get_question` | One question's full text and figures, and your `variation_guidance` if any |
 | `get_rubric` | One question's rubric items and grading notes |
 | `get_solution` | One question's worked solution and its figures |

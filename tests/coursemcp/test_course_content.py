@@ -165,14 +165,14 @@ CONTENT_TOOLS = {"list_questions", "get_question", "get_rubric", "get_solution",
 def test_without_a_token_everything_is_served_openly(tmp_path, monkeypatch) -> None:
     """The token is optional: unset, students need only the address."""
     client = build_app(tmp_path, monkeypatch, token=None).test_client()
-    assert tool_names(client, auth=None) == {"list_courses", "list_units"} | CONTENT_TOOLS
+    assert tool_names(client, auth=None) == {"list_courses", "list_units", "list_unit_types"} | CONTENT_TOOLS
     body = payload(call(client, "get_solution",
                         {"course_id": "alpha", "unit": UNIT, "qtag": "Bouncing ball"}, auth=None))
     assert SOLUTION_SENTINEL in body["solution"]
 
 
 def test_with_a_token_content_tools_are_served(client) -> None:
-    assert tool_names(client) == {"list_courses", "list_units"} | CONTENT_TOOLS
+    assert tool_names(client) == {"list_courses", "list_units", "list_unit_types"} | CONTENT_TOOLS
 
 
 @pytest.mark.parametrize("auth", [None, "wrong-token-wrong-token"])

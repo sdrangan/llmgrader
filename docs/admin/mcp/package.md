@@ -16,6 +16,10 @@ The course MCP serves two kinds of material:
   listed in a second file, `llmgrader_mcp_config.xml`, and built into the same
   package. You still upload one archive per course.
 
+The same file can also publish units the portal does not serve, such as past
+exams, and describe each kind of unit; see
+[Past Exams and Unit Types](./units.md).
+
 This page covers the slides. If you only want to publish questions, skip to
 [Deploying](./deploy.md).
 

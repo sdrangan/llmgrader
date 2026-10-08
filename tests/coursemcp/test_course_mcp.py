@@ -237,7 +237,7 @@ def test_tools_are_listed(client) -> None:
     response = rpc(client, "tools/list")
     assert response.status_code == 200
     names = {tool["name"] for tool in response.get_json()["result"]["tools"]}
-    assert names == {"list_courses", "list_units", "list_questions", "get_question",
+    assert names == {"list_courses", "list_units", "list_unit_types", "list_questions", "get_question",
                      "get_rubric", "get_solution", "list_materials", "get_outline",
                      "search_slides", "get_slide"}
 
@@ -289,7 +289,8 @@ def test_list_units_reads_the_named_course(client, course_id) -> None:
     items = tool_items(call_tool(client, "list_units", {"course_id": course_id}))
     assert items == [
         {"type": "section", "name": "Lectures"},
-        {"type": "unit", "name": COURSES[course_id]["unit_title"], "questions": 2},
+        {"type": "unit", "name": COURSES[course_id]["unit_title"], "questions": 2,
+         "unit_type": "problem_set"},
     ]
 
 

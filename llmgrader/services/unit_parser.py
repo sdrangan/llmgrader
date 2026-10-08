@@ -16,6 +16,9 @@ import xmlschema
 
 from llmgrader.services.models import resolve_preferred_model
 
+# A unit with no unit_type attribute (plans/exam_units.md, decision 1).
+DEFAULT_UNIT_TYPE = "problem_set"
+
 
 def strip_code_block_leading_newlines(html_text: str) -> str:
     def strip_newlines_match(match):
@@ -1099,6 +1102,271 @@ class UnitParser:
 
         return data_uris
 
+    def _parse_unit_file(
+        self, name: str, xml_path: str, soln_pkg_path: str, log, validation_errors: list[str]
+    ) -> tuple[dict, dict] | None:
+        """One unit file's questions and metadata, or None if it does not load.
+
+        Shared by ``parse`` (the units llmgrader_config.xml lists) and
+        ``parse_unit_files`` (the course MCP's units, which it does not).
+        Problems are appended to *validation_errors* and written to *log*.
+        """
+        log.write(f"Processing unit: {name}\n")
+        log.write(f"  XML file: {xml_path}\n")
+
+        if not os.path.exists(xml_path):
+            error = f"{xml_path}: /: File does not exist."
+            validation_errors.append(error)
+            log.write(f"Validation error: {error}\n")
+            return None
+
+        unit_validation_errors = self.validate_unit_file(xml_path)
+        if unit_validation_errors:
+            validation_errors.extend(unit_validation_errors)
+            log.write(f"Skipping unit {name}: XML schema validation failed.\n")
+            for error in unit_validation_errors:
+                log.write(f"Validation error: {error}\n")
+            return None
+
+        try:
+            tree = ET.parse(xml_path)
+            root = tree.getroot()
+        except Exception as exc:
+            error = f"{xml_path}: /: Failed to parse XML: {exc}"
+            validation_errors.append(error)
+            log.write(f"Validation error: {error}\n")
+            return None
+
+        digitalsign_elem = root.find("digitalsign")
+        digitalsign = (
+            digitalsign_elem is not None
+            and (digitalsign_elem.text or "").strip().lower() == "true"
+        )
+        metadata = {
+            "digitalsign": digitalsign,
+            # plans/exam_units.md, decision 1.  Reported by the course MCP;
+            # the grader ignores both.
+            "unit_type": (root.get("unit_type") or "").strip() or DEFAULT_UNIT_TYPE,
+            "semester": (root.get("semester") or "").strip(),
+        }
+
+        unit_dict = {}
+
+        for question in root.findall("question"):
+            qtag = question.get("qtag")
+            if not qtag:
+                log.write(f"Skipping question in unit {name}: missing qtag attribute\n")
+                continue
+
+            preferred_model = question.get("preferred_model", "")
+            if preferred_model and resolve_preferred_model(
+                preferred_model, qtag=qtag
+            ) is None:
+                # Warn, never fail: the unit still loads and the
+                # grader falls back to DEFAULT_MODEL_SIMPLE. Deliberately
+                # not a validation_error -- that raises a banner
+                # saying the file failed validation and was not
+                # loaded, which would not be true.
+                log.write(
+                    f"[WARN] Question '{qtag}' in unit {name}: "
+                    f"preferred_model '{preferred_model}' is not a tier "
+                    f"name or a known model; grading will use the "
+                    f"default model.\n"
+                )
+
+            question_text_elem = question.find("question_text")
+            question_text = element_text(question_text_elem)
+
+            solution_elem = question.find("solution")
+            solution = element_text(solution_elem)
+            # Extract first: the extractor resolves the unprefixed
+            # /pkg_assets/ form against the package on disk, and it
+            # has no business knowing about URLs.
+            solution_images = self._extract_solution_images(solution, soln_pkg_path, xml_path, log)
+            solution = self._scope_pkg_asset_urls(solution)
+            question_text = self._scope_pkg_asset_urls(question_text)
+
+            grading_notes_elem = question.find("grading_notes")
+            grading_notes = element_text(grading_notes_elem)
+
+            # What an AI may vary when making practice variants.
+            # Ignored by the grader; served by the course MCP's
+            # get_question (plans/course_mcp.md, decision 11).
+            variation_elem = question.find("variation_guidance")
+            variation_guidance = element_text(variation_elem)
+
+            required_elem = question.find("required")
+            if required_elem is None:
+                required_elem = question.find("grade")
+            if required_elem is not None and required_elem.text:
+                required = required_elem.text.strip().lower() == "true"
+            else:
+                required = True
+
+            partial_credit_elem = question.find("partial_credit")
+            if partial_credit_elem is not None and partial_credit_elem.text:
+                partial_credit = partial_credit_elem.text.strip().lower() == "true"
+            else:
+                partial_credit = False
+
+            tools = []
+            for tool_elem in question.findall("tool"):
+                if tool_elem.text is None:
+                    continue
+                tool_name = tool_elem.text.strip()
+                if not tool_name:
+                    continue
+                if tool_name not in self.supported_tools:
+                    log.write(
+                        f"Warning: question {qtag} in unit {name} requested unsupported tool '{tool_name}'; ignoring.\n"
+                    )
+                    continue
+                tools.append(tool_name)
+
+            rubrics = {}
+            rubric_groups = []
+            rubrics_elem = question.find("rubrics")
+            if rubrics_elem is not None:
+                for child in rubrics_elem:
+                    if child.tag not in {"item", "group"}:
+                        self._log_question_warning(
+                            log,
+                            name,
+                            qtag,
+                            f"has unexpected element <{child.tag}> inside <rubrics>; ignoring it.",
+                        )
+
+                for rubric_item in rubrics_elem.findall("item"):
+                    item_id, rubric_data = self._parse_rubric_item(
+                        rubric_item,
+                        partial_credit=partial_credit,
+                        unit_name=name,
+                        qtag=qtag,
+                        log=log,
+                    )
+                    if item_id is None or rubric_data is None:
+                        continue
+                    rubrics[item_id] = rubric_data
+
+                rubric_groups = self._parse_rubric_groups(
+                    rubrics_elem,
+                    set(rubrics.keys()),
+                    unit_name=name,
+                    qtag=qtag,
+                    log=log,
+                )
+
+            rubric_total = self._parse_rubric_total(
+                question,
+                partial_credit=partial_credit,
+                has_rubrics=bool(rubrics),
+                unit_name=name,
+                qtag=qtag,
+                log=log,
+            )
+
+            parts = []
+            parts_elem = question.find("parts")
+            if parts_elem is not None:
+                for part in parts_elem.findall("part"):
+                    part_id = part.get("id")
+                    part_label_elem = part.find("part_label")
+                    points_elem = part.find("points")
+
+                    if part_label_elem is not None and part_label_elem.text:
+                        part_label = part_label_elem.text.strip()
+                    elif part_id:
+                        part_label = part_id
+                    else:
+                        part_label = "all"
+
+                    if points_elem is not None and points_elem.text:
+                        try:
+                            points = float(points_elem.text.strip())
+                        except ValueError:
+                            points = 0.0
+                    elif part.get("points"):
+                        try:
+                            points = float(part.get("points"))
+                        except ValueError:
+                            points = 0.0
+                    else:
+                        points = 0.0
+
+                    parts.append({"part_label": part_label, "points": points})
+
+            question_dict = {
+                "qtag": qtag,
+                "question_text": question_text,
+                "solution": solution,
+                "solution_images": solution_images,
+                "grading_notes": grading_notes,
+                "variation_guidance": variation_guidance,
+                "parts": parts,
+                "required": required,
+                "partial_credit": partial_credit,
+                "tools": tools,
+                "rubrics": rubrics,
+                "rubric_total": rubric_total,
+                "rubric_groups": rubric_groups,
+                "preferred_model": preferred_model,
+            }
+
+            unit_dict[qtag] = question_dict
+
+        required_fields = [
+            "qtag",
+            "question_text",
+            "solution",
+            "grading_notes",
+            "parts",
+            "required",
+        ]
+
+        valid_questions = {}
+        for qtag, qdict in unit_dict.items():
+            missing_fields = [field for field in required_fields if field not in qdict]
+            if missing_fields:
+                log.write(
+                    f"Skipping question {qtag} in unit {name}: missing required fields: {missing_fields}\n"
+                )
+                continue
+            valid_questions[qtag] = qdict
+
+        unit_dict = valid_questions
+
+        if len(unit_dict) == 0:
+            log.write(f"Skipping unit {name}: no valid questions found\n")
+            return None
+
+        log.write(f"Unit {name} successfully loaded with questions:\n")
+        for qtag in unit_dict:
+            log.write(f"  qtag={qtag} \n")
+
+        return unit_dict, metadata
+
+    def parse_unit_files(self, entries: list[tuple[str, str]]) -> tuple[dict, dict, list[str]]:
+        """Parse unit files that no llmgrader_config.xml lists.
+
+        *entries* is ``[(name, path), ...]``, each path relative to the
+        package.  The course MCP's own units (plans/exam_units.md, decision 3)
+        come through here: the same parsing as ``parse``, so they reach the
+        tools in the same shape.  Returns ``(units, unit_metadata,
+        validation_errors)``; a unit that fails to load is left out.
+        """
+        soln_pkg_path = self._resolve_solution_package_path()
+        units: dict = {}
+        unit_metadata: dict = {}
+        validation_errors: list[str] = []
+        log_path = os.path.join(self.scratch_dir, "load_mcp_units_log.txt")
+        with open(log_path, "w", encoding="utf-8") as log:
+            for name, relative in entries:
+                xml_path = os.path.join(soln_pkg_path, os.path.normpath(relative))
+                parsed = self._parse_unit_file(name, xml_path, soln_pkg_path, log, validation_errors)
+                if parsed is not None:
+                    units[name], unit_metadata[name] = parsed
+        return units, unit_metadata, validation_errors
+
     def parse(self) -> UnitPackageData:
         soln_pkg_path = self._resolve_solution_package_path()
         log_path = os.path.join(self.scratch_dir, "load_unit_pkg_log.txt")
@@ -1182,236 +1450,11 @@ class UnitParser:
                 unit_metadata: dict[str, dict] = {}
 
                 for name, xml_path in zip(units_list, xml_path_list):
-                    xml_path = os.path.normpath(xml_path)
-                    xml_path = os.path.join(soln_pkg_path, xml_path)
-
-                    log.write(f"Processing unit: {name}\n")
-                    log.write(f"  XML file: {xml_path}\n")
-
-                    if not os.path.exists(xml_path):
-                        error = f"{xml_path}: /: File does not exist."
-                        validation_errors.append(error)
-                        log.write(f"Validation error: {error}\n")
+                    xml_path = os.path.join(soln_pkg_path, os.path.normpath(xml_path))
+                    parsed = self._parse_unit_file(name, xml_path, soln_pkg_path, log, validation_errors)
+                    if parsed is None:
                         continue
-
-                    unit_validation_errors = self.validate_unit_file(xml_path)
-                    if unit_validation_errors:
-                        validation_errors.extend(unit_validation_errors)
-                        log.write(f"Skipping unit {name}: XML schema validation failed.\n")
-                        for error in unit_validation_errors:
-                            log.write(f"Validation error: {error}\n")
-                        continue
-
-                    try:
-                        tree = ET.parse(xml_path)
-                        root = tree.getroot()
-                    except Exception as exc:
-                        error = f"{xml_path}: /: Failed to parse XML: {exc}"
-                        validation_errors.append(error)
-                        log.write(f"Validation error: {error}\n")
-                        continue
-
-                    digitalsign_elem = root.find("digitalsign")
-                    digitalsign = (
-                        digitalsign_elem is not None
-                        and (digitalsign_elem.text or "").strip().lower() == "true"
-                    )
-                    unit_metadata[name] = {"digitalsign": digitalsign}
-
-                    unit_dict = {}
-
-                    for question in root.findall("question"):
-                        qtag = question.get("qtag")
-                        if not qtag:
-                            log.write(f"Skipping question in unit {name}: missing qtag attribute\n")
-                            continue
-
-                        preferred_model = question.get("preferred_model", "")
-                        if preferred_model and resolve_preferred_model(
-                            preferred_model, qtag=qtag
-                        ) is None:
-                            # Warn, never fail: the unit still loads and the
-                            # grader falls back to DEFAULT_MODEL_SIMPLE. Deliberately
-                            # not a validation_error -- that raises a banner
-                            # saying the file failed validation and was not
-                            # loaded, which would not be true.
-                            log.write(
-                                f"[WARN] Question '{qtag}' in unit {name}: "
-                                f"preferred_model '{preferred_model}' is not a tier "
-                                f"name or a known model; grading will use the "
-                                f"default model.\n"
-                            )
-
-                        question_text_elem = question.find("question_text")
-                        question_text = element_text(question_text_elem)
-
-                        solution_elem = question.find("solution")
-                        solution = element_text(solution_elem)
-                        # Extract first: the extractor resolves the unprefixed
-                        # /pkg_assets/ form against the package on disk, and it
-                        # has no business knowing about URLs.
-                        solution_images = self._extract_solution_images(solution, soln_pkg_path, xml_path, log)
-                        solution = self._scope_pkg_asset_urls(solution)
-                        question_text = self._scope_pkg_asset_urls(question_text)
-
-                        grading_notes_elem = question.find("grading_notes")
-                        grading_notes = element_text(grading_notes_elem)
-
-                        # What an AI may vary when making practice variants.
-                        # Ignored by the grader; served by the course MCP's
-                        # get_question (plans/course_mcp.md, decision 11).
-                        variation_elem = question.find("variation_guidance")
-                        variation_guidance = element_text(variation_elem)
-
-                        required_elem = question.find("required")
-                        if required_elem is None:
-                            required_elem = question.find("grade")
-                        if required_elem is not None and required_elem.text:
-                            required = required_elem.text.strip().lower() == "true"
-                        else:
-                            required = True
-
-                        partial_credit_elem = question.find("partial_credit")
-                        if partial_credit_elem is not None and partial_credit_elem.text:
-                            partial_credit = partial_credit_elem.text.strip().lower() == "true"
-                        else:
-                            partial_credit = False
-
-                        tools = []
-                        for tool_elem in question.findall("tool"):
-                            if tool_elem.text is None:
-                                continue
-                            tool_name = tool_elem.text.strip()
-                            if not tool_name:
-                                continue
-                            if tool_name not in self.supported_tools:
-                                log.write(
-                                    f"Warning: question {qtag} in unit {name} requested unsupported tool '{tool_name}'; ignoring.\n"
-                                )
-                                continue
-                            tools.append(tool_name)
-
-                        rubrics = {}
-                        rubric_groups = []
-                        rubrics_elem = question.find("rubrics")
-                        if rubrics_elem is not None:
-                            for child in rubrics_elem:
-                                if child.tag not in {"item", "group"}:
-                                    self._log_question_warning(
-                                        log,
-                                        name,
-                                        qtag,
-                                        f"has unexpected element <{child.tag}> inside <rubrics>; ignoring it.",
-                                    )
-
-                            for rubric_item in rubrics_elem.findall("item"):
-                                item_id, rubric_data = self._parse_rubric_item(
-                                    rubric_item,
-                                    partial_credit=partial_credit,
-                                    unit_name=name,
-                                    qtag=qtag,
-                                    log=log,
-                                )
-                                if item_id is None or rubric_data is None:
-                                    continue
-                                rubrics[item_id] = rubric_data
-
-                            rubric_groups = self._parse_rubric_groups(
-                                rubrics_elem,
-                                set(rubrics.keys()),
-                                unit_name=name,
-                                qtag=qtag,
-                                log=log,
-                            )
-
-                        rubric_total = self._parse_rubric_total(
-                            question,
-                            partial_credit=partial_credit,
-                            has_rubrics=bool(rubrics),
-                            unit_name=name,
-                            qtag=qtag,
-                            log=log,
-                        )
-
-                        parts = []
-                        parts_elem = question.find("parts")
-                        if parts_elem is not None:
-                            for part in parts_elem.findall("part"):
-                                part_id = part.get("id")
-                                part_label_elem = part.find("part_label")
-                                points_elem = part.find("points")
-
-                                if part_label_elem is not None and part_label_elem.text:
-                                    part_label = part_label_elem.text.strip()
-                                elif part_id:
-                                    part_label = part_id
-                                else:
-                                    part_label = "all"
-
-                                if points_elem is not None and points_elem.text:
-                                    try:
-                                        points = float(points_elem.text.strip())
-                                    except ValueError:
-                                        points = 0.0
-                                elif part.get("points"):
-                                    try:
-                                        points = float(part.get("points"))
-                                    except ValueError:
-                                        points = 0.0
-                                else:
-                                    points = 0.0
-
-                                parts.append({"part_label": part_label, "points": points})
-
-                        question_dict = {
-                            "qtag": qtag,
-                            "question_text": question_text,
-                            "solution": solution,
-                            "solution_images": solution_images,
-                            "grading_notes": grading_notes,
-                            "variation_guidance": variation_guidance,
-                            "parts": parts,
-                            "required": required,
-                            "partial_credit": partial_credit,
-                            "tools": tools,
-                            "rubrics": rubrics,
-                            "rubric_total": rubric_total,
-                            "rubric_groups": rubric_groups,
-                            "preferred_model": preferred_model,
-                        }
-
-                        unit_dict[qtag] = question_dict
-
-                    required_fields = [
-                        "qtag",
-                        "question_text",
-                        "solution",
-                        "grading_notes",
-                        "parts",
-                        "required",
-                    ]
-
-                    valid_questions = {}
-                    for qtag, qdict in unit_dict.items():
-                        missing_fields = [field for field in required_fields if field not in qdict]
-                        if missing_fields:
-                            log.write(
-                                f"Skipping question {qtag} in unit {name}: missing required fields: {missing_fields}\n"
-                            )
-                            continue
-                        valid_questions[qtag] = qdict
-
-                    unit_dict = valid_questions
-
-                    if len(unit_dict) == 0:
-                        log.write(f"Skipping unit {name}: no valid questions found\n")
-                        continue
-
-                    log.write(f"Unit {name} successfully loaded with questions:\n")
-                    for qtag in unit_dict:
-                        log.write(f"  qtag={qtag} \n")
-
-                    units[name] = unit_dict
+                    units[name], unit_metadata[name] = parsed
 
                 if len(units) == 0:
                     log.write("No valid directories units found.\n")
