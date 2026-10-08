@@ -14,6 +14,7 @@ from mcp.server.mcpserver import Image, MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 
 from llmgrader.coursemcp import content as cc
+from llmgrader.coursemcp.code import FIRST_FETCH_WAIT_S, CodeError
 from llmgrader.coursemcp.materials import load_materials
 from llmgrader.services.course_registry import CourseRegistry
 from llmgrader.services.unit_parser import DEFAULT_UNIT_TYPE
@@ -44,6 +45,20 @@ CONTENT_INSTRUCTIONS = (
     "and without the student's words."
 )
 
+# Added when the portal serves demo code (LLMGRADER_MCP_CODE).
+CODE_INSTRUCTIONS = (
+    " Demos: the instructor's in-class demos -- SystemVerilog, Vitis HLS C++ "
+    "and Tcl, Python build scripts and notebooks -- and the docs pages that "
+    "walk through them often show what the slides only describe. When a "
+    "student asks where something is shown or how to do it (a pragma, an "
+    "interface, a testbench, a build step), search_demos for its exact "
+    "identifiers or a phrase, then get_demo_file to read the docs page or the "
+    "code; list_demos says which unit and slides each demo goes with, so you "
+    "can point the student to a demo to study. Give the student view_url for "
+    "a docs page and source_url for exact lines of code, and cite code as "
+    "path:line. Demo calls are counted the same way, by demo and file."
+)
+
 
 def log_call(tool: str, **ids) -> None:
     """One log line per tool call: the tool and the ids it was asked about.
@@ -57,13 +72,15 @@ def log_call(tool: str, **ids) -> None:
 
 
 def build_course_mcp(registry: CourseRegistry, *, content: bool = False,
-                     public_url=lambda: None) -> MCPServer:
+                     public_url=lambda: None, code=None) -> MCPServer:
     """An MCP server whose tools read the courses *registry* serves.
 
     *content* adds the question, rubric, solution and slide tools; ``mount.py``
     always passes it -- a token, if any, is checked before a request gets
     here.  *public_url* returns the portal's public address, for links a
-    student can open, or None.
+    student can open, or None.  *code*, a ``CodeLibrary``, adds the demo
+    tools (``plans/demo_code_mcp.md``); ``mount.py`` passes one only when
+    ``LLMGRADER_MCP_CODE`` is set.
 
     Only the tools are defined here.  How it is served over HTTP is
     ``mount.py``'s business: in mcp 2 those settings belong to the app, not
@@ -71,7 +88,8 @@ def build_course_mcp(registry: CourseRegistry, *, content: bool = False,
     """
     mcp = MCPServer(
         "llmgrader-course",
-        instructions=INSTRUCTIONS + (CONTENT_INSTRUCTIONS if content else ""),
+        instructions=INSTRUCTIONS + (CONTENT_INSTRUCTIONS if content else "")
+        + (CODE_INSTRUCTIONS if content and code is not None else ""),
         # No subscriptions/listen.  A listen request is a POST held open to
         # stream change notifications, and under gunicorn's sync worker an
         # open stream holds the whole portal.  Course content changes only on
@@ -98,12 +116,17 @@ def build_course_mcp(registry: CourseRegistry, *, content: bool = False,
         Use the id as course_id in every other tool.
         """
         # The version is here and in no other tool's result: an assistant
-        # reads every result, and on any other call it would be noise.
-        return [
-            {"course_id": entry.id, "name": entry.name, "semester": entry.semester,
-             "package_version": registry.grader_for(entry.id).package_version}
-            for entry in registry.courses()
-        ]
+        # reads every result, and on any other call it would be noise.  So
+        # is the demo repo's commit, for a course that publishes demos.
+        courses = []
+        for entry in registry.courses():
+            item = {"course_id": entry.id, "name": entry.name, "semester": entry.semester,
+                    "package_version": registry.grader_for(entry.id).package_version}
+            code_version = code.code_version(entry.id) if code is not None else None
+            if code_version:
+                item["code_version"] = code_version
+            courses.append(item)
+        return courses
 
     @mcp.tool()
     def list_units(course_id: str) -> list[dict]:
@@ -165,7 +188,9 @@ def build_course_mcp(registry: CourseRegistry, *, content: bool = False,
         return result
 
     if content:
-        _add_content_tools(mcp, require_course, public_url)
+        _add_content_tools(mcp, require_course, public_url, code)
+        if code is not None:
+            _add_code_tools(mcp, require_course, public_url, code)
 
     return mcp
 
@@ -188,13 +213,38 @@ def _with_figures(payload: dict, figures: list) -> list:
     return blocks
 
 
-def _add_content_tools(mcp: MCPServer, require_course, public_url) -> None:
+def _slide_url(public_url, course_id: str, deck: str, number: int) -> str | None:
+    # The portal's /c/<course>/slides/<deck>/<n> route.  None until a
+    # request has shown the server its own address.
+    base = public_url()
+    return f"{base}/c/{course_id}/slides/{deck}/{number}" if base else None
+
+
+def _slide_demos(code, require_course, course_id: str):
+    """``(deck, n) -> [{"demo", "title"}]``: the demos a slide cites.
+
+    Never waits and never fails a slide tool: with no copy of the demos yet,
+    or any problem building the links, a slide simply has no demos.
+    """
+    if code is None:
+        return lambda deck, n: []
+    try:
+        sync = code.sync_for(course_id)
+        snapshot = sync.ensure(wait=0) if sync is not None else None
+        if snapshot is None:
+            return lambda deck, n: []
+        index = sync.index(snapshot, load_materials(require_course(course_id).soln_pkg))
+    except Exception as exc:
+        print(f"[CourseCode] {course_id}: no demo links for slides: {exc!r}")
+        return lambda deck, n: []
+    return lambda deck, n: [{"demo": d.id, "title": d.title}
+                            for d in index.demos_for_slide(deck, n)]
+
+
+def _add_content_tools(mcp: MCPServer, require_course, public_url, code=None) -> None:
 
     def slide_url(course_id: str, deck: str, number: int) -> str | None:
-        # The portal's /c/<course>/slides/<deck>/<n> route.  None until a
-        # request has shown the server its own address.
-        base = public_url()
-        return f"{base}/c/{course_id}/slides/{deck}/{number}" if base else None
+        return _slide_url(public_url, course_id, deck, number)
 
 
     @mcp.tool()
@@ -374,12 +424,16 @@ def _add_content_tools(mcp: MCPServer, require_course, public_url) -> None:
         log_call("search_slides", course=course_id, unit=unit)  # not the query: student words
         materials = require_materials(require_course(course_id))
         hits = materials.search(query, unit=unit)
+        demos_of = _slide_demos(code, require_course, course_id) if hits else None
         for hit in hits:
             deck = materials.deck(hit["deck"])
             if deck and deck["slides"][hit["slide"] - 1].get("image"):
                 url = slide_url(course_id, hit["deck"], hit["slide"])
                 if url:
                     hit["view_url"] = url
+            demos = demos_of(hit["deck"], hit["slide"])
+            if demos:
+                hit["demos"] = demos
         return hits
 
     @mcp.tool()
@@ -406,6 +460,9 @@ def _add_content_tools(mcp: MCPServer, require_course, public_url) -> None:
                    "text": entry["text"], "notes": entry["notes"]}
         if entry.get("description"):
             payload["figure_description"] = entry["description"]
+        demos = _slide_demos(code, require_course, course_id)(found["id"], entry["n"])
+        if demos:
+            payload["demos"] = demos    # list_demos / get_demo_file take it from here
         blocks: list = []
         image = materials.image_path(found["id"], entry["image"]) if entry.get("image") else None
         if image is None:
@@ -418,3 +475,153 @@ def _add_content_tools(mcp: MCPServer, require_course, public_url) -> None:
         if image is not None:
             blocks.append(Image(data=image.read_bytes(), format="jpeg"))
         return blocks
+
+
+def _add_code_tools(mcp: MCPServer, require_course, public_url, code) -> None:
+    """The demo tools: plans/demo_code_mcp.md.  Every result is bounded."""
+
+    def require_demos(course_id: str):
+        grader = require_course(course_id)
+        sync = code.sync_for(course_id)
+        if sync is None:
+            raise ToolError("This course has not published demos.")
+        # Waits only when there is no copy at all, and then briefly.
+        snapshot = sync.ensure(wait=FIRST_FETCH_WAIT_S)
+        if snapshot is None:
+            error = sync.last_error()
+            if error:
+                raise ToolError(f"The demos could not be fetched ({error}); try again later.")
+            raise ToolError("The demos are being fetched for the first time; "
+                            "try again in a minute.")
+        try:
+            index = sync.index(snapshot, load_materials(grader.soln_pkg))
+        except Exception as exc:
+            raise ToolError(f"The demo links could not be built: {exc}") from exc
+        return snapshot, index
+
+    def require_demo(index, demo: str):
+        found = index.demos.get((demo or "").strip())
+        if found is None or found.hidden:
+            raise ToolError(f"Unknown demo {demo!r}. Valid demos, from list_demos: "
+                            + ", ".join(repr(d.id) for d in index.visible()))
+        return found
+
+    def unit_matches(unit_name: str, wanted: str) -> bool:
+        name = " ".join(unit_name.lower().split())
+        return name == wanted or name.startswith(wanted + ":")
+
+    @mcp.tool()
+    def list_demos(course_id: str, unit: str | None = None) -> list[dict]:
+        """List the course's in-class demos: each one's docs pages, code,
+        slides and unit.
+
+        A demo is a worked example the instructor builds in class --
+        SystemVerilog, a Vitis HLS kernel, a Python build script or notebook --
+        usually with docs pages that walk through it.  Use this to point a
+        student to a demo that shows a topic, or to find the demo that goes
+        with a slide or unit.  Pass unit (a name from list_units) for one
+        unit's demos.  Each unit says how the link was found ("via").
+        """
+        log_call("list_demos", course=course_id, unit=unit)
+        snapshot, index = require_demos(course_id)
+        wanted = " ".join(unit.lower().split()) if unit else None
+        result = []
+        for demo in index.visible():
+            if wanted and not any(unit_matches(u["unit"], wanted) for u in demo.units):
+                continue
+            slides = []
+            for s in demo.slides:
+                item = {"deck": s["deck"], "slide": s["slide"]}
+                url = _slide_url(public_url, course_id, s["deck"], s["slide"])
+                if url:
+                    item["view_url"] = url
+                slides.append(item)
+            docs = []
+            for path in demo.docs:
+                page = {"path": path, "title": snapshot.files[path].title}
+                view = snapshot.view_url(path)
+                if view:
+                    page["view_url"] = view
+                docs.append(page)
+            result.append({
+                "demo": demo.id, "title": demo.title, "description": demo.description,
+                "units": [{"unit": u["unit"], "via": u["via"]} for u in demo.units],
+                "slides": slides, "docs": docs, "code": list(demo.code),
+                "related": list(demo.related),
+                "files": len(index.files_of(demo, snapshot)),
+            })
+        return result
+
+    @mcp.tool()
+    def list_demo_files(course_id: str, demo: str) -> list[dict]:
+        """List one demo's files: its docs pages first, in reading order, then
+        its code.
+
+        demo comes from list_demos.  Paths are relative to the repository;
+        pass them to get_demo_file as they are.  Build output, bitstreams,
+        binaries and generated scripts are not served.
+        """
+        log_call("list_demo_files", course=course_id, demo=demo)
+        snapshot, index = require_demos(course_id)
+        found = require_demo(index, demo)
+        files = []
+        for path in index.files_of(found, snapshot):
+            source = snapshot.files[path]
+            item = {"path": path, "kind": source.kind, "demo": found.id}
+            if source.kind == "doc":
+                item["title"] = source.title
+            else:
+                item["language"] = source.language
+            item["lines"] = source.last_line
+            item.update(snapshot.links_for(path))
+            files.append(item)
+        return files
+
+    @mcp.tool()
+    def get_demo_file(course_id: str, path: str, start_line: int | None = None,
+                      end_line: int | None = None) -> dict:
+        """Read one demo file -- a docs page or code -- with line numbers.
+
+        path comes from list_demo_files or search_demos (a leading
+        "hwdesign/", as the docs write paths, is accepted).  At most 400 lines
+        come back per call: when truncated is true, call again with
+        start_line = end_line + 1.  A docs page lists the code it cites in
+        cites; demos says which demos the file belongs to.  Give the student
+        view_url (a docs page as published) or source_url (the exact lines on
+        GitHub).
+        """
+        log_call("get_demo_file", course=course_id, path=path)
+        snapshot, index = require_demos(course_id)
+        try:
+            result = snapshot.read(path, start_line, end_line)
+        except CodeError as exc:
+            raise ToolError(str(exc)) from exc
+        result["demos"] = index.demos_for_path(result["path"])
+        if result["kind"] == "doc":
+            result["cites"] = index.doc_cites.get(result["path"], [])
+        return result
+
+    @mcp.tool()
+    def search_demos(course_id: str, query: str, demo: str | None = None,
+                     kind: str | None = None) -> dict:
+        """Find a word, identifier or phrase in the demo code and docs pages.
+
+        A literal, case-insensitive search -- not a regex, and not by meaning
+        -- so search for exact identifiers (s_axilite, ap_ctrl_none,
+        always_ff) or a short phrase, and try other terms if it misses.
+        Docs pages come first, then hand-written source, scripts and
+        notebooks.  Neighbouring matches come back as one hit with a line
+        range.  Pass demo (from list_demos) to search one demo, or kind
+        ("code" or "doc").  more counts hits left out: narrow the search to
+        see them.
+        """
+        log_call("search_demos", course=course_id, demo=demo, kind=kind)  # not the query
+        snapshot, index = require_demos(course_id)
+        if kind is not None and kind not in ("code", "doc"):
+            raise ToolError("kind must be 'code' or 'doc'.")
+        paths = set(index.files_of(require_demo(index, demo), snapshot)) if demo else None
+        try:
+            return snapshot.search(query, paths=paths, kind=kind,
+                                   demos_for=index.demos_for_path)
+        except CodeError as exc:
+            raise ToolError(str(exc)) from exc

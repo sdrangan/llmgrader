@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- demos/demos.xml: corrections to the demo links the course MCP derives on
+     its own.  Optional, and meant to stay short.
+
+     The portal works out each demo (a docs topic folder plus the code its
+     pages cite, or a code directory nothing documents) and which slides
+     and units go with it, from the references slides and docs pages already
+     make.  This file only says what those references cannot: a unit for a
+     demo no slide cites, a description for a code-only demo, a wrong link
+     to drop, a directory that is not a demo.  It lives in the demo repo, so
+     a change reaches students on the next sync, without a package rebuild.
+     See plans/demo_code_mcp.md, decision 3. -->
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" elementFormDefault="qualified">
+
+  <!-- A demo id as the portal derives it: a docs topic folder or a code
+       directory name. -->
+  <xs:simpleType name="demoId">
+    <xs:restriction base="xs:string">
+      <xs:pattern value="[A-Za-z0-9_][A-Za-z0-9_.\-]{0,63}"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <!-- A deck id from llmgrader_mcp_config.xml. -->
+  <xs:simpleType name="deckId">
+    <xs:restriction base="xs:string">
+      <xs:pattern value="[a-z0-9][a-z0-9_-]{0,63}"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <!-- Slides of one deck that go with the demo.  Without first, the deck's
+       unit alone. -->
+  <xs:complexType name="slidesType">
+    <xs:attribute name="deck" type="deckId" use="required"/>
+    <xs:attribute name="first" type="xs:positiveInteger" use="optional"/>
+    <xs:attribute name="last" type="xs:positiveInteger" use="optional"/>
+  </xs:complexType>
+
+  <!-- Drop every automatic link to one deck: its slides and its unit. -->
+  <xs:complexType name="notSlidesType">
+    <xs:attribute name="deck" type="deckId" use="required"/>
+  </xs:complexType>
+
+  <xs:complexType name="demoType">
+    <xs:sequence>
+      <xs:element name="description" type="xs:string" minOccurs="0"/>
+      <xs:choice minOccurs="0" maxOccurs="unbounded">
+        <!-- A unit <name> from llmgrader_config.xml. -->
+        <xs:element name="unit" type="xs:string"/>
+        <xs:element name="slides" type="slidesType"/>
+        <xs:element name="not_slides" type="notSlidesType"/>
+      </xs:choice>
+    </xs:sequence>
+    <xs:attribute name="id" type="demoId" use="required"/>
+    <xs:attribute name="title" type="xs:string" use="optional"/>
+  </xs:complexType>
+
+  <!-- Leave a demo out of list_demos.  Its files stay searchable. -->
+  <xs:complexType name="hideType">
+    <xs:attribute name="id" type="demoId" use="required"/>
+  </xs:complexType>
+
+  <xs:element name="demos">
+    <xs:complexType>
+      <xs:choice minOccurs="0" maxOccurs="unbounded">
+        <xs:element name="demo" type="demoType"/>
+        <xs:element name="hide" type="hideType"/>
+      </xs:choice>
+    </xs:complexType>
+  </xs:element>
+</xs:schema>

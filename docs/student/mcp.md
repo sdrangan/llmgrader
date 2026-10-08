@@ -14,6 +14,7 @@ up the course material for itself, so you can ask it things like:
 - *Help me with the problem on the bouncing ball.*
 - *Give me a similar problem to practice on.*
 - *Where is this described in the class slides?*
+- *Show me how the class demo declares AXI4-Lite registers.*
 
 and it answers from this course's actual questions and slides, not from whatever
 it remembers about the topic in general.
@@ -49,6 +50,9 @@ Once connected, your assistant can:
 - **read the worked solution**, to check your reasoning or give you a hint;
 - **find where a topic is taught in the lecture slides**, and look at a slide
   -- its image, its text and the instructor's speaker notes;
+- **read the class demos** -- their code and the docs pages that walk through
+  them -- search them for a pragma or a signal name, and give you a link to the
+  exact lines, when your instructor publishes them;
 - **read past exams** your instructor has published, with their rubrics and
   solutions, and your instructor's description of what this term's exams are
   like -- so it can write practice problems in the style of the real exam.
@@ -66,10 +70,12 @@ most from it, try asking things like:
 - *"Give me a hint for part (b), not the answer."*
 - *"Give me a similar problem, then check my answer."*
 - *"Which slide explains this? Show me."*
+- *"Which demo shows how to write a testbench for this? Link me to the lines."*
 - *"Give me a midterm-style problem on FSMs, like the past midterm."*
 
 Nothing you do through the MCP is graded. The portal counts its use
-anonymously -- which problems and slides are looked at, and how often -- so
+anonymously -- which problems, slides and demo files are looked at, and how
+often -- so
 your instructor can see what helps. It never records your name, your
 questions or what your assistant says to you.
 

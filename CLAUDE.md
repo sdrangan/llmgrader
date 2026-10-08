@@ -274,6 +274,30 @@ The Analytics routes take `db=grade|mcp` (default `grade`, anything else
 refused) and open the file read-only. Presets live in `static/js/analytics.js`;
 the UI suite runs each one, since nothing else parses them.
 
+### Demo code in the MCP
+
+`coursemcp/code.py` + `coursemcp/demo_links.py` serve a course's demo repo
+(`<code>` in `llmgrader_mcp_config.xml`: a public GitHub repo and the
+`<include>` paths) through `list_demos`, `list_demo_files`, `get_demo_file`
+and `search_demos`, only when `LLMGRADER_MCP_CODE` is set. Only the pointer is
+packaged; the portal keeps a shallow, sparse, partial clone under
+`<storage>/courses/<id>/code/mirror` and serves an immutable in-memory
+`CodeSnapshot` built from it, so readers take no lock and a sync swaps the
+snapshot in one assignment.
+
+**No request waits on GitHub.** `CodeLibrary.warm()` runs on every `/mcp`
+POST; a copy older than the TTL is refreshed on a background thread while the
+call is answered from the copy in hand, and a failed sync keeps the last good
+one. Only a course with no copy at all waits, for `FIRST_FETCH_WAIT_S`. Tests
+reach git through `code.run_git` and `code.remote_url`, which they patch.
+
+Which demo is which, and its slides and unit, is derived each sync from paths
+and links already in the slides and docs pages (`build_index`); an optional
+`demos/demos.xml` in the demo repo corrects it, and a commit whose overrides
+file fails `llmgrader_demos.xsd` is not served. `llmgrader_mcp_build --links`
+prints the same graph from a local checkout. See `plans/demo_code_mcp.md` and
+`docs/admin/mcp/code.md`.
+
 ### Course content format
 
 Courses are defined as **XML files** validated against `llmgrader/schemas/unit.xsd` (questions/solutions/rubrics) and `llmgrader/schemas/llmgrader_config.xsd` (course metadata and unit references). `UnitParser` handles schema validation, CDATA cleaning, and line-number mapping for error reporting.

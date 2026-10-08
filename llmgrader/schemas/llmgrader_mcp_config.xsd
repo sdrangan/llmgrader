@@ -80,6 +80,66 @@
     </xs:simpleContent>
   </xs:complexType>
 
+  <!-- A path inside the demo repo: no leading slash, no "..", no drive. -->
+  <xs:simpleType name="repoPath">
+    <xs:restriction base="xs:string">
+      <xs:pattern value="[A-Za-z0-9_][A-Za-z0-9_.\-]*(/[A-Za-z0-9_][A-Za-z0-9_.\-]*)*"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <!-- One subtree of the demo repo to publish.  kind="doc" for Markdown
+       pages (only .md files are served from it), code otherwise. -->
+  <xs:complexType name="codeIncludeType">
+    <xs:attribute name="path" type="repoPath" use="required"/>
+    <xs:attribute name="kind" use="optional" default="code">
+      <xs:simpleType>
+        <xs:restriction base="xs:string">
+          <xs:enumeration value="code"/>
+          <xs:enumeration value="doc"/>
+        </xs:restriction>
+      </xs:simpleType>
+    </xs:attribute>
+  </xs:complexType>
+
+  <!-- A public GitHub repo whose demo code and docs the MCP serves, kept in
+       sync with the branch rather than built into the package: only the
+       <include> paths are fetched or served, minus build output, binaries,
+       generated Tcl and anything an <exclude> glob matches (relative to the
+       repo root; a glob without "/" matches file names).  site is where the
+       docs are published; by default it is read from the repo's
+       _config.yml.  links names the overrides file (default
+       demos/demos.xml).  root names a <root> holding a local checkout, for
+       the build's link report.  See plans/demo_code_mcp.md. -->
+  <xs:complexType name="codeType">
+    <xs:sequence>
+      <xs:element name="include" type="codeIncludeType" maxOccurs="unbounded"/>
+      <xs:element name="exclude" type="xs:string" minOccurs="0" maxOccurs="unbounded"/>
+    </xs:sequence>
+    <xs:attribute name="repo" use="required">
+      <xs:simpleType>
+        <xs:restriction base="xs:string">
+          <xs:pattern value="https://github\.com/[A-Za-z0-9_.\-]+/[A-Za-z0-9_.\-]+/?"/>
+        </xs:restriction>
+      </xs:simpleType>
+    </xs:attribute>
+    <xs:attribute name="branch" use="optional" default="main">
+      <xs:simpleType>
+        <xs:restriction base="xs:string">
+          <xs:pattern value="[A-Za-z0-9_][A-Za-z0-9_.\-/]*"/>
+        </xs:restriction>
+      </xs:simpleType>
+    </xs:attribute>
+    <xs:attribute name="site" use="optional">
+      <xs:simpleType>
+        <xs:restriction base="xs:string">
+          <xs:pattern value="https?://[^\s]+"/>
+        </xs:restriction>
+      </xs:simpleType>
+    </xs:attribute>
+    <xs:attribute name="links" type="repoPath" use="optional"/>
+    <xs:attribute name="root" type="idType" use="optional"/>
+  </xs:complexType>
+
   <xs:element name="llmgrader_mcp">
     <xs:complexType>
       <xs:sequence>
@@ -119,6 +179,7 @@
             </xs:sequence>
           </xs:complexType>
         </xs:element>
+        <xs:element name="code" type="codeType" minOccurs="0"/>
       </xs:sequence>
     </xs:complexType>
     <xs:unique name="uniqueDeckId">

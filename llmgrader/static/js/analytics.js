@@ -416,6 +416,17 @@ ORDER BY views DESC
 `.trim()
         },
         {
+            label: "Demos: calls by demo and file",
+            sql: `
+SELECT course_id, demo, path, tool, COUNT(*) AS calls
+FROM mcp_calls
+WHERE tool IN ('list_demos', 'list_demo_files', 'get_demo_file', 'search_demos')
+  AND status = 'ok'${course("AND")}
+GROUP BY course_id, demo, path, tool
+ORDER BY calls DESC
+`.trim()
+        },
+        {
             label: "Searches that found nothing",
             sql: `
 SELECT substr(ts, 1, 10) AS day, COUNT(*) AS searches,

@@ -233,7 +233,7 @@ def test_build_uses_the_pdf_only_when_it_matches_the_deck(tmp_path, pages, expec
     deck = json.loads((package / "mcp_materials" / "slides" / "d" / "deck.json").read_text())
     assert deck["title"] == "First Title"  # from the title slide, soft break removed
     assert deck["slides"][1] == {"n": 2, "title": "Second", "text": "Body of Second",
-                                 "notes": "Notes for Second",
+                                 "notes": "Notes for Second", "links": [],
                                  "image": "slide-002.jpg" if expect_images else None,
                                  "description": ""}
     jpgs = sorted(p.name for p in (package / "mcp_materials" / "slides" / "d").glob("*.jpg"))

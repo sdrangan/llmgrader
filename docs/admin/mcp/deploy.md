@@ -45,6 +45,7 @@ In the Render dashboard, open your portal's web service, go to
 | --- | --- | --- |
 | `LLMGRADER_MCP_ENABLED` | `1` | Serves the course MCP at `/mcp`. Off when unset. |
 | `LLMGRADER_MCP_TOKEN` | the token from step 1 | **Optional.** When set, required on every MCP request. Unset, the MCP is open. |
+| `LLMGRADER_MCP_CODE` | `1` | **Optional.** Serves the demo code tools, for a course whose package points at a demo repository. See [Demo Code and Docs](./code.md). |
 
 Save. Render redeploys the service. When it starts, the deploy log shows one of:
 
@@ -107,7 +108,9 @@ curl -s -X POST https://<portal>/mcp \
 
 A working server replies with JSON listing its tools: `list_courses`,
 `list_units`, `list_questions`, `get_question`, `get_rubric`, `get_solution`,
-`list_materials`, `get_outline`, `search_slides` and `get_slide`.
+`list_materials`, `get_outline`, `search_slides` and `get_slide` -- and, with
+`LLMGRADER_MCP_CODE` set, `list_demos`, `list_demo_files`, `get_demo_file` and
+`search_demos`.
 
 | Reply | Meaning |
 | --- | --- |
@@ -167,19 +170,22 @@ Read it in **Analytics ▸ MCP DB** ([MCP usage](../../analytics/mcp_usage.md)).
 
 - when, which tool, and whether it succeeded, failed or was refused;
 - the course, unit, question, deck and slide asked about -- as the tool
-  resolved them, so *"unit 2"* is recorded as the unit's real name;
+  resolved them, so *"unit 2"* is recorded as the unit's real name -- and the
+  demo and demo file;
 - how big the answer was: its size in bytes, how many items a list held, how
   many images it carried;
 - which kind of assistant made the call -- `claude.ai`, `vscode`,
   `claude-code` or `other` -- and the MCP protocol version;
 - an anonymous session id, so calls from one chat can be grouped (below);
 - the version of the course package that answered (see
-  [package versions](./package.md#package-versions)).
+  [package versions](./package.md#package-versions)), and for a demo call, the
+  commit of the demo repository that answered.
 
 **Never recorded:**
 
-- **the student's words.** A slide search is recorded with its query replaced
-  by `<redacted>`; it is the only tool that takes free text.
+- **the student's words.** A slide or demo search is recorded with its query
+  replaced by `<redacted>`; the two searches are the only tools that take free
+  text.
 - **who the student is.** No name, email, IP address or browser string. The
   MCP has no sign-in, so there is no identity to record; with a course token
   set, every student sends the same token, and it is not recorded either.
@@ -206,8 +212,8 @@ Before…** (MCP DB only). Grades are never touched by it.
 
 - **What is logged.** Besides the usage database, one log line per tool call:
   the tool, the course, and the unit, question, deck or slide asked about --
-  never the student's words. A slide search logs its course and unit, not its
-  query.
+  never the student's words. A slide search logs its course and unit, and a
+  demo search its course and demo, not the query.
 - **`/mcp` is not behind Google sign-in.** MCP requests go to the MCP directly,
   not through the portal's login; the token is what protects it.
 - **A bad token gets 403, not 401.** A 401 would make claude.ai start an OAuth
