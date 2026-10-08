@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!-- llmgrader_mcp_config.xml: the course material the course MCP publishes
-     beyond the grading package: today, lecture slide decks.
+     beyond the grading package: lecture slide decks, units the portal does not
+     serve (past exams), and descriptions of each kind of unit.
 
      It sits beside llmgrader_config.xml, and create_soln_pkg builds what it
      lists into the course package (mcp_materials/), so one upload still
@@ -43,6 +44,42 @@
     </xs:simpleContent>
   </xs:complexType>
 
+  <!-- A unit published to the course MCP only: the element text is its unit
+       XML file, relative to this file (or to root).  The portal never sees
+       it, so it must not also be in llmgrader_config.xml.  Its figures
+       follow the portal convention: an images/ folder beside the file,
+       referenced as /pkg_assets/<file stem>_images/<file>.  name defaults to
+       the unit's title attribute; section groups it in list_units.  See
+       plans/exam_units.md, decision 2. -->
+  <xs:complexType name="mcpUnitType">
+    <xs:simpleContent>
+      <xs:extension base="xs:string">
+        <xs:attribute name="name" type="xs:string" use="optional"/>
+        <xs:attribute name="section" type="xs:string" use="optional"/>
+        <xs:attribute name="root" type="idType" use="optional"/>
+      </xs:extension>
+    </xs:simpleContent>
+  </xs:complexType>
+
+  <!-- The same key as unit_type on a unit (unit.xsd). -->
+  <xs:simpleType name="unitTypeId">
+    <xs:restriction base="xs:string">
+      <xs:pattern value="[a-z][a-z0-9_-]*"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <!-- What a kind of unit is like, for a student's assistant: the element
+       text is the description ("closed book, five minutes a problem").  It
+       changes each term; the past units of that type do not. -->
+  <xs:complexType name="unitTypeType">
+    <xs:simpleContent>
+      <xs:extension base="xs:string">
+        <xs:attribute name="id" type="unitTypeId" use="required"/>
+        <xs:attribute name="title" type="xs:string" use="optional"/>
+      </xs:extension>
+    </xs:simpleContent>
+  </xs:complexType>
+
   <xs:element name="llmgrader_mcp">
     <xs:complexType>
       <xs:sequence>
@@ -68,10 +105,28 @@
             </xs:sequence>
           </xs:complexType>
         </xs:element>
+        <xs:element name="units" minOccurs="0">
+          <xs:complexType>
+            <xs:sequence>
+              <xs:element name="unit" type="mcpUnitType" maxOccurs="unbounded"/>
+            </xs:sequence>
+          </xs:complexType>
+        </xs:element>
+        <xs:element name="unit_types" minOccurs="0">
+          <xs:complexType>
+            <xs:sequence>
+              <xs:element name="unit_type" type="unitTypeType" maxOccurs="unbounded"/>
+            </xs:sequence>
+          </xs:complexType>
+        </xs:element>
       </xs:sequence>
     </xs:complexType>
     <xs:unique name="uniqueDeckId">
       <xs:selector xpath="slides/deck"/>
+      <xs:field xpath="@id"/>
+    </xs:unique>
+    <xs:unique name="uniqueUnitTypeId">
+      <xs:selector xpath="unit_types/unit_type"/>
       <xs:field xpath="@id"/>
     </xs:unique>
     <xs:unique name="uniqueRootId">

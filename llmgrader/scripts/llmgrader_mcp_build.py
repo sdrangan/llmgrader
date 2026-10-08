@@ -1,4 +1,4 @@
-"""llmgrader_mcp_build: build the course MCP's slide material into a package.
+"""llmgrader_mcp_build: build the course MCP's material into a package.
 
     llmgrader_mcp_build --dry-run                       # list what would be published
     llmgrader_mcp_build --package soln_package          # build into an extracted package
@@ -41,6 +41,8 @@ from llmgrader.coursemcp.materials import (
     load_descriptions,
     plan_descriptions,
     read_config,
+    read_unit_types,
+    read_units,
     sync_descriptions,
 )
 
@@ -155,11 +157,19 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"      {spec.pptx}")
                 if spec.pdf:
                     print(f"      {spec.pdf}")
+            units = read_units(args.config, parse_roots(args.root))
+            if units:
+                print(f"Would publish {len(units)} unit(s) to the MCP only:")
+                for unit in units:
+                    print(f"  [{unit.name}]" + (f" section={unit.section!r}" if unit.section else ""))
+                    print(f"      {unit.path}")
             print("\nNothing else from these repositories is published.")
             return 0
-        print(f"Building slide material into {args.package}:")
+        print(f"Building course MCP material into {args.package}:")
         build_materials(specs, args.package,
-                        descriptions=load_descriptions(descriptions_dir(args.config)))
+                        descriptions=load_descriptions(descriptions_dir(args.config)),
+                        units=read_units(args.config, parse_roots(args.root)),
+                        unit_types=read_unit_types(args.config))
     except MaterialsError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1

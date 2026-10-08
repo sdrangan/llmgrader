@@ -195,6 +195,24 @@ can still practise a past exam through their assistant, which reads the rubric.
 Portal grading of exam units -- unlisted, reachable by link -- is a later
 decision.
 
+## Status
+
+Phases 1 to 3 are built (branch `feature/exam-units`), with their part of
+phase 6: `docs/admin/mcp/units.md`, the `<unit>` table in
+`docs/admin/buildcourse/unitxml.md`, and the tool tables in the MCP overview,
+developer and student pages. Choices the plan left open:
+
+- An MCP-only unit's name is `name=` on its `<unit>` entry, else the unit's
+  `title`. A name the portal already uses is a build error, like a file in
+  both configs.
+- Its figures are rewritten at build time from `/pkg_assets/<stem>_images/`
+  to `/pkg_assets/mcp_materials/units/<stem>_images/`, where the build puts
+  them, so the author writes the portal convention and nothing downstream
+  needs to know.
+- `list_unit_types` also lists a type that is described but has no unit yet
+  (a `final` description before any past final exists).
+- `list_units` gives `semester` only when it is set.
+
 ## Phases
 
 1. **Unit attributes.** `unit_type` and `semester` in `unit.xsd`, parsed by

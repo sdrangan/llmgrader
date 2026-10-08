@@ -1,7 +1,8 @@
 """Course content shaped for a student's AI: lookups, text and figures.
 
-Plain functions over a ``Grader``'s loaded units, kept apart from the MCP
-tool definitions so they can be tested without a server.
+Plain functions over a ``Grader``'s loaded units -- and the units the
+course publishes to the MCP alone -- kept apart from the MCP tool definitions
+so they can be tested without a server.
 
 Every result here is bounded by construction (``plans/course_mcp.md``
 decision 3): an index entry carries a short label rather than the question
@@ -18,6 +19,9 @@ import re
 from dataclasses import dataclass
 
 from mcp.server.mcpserver.exceptions import ToolError
+
+from llmgrader.coursemcp.materials import load_materials
+from llmgrader.services.unit_parser import DEFAULT_UNIT_TYPE
 
 # A figure larger than this is described rather than sent.  Tool results are
 # context: one oversized image can exhaust a client's window on its own.
@@ -43,10 +47,58 @@ class Figure:
 # ---------------------------------------------------------------------------
 
 
+@dataclass
+class CourseUnits:
+    """Every unit the MCP serves: the portal's, then the MCP-only ones.
+
+    ``order`` is list_units' sequence of section headings and units;
+    ``units`` maps a unit name to its questions, as ``Grader.units`` does;
+    ``meta`` maps it to ``unit_type`` and ``semester``.
+    """
+    units: dict
+    order: list[dict]
+    meta: dict
+
+
+def course_units(grader) -> CourseUnits:
+    """The portal's units in teaching order, then the MCP-only units.
+
+    plans/exam_units.md, decision 3: every content tool looks units up here,
+    so an exam the portal never lists is, to the assistant, one more unit.
+    The MCP-only ones are parsed once per package (``Materials``).
+    """
+    units = dict(grader.units)
+    order = [dict(item) for item in grader.units_order]
+    if not any(item["type"] == "unit" for item in order):
+        order += [{"type": "unit", "name": name} for name in grader.units]
+    meta = {name: dict(grader.unit_metadata.get(name, {})) for name in units}
+
+    materials = load_materials(grader.soln_pkg)
+    if materials is not None and materials.units:
+        parsed, parsed_meta = materials.parsed_units(
+            scratch_dir=grader.scratch_dir, course_id=grader.course_id)
+        section = None
+        for entry in materials.units:
+            name = entry["name"]
+            # The build refuses a name the portal uses; should a package
+            # disagree, the portal's unit keeps it.
+            if name not in parsed or name in units:
+                continue
+            if entry.get("section") and entry["section"] != section:
+                order.append({"type": "section", "name": entry["section"]})
+            section = entry.get("section")
+            order.append({"type": "unit", "name": name})
+            units[name] = parsed[name]
+            meta[name] = parsed_meta.get(name, {})
+    for name in meta:
+        meta[name].setdefault("unit_type", DEFAULT_UNIT_TYPE)
+        meta[name].setdefault("semester", "")
+    return CourseUnits(units, order, meta)
+
+
 def unit_names(grader) -> list[str]:
-    """The course's unit names in teaching order."""
-    names = [item["name"] for item in grader.units_order if item["type"] == "unit"]
-    return names or list(grader.units)
+    """The course's unit names in the order list_units gives them."""
+    return [item["name"] for item in course_units(grader).order if item["type"] == "unit"]
 
 
 def resolve_unit(grader, unit: str) -> str:
@@ -56,10 +108,11 @@ def resolve_unit(grader, unit: str) -> str:
     carry double spaces ("Unit 2:  Sequential Logic"), which an AI will not
     reproduce reliably.
     """
-    if unit in grader.units:
+    units = course_units(grader).units
+    if unit in units:
         return unit
     wanted = _WS_RE.sub(" ", unit).strip().lower()
-    for name in grader.units:
+    for name in units:
         if _WS_RE.sub(" ", name).strip().lower() == wanted:
             return name
     raise ToolError(
@@ -71,7 +124,7 @@ def resolve_unit(grader, unit: str) -> str:
 def resolve_question(grader, unit: str, qtag: str) -> tuple[str, str, dict]:
     """``(unit_name, qtag, question)``, or a ToolError listing valid qtags."""
     unit_name = resolve_unit(grader, unit)
-    questions = grader.units[unit_name]
+    questions = course_units(grader).units[unit_name]
     if qtag in questions:
         return unit_name, qtag, questions[qtag]
     wanted = qtag.strip().lower()

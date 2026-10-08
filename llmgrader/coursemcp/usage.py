@@ -35,7 +35,7 @@ from datetime import datetime, timezone
 
 # Arguments that name course content.  Kept, and the resolved forms of
 # unit/qtag/deck/slide go in their own columns.
-IDENTIFIER_ARGUMENTS = frozenset({"course_id", "unit", "qtag", "deck", "slide"})
+IDENTIFIER_ARGUMENTS = frozenset({"course_id", "unit", "unit_type", "qtag", "deck", "slide"})
 
 # Arguments that carry the student's own words.  Never recorded.
 REDACTED_ARGUMENTS = frozenset({"query"})

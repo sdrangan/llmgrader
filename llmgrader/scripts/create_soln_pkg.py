@@ -210,19 +210,23 @@ def main():
             print(f"  Destination: {destination_rel.as_posix()}")
             print()
 
-    # Course MCP material (lecture slides), when the course publishes any.
+    # Course MCP material (lecture slides, MCP-only units such as past
+    # exams), when the course publishes any.
     # Built into the package so one upload carries it.
     mcp_config = config_dir / 'llmgrader_mcp_config.xml'
     if mcp_config.exists():
         from llmgrader.coursemcp.materials import (
-            MaterialsError, build_materials, descriptions_dir, load_descriptions, read_config)
+            MaterialsError, build_materials, descriptions_dir, load_descriptions, read_config,
+            read_unit_types, read_units)
         print(f"Building course MCP material from {mcp_config.name}:")
         try:
             # Slide descriptions are read from the cache llmgrader_mcp_build
             # --describe writes; this build itself never calls a model.
             decks = read_config(mcp_config)
+            mcp_units = read_units(mcp_config)
             build_materials(decks, output_dir,
-                            descriptions=load_descriptions(descriptions_dir(mcp_config)))
+                            descriptions=load_descriptions(descriptions_dir(mcp_config)),
+                            units=mcp_units, unit_types=read_unit_types(mcp_config))
         except (MaterialsError, ImportError) as exc:
             print(f"Error: {exc}")
             if isinstance(exc, ImportError):
@@ -230,6 +234,7 @@ def main():
             return 1
         inputs += [mcp_config, descriptions_dir(mcp_config)]
         inputs += [path for deck in decks for path in (deck.pptx, deck.pdf) if path]
+        inputs += [path for unit in mcp_units for path in (unit.path, unit.images) if path]
         print()
 
     # Version the package, last, so the hash covers everything above.
