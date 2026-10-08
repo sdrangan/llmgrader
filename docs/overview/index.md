@@ -11,8 +11,9 @@ LLM Grader is designed to make open-ended technical assessment more practical fo
 
 This is especially useful for courses where traditional autograders are too rigid. Instead of grading only exact numeric answers or fixed code outputs, LLM Grader is built to evaluate multi-step reasoning, derivations, design choices, partial progress, and explanation quality.
 
-This chapter provides details into three subjects:
+This chapter provides details into four subjects:
 
 - [Architecture and core components](./architecture.md)
 - [Academic integrity and learning philosophy](./academicintegrity.md)
 - [Data privacy](./dataprivacy.md)
+- [The course MCP](./mcp.md): publishing the course to students' own AI assistants, rather than building a tutor into the platform

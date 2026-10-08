@@ -19,8 +19,17 @@ The system is intentionally lightweight — a small core that instructors can un
 
 ---
 
+### Study With Your Own AI: the Course MCP
+
+LLM Grader also publishes each course as an **MCP server** that students connect to **the AI assistant they already use** — Claude, ChatGPT, GitHub Copilot. Their assistant can then list the course's problems, open one with its figures, read the rubric it is graded against, check the worked solution, and find where a topic is taught in the lecture slides, showing the student the slide itself.
+
+There is no tutor chat built into the portal, and nothing for the course to pay for: the reasoning runs on the student's own assistant, and the course provides what no AI vendor can — *this* course's material. Read [why the course MCP takes this approach](./overview/mcp.md), how students [connect their assistant](./student/mcp.md), and how instructors [publish a course](./admin/mcp/overview.md).
+
+---
+
 ### Core Capabilities
 
+- **A course MCP for students' own AI assistants**: problems, rubrics, worked solutions and lecture slides, published for the assistant the student already uses rather than through a built-in tutor.  
 - **Structured problem definitions** that capture instructor intent, reference solutions, rubrics, and grading notes across engineering domains.  
 - **Agent-assisted course building** through an MCP-based authoring workflow that can scan course materials, inspect example questions, draft XML, and validate the result before packaging.  
 - **LLM‑based evaluation** of student reasoning using OpenAI models, with optional tool‑assisted checks (Python execution, numeric verification, and web‑search‑augmented fact checking).  

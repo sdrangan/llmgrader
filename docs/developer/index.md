@@ -18,3 +18,4 @@ Use the links below to jump into the current developer topics:
 * [Developer set-up](./setup.md)
 * [Unit testing and CI/CD](./pytest.md)
 * [The model registry](./models.md) — adding or retiring a model
+* [How the course MCP works](./mcp.md) — the request path, the tools, the package build, and why it is not RAG
