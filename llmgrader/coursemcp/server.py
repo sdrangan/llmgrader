@@ -416,7 +416,9 @@ def _add_content_tools(mcp: MCPServer, require_course, public_url, code=None) ->
         instructor has generated them) descriptions of each slide's figures,
         best match first.  It matches words, not meanings, so if the first
         search misses, try the course's own terms and synonyms (e.g. "FSM",
-        "state machine", "next-state logic"), or browse get_outline.
+        "state machine", "next-state logic"), or browse get_outline.  An
+        identifier such as s_axilite or ap_ctrl_none matches whole, and a
+        slide that has it ranks first.
 
         A hit on a slide with an image carries view_url, a link the student
         can open to see it.
