@@ -125,11 +125,63 @@
     <xs:attribute name="preferred_model" type="xs:string" use="optional"/>
   </xs:complexType>
 
+  <!-- How a unit prints (plans/exam_units.md, decision 5): create_qfile
+       print renders one block.  The grader and the course MCP never read it.
+       Everything is optional; see docs/admin/buildcourse/print.md. -->
+  <xs:simpleType name="printId">
+    <xs:restriction base="xs:string">
+      <xs:pattern value="[a-z0-9][a-z0-9_-]*"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:complexType name="printFieldsType">
+    <xs:sequence>
+      <xs:element name="field" type="xs:string" maxOccurs="unbounded"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="printInstructionsType">
+    <xs:sequence>
+      <xs:element name="item" type="richTextType" maxOccurs="unbounded"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="titlePageType">
+    <xs:all>
+      <xs:element name="title" type="xs:string" minOccurs="0"/>
+      <xs:element name="course" type="xs:string" minOccurs="0"/>
+      <xs:element name="instructors" type="xs:string" minOccurs="0"/>
+      <xs:element name="date" type="xs:string" minOccurs="0"/>
+      <xs:element name="duration" type="xs:string" minOccurs="0"/>
+      <xs:element name="fields" type="printFieldsType" minOccurs="0"/>
+      <xs:element name="instructions" type="printInstructionsType" minOccurs="0"/>
+    </xs:all>
+  </xs:complexType>
+
+  <!-- One printed question, in printed order.  qtag must be a question of
+       this unit (checked by UnitParser, not here). -->
+  <xs:complexType name="printQuestionType">
+    <xs:attribute name="qtag" type="xs:string" use="required"/>
+    <xs:attribute name="answer_pages" type="xs:nonNegativeInteger" use="optional"/>
+  </xs:complexType>
+
+  <xs:complexType name="printType">
+    <xs:sequence>
+      <xs:element name="title_page" type="titlePageType" minOccurs="0"/>
+      <xs:element name="question" type="printQuestionType" minOccurs="0" maxOccurs="unbounded"/>
+    </xs:sequence>
+    <xs:attribute name="id" type="printId" use="required"/>
+    <xs:attribute name="answer_pages" type="xs:nonNegativeInteger" use="optional"/>
+    <xs:attribute name="page_per_question" type="trueFalseEnum" use="optional"/>
+  </xs:complexType>
+
   <xs:element name="unit">
     <xs:complexType>
       <xs:sequence>
         <xs:element name="digitalsign" type="trueFalseEnum" minOccurs="0"/>
         <xs:element name="question" type="questionType" minOccurs="0" maxOccurs="unbounded"/>
+        <!-- After every question, so the questions stay contiguous. -->
+        <xs:element name="print" type="printType" minOccurs="0" maxOccurs="unbounded"/>
       </xs:sequence>
       <xs:attribute name="id" type="xs:string" use="optional"/>
       <xs:attribute name="title" type="xs:string" use="optional"/>
@@ -141,5 +193,9 @@
       <!-- When past material was given, as free text ("Spring 2026"). -->
       <xs:attribute name="semester" type="xs:string" use="optional"/>
     </xs:complexType>
+    <xs:unique name="uniquePrintId">
+      <xs:selector xpath="print"/>
+      <xs:field xpath="@id"/>
+    </xs:unique>
   </xs:element>
 </xs:schema>

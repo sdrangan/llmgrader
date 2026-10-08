@@ -433,7 +433,31 @@ class UnitParser:
                         f"{unit_path}: {question_path}: rubric_total 'sum_positive' requires positive rubric items for part '{part_label}' to sum to {max_points}, but found {positive_sum}."
                     )
 
+        validation_errors.extend(cls._validate_print_blocks(unit_path, root))
         return validation_errors
+
+    @staticmethod
+    def _validate_print_blocks(unit_path: str, root: ET.Element) -> list[str]:
+        """A <print> block may list only this unit's questions, each once.
+
+        The schema cannot see across elements, and an unknown qtag would
+        otherwise drop a question from the printed exam without a word.
+        """
+        errors = []
+        qtags = {(q.get("qtag") or "").strip() for q in root.findall("question")}
+        for block in root.findall("print"):
+            block_id = block.get("id") or ""
+            seen: set[str] = set()
+            for entry in block.findall("question"):
+                qtag = (entry.get("qtag") or "").strip()
+                if qtag not in qtags:
+                    errors.append(f"{unit_path}: /unit/print[@id='{block_id}']: "
+                                  f"question '{qtag}' is not a question in this unit.")
+                elif qtag in seen:
+                    errors.append(f"{unit_path}: /unit/print[@id='{block_id}']: "
+                                  f"question '{qtag}' is listed twice.")
+                seen.add(qtag)
+        return errors
 
     @classmethod
     def _validate_unit_authoring_conventions(
