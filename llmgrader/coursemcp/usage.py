@@ -34,8 +34,10 @@ import secrets
 from datetime import datetime, timezone
 
 # Arguments that name course content.  Kept, and the resolved forms of
-# unit/qtag/deck/slide go in their own columns.
-IDENTIFIER_ARGUMENTS = frozenset({"course_id", "unit", "unit_type", "qtag", "deck", "slide"})
+# unit/qtag/deck/slide/demo/path go in their own columns.  kind and the line
+# numbers are a demo tool's choice of view, not student text.
+IDENTIFIER_ARGUMENTS = frozenset({"course_id", "unit", "unit_type", "qtag", "deck", "slide",
+                                  "demo", "path", "kind", "start_line", "end_line"})
 
 # Arguments that carry the student's own words.  Never recorded.
 REDACTED_ARGUMENTS = frozenset({"query"})
@@ -137,7 +139,7 @@ def _request_fields(message: dict, environ) -> dict:
         row["tool"] = str(params.get("name") or "")[:100] or None
         row["args_json"] = json.dumps(args, ensure_ascii=False, sort_keys=True)
         row["course_id"] = args.get("course_id") if isinstance(args.get("course_id"), str) else None
-        for key in ("unit", "qtag", "deck"):
+        for key in ("unit", "qtag", "deck", "demo", "path"):
             if isinstance(args.get(key), str):
                 row[key] = args[key]
         if isinstance(args.get("slide"), int) and not isinstance(args.get("slide"), bool):
@@ -197,15 +199,22 @@ def _apply_response(row: dict, response, status_code: int) -> None:
     payload = _payload_of(result)
     if isinstance(payload, list):
         row["result_items"] = len(payload)
-        # A list asked for one unit (or deck) resolved it: every item names it.
-        for key in ("unit", "deck"):
+        # A list asked for one unit (or deck, or demo) resolved it: every item
+        # names it.
+        for key in ("unit", "deck", "demo"):
             values = {item.get(key) for item in payload if isinstance(item, dict)}
             if row.get(key) and len(values) == 1 and None not in values:
                 row[key] = str(values.pop())[:MAX_ARG_CHARS]
     elif isinstance(payload, dict):
-        for key in ("unit", "qtag", "deck"):
+        for key in ("unit", "qtag", "deck", "path"):
             if isinstance(payload.get(key), str):
                 row[key] = payload[key][:MAX_ARG_CHARS]
+        # A demo file names the demos it belongs to; a search, its hits.
+        demos = payload.get("demos")
+        if not row.get("demo") and isinstance(demos, list) and demos and isinstance(demos[0], str):
+            row["demo"] = demos[0][:MAX_ARG_CHARS]
+        if isinstance(payload.get("hits"), list):
+            row["result_items"] = len(payload["hits"])
         if isinstance(payload.get("slide"), int):
             row["slide"] = payload["slide"]
 

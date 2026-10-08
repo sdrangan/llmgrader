@@ -54,6 +54,16 @@ NOT_POST_MESSAGE = (
 
 
 TOKEN_ENV = "LLMGRADER_MCP_TOKEN"
+
+# The demo tools (plans/demo_code_mcp.md) are served only with this set: a
+# new thing served from the portal process ships behind a switch, so that
+# unsetting it is the rollback.
+CODE_ENV = "LLMGRADER_MCP_CODE"
+DEMO_TOOLS = frozenset({"list_demos", "list_demo_files", "get_demo_file", "search_demos"})
+
+
+def code_enabled() -> bool:
+    return os.environ.get(CODE_ENV, "").strip().lower() in {"1", "true", "yes"}
 MIN_TOKEN_CHARS = 16
 
 
@@ -116,6 +126,12 @@ class CourseMCPRunner:
         self._pid: int | None = None
         self._wsgi = None
         self._loop: asyncio.AbstractEventLoop | None = None
+        # Each course's copy of its demo repo.  Creating it starts nothing:
+        # the copy is loaded, and synced on a thread, on the first request.
+        self.code = None
+        if code_enabled():
+            from llmgrader.coursemcp.code import CodeLibrary
+            self.code = CodeLibrary(registry)
 
     def _running_here(self) -> bool:
         return (
@@ -126,7 +142,7 @@ class CourseMCPRunner:
 
     def _start(self) -> None:
         mcp = build_course_mcp(self.registry, content=True,
-                               public_url=lambda: self.public_url)
+                               public_url=lambda: self.public_url, code=self.code)
         asgi_app = mcp.streamable_http_app(  # creates mcp.session_manager
             # Mounted at /mcp by the dispatcher, so the app serves its root.
             streamable_http_path="/",
@@ -212,6 +228,7 @@ class CourseMCPRunner:
             start_response("403 Forbidden", [("Content-Type", "application/json")])
             return _Recorded([refusal], lambda: self._record(
                 body, environ, 403, refusal, started, refused=True))
+        self._warm_code()
         try:
             mcp_wsgi = self.wsgi()
         except Exception as exc:
@@ -291,9 +308,24 @@ class CourseMCPRunner:
             for row in build_rows(body, environ, status_code, response_body, duration_ms,
                                   refused=refused):
                 row["package_version"] = self._package_version(row.get("course_id"))
+                if self.code is not None and row.get("tool") in DEMO_TOOLS:
+                    row["code_version"] = self.code.code_version(row.get("course_id"))
                 self.usage.record(row)
         except Exception as exc:
             print(f"[McpUsage] Could not record a call: {exc!r}")
+
+    def _warm_code(self) -> None:
+        """Load each course's demo copy, and refresh a stale one on a thread.
+
+        Any request does it, so a session's first calls warm the copy before
+        a demo question.  Never waits on GitHub, and never fails a request.
+        """
+        if self.code is None:
+            return
+        try:
+            self.code.warm()
+        except Exception as exc:
+            print(f"[CourseCode] Could not check the demo copies: {exc!r}")
 
     def _package_version(self, course_id):
         if not isinstance(course_id, str) or self.registry.get(course_id) is None:

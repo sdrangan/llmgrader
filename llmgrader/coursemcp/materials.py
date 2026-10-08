@@ -213,6 +213,39 @@ def read_unit_types(config_path: str | Path) -> list[dict]:
     ]
 
 
+@dataclass
+class CodeSpec:
+    """``<code>`` as the manifest carries it, and the local checkout, if a
+    ``root=`` names one, for the build's link report."""
+    config: dict
+    local_root: Path | None
+
+
+def read_code(config_path: str | Path, root_overrides: dict[str, str] | None = None) -> CodeSpec | None:
+    """The demo repo *config_path* publishes (``<code>``), or None.
+
+    Only a pointer: the code itself is synced by the portal, never packaged
+    (``plans/demo_code_mcp.md``, decision 2).
+    """
+    _, root_elem, roots = _load_config(config_path, root_overrides)
+    elem = root_elem.find("code")
+    if elem is None:
+        return None
+    root_id = elem.get("root")
+    if root_id and root_id not in roots:
+        raise MaterialsError(f"<code root={root_id!r}>: no <root id={root_id!r}>")
+    config = {
+        "repo": elem.get("repo").rstrip("/").removesuffix(".git"),
+        "branch": elem.get("branch") or "main",
+        "includes": [{"path": i.get("path").strip("/"), "kind": i.get("kind") or "code"}
+                     for i in elem.findall("include")],
+        "excludes": [(e.text or "").strip() for e in elem.findall("exclude") if (e.text or "").strip()],
+        "site": (elem.get("site") or "").rstrip("/") or None,
+        "links": elem.get("links") or None,
+    }
+    return CodeSpec(config, roots[root_id] if root_id else None)
+
+
 # ---------------------------------------------------------------------------
 # Build
 # ---------------------------------------------------------------------------
@@ -258,8 +291,44 @@ def _clean(text: str) -> str:
     return text.replace("\x0b", " ").strip()
 
 
+def _shape_links(shape) -> list[str]:
+    """Hyperlink targets in *shape*: its click action and every text run's link.
+
+    A slide often says "see the demo" with the address only in the link, so
+    the visible text alone would miss it (``plans/demo_code_mcp.md``).
+    """
+    links = []
+    if getattr(shape, "shape_type", None) == 6:  # MSO_SHAPE_TYPE.GROUP
+        # A group has no click action or text of its own (python-pptx raises
+        # TypeError for its click_action): only its children do.
+        for child in shape.shapes:
+            links.extend(_shape_links(child))
+        return links
+    try:
+        address = shape.click_action.hyperlink.address
+        if address:
+            links.append(address)
+    except (AttributeError, KeyError, ValueError, TypeError):
+        pass
+    frames = []
+    if getattr(shape, "has_text_frame", False) and shape.has_text_frame:
+        frames.append(shape.text_frame)
+    if getattr(shape, "has_table", False) and shape.has_table:
+        frames.extend(cell.text_frame for row in shape.table.rows for cell in row.cells)
+    for frame in frames:
+        for paragraph in frame.paragraphs:
+            for run in paragraph.runs:
+                try:
+                    address = run.hyperlink.address
+                except (AttributeError, KeyError, ValueError):
+                    address = None
+                if address:
+                    links.append(address)
+    return links
+
+
 def extract_slides(pptx_path: Path) -> list[dict]:
-    """Title, body text and speaker notes of every slide, in order."""
+    """Title, body text, speaker notes and hyperlinks of every slide, in order."""
     from pptx import Presentation
 
     slides = []
@@ -267,7 +336,11 @@ def extract_slides(pptx_path: Path) -> list[dict]:
         title_shape = slide.shapes.title
         title = title_shape.text.strip() if title_shape is not None and title_shape.has_text_frame else ""
         body = []
+        links: list[str] = []
         for shape in slide.shapes:
+            for address in _shape_links(shape):
+                if address not in links:
+                    links.append(address)
             if title_shape is not None and shape.shape_id == title_shape.shape_id:
                 continue
             body.extend(_shape_texts(shape))
@@ -277,7 +350,8 @@ def extract_slides(pptx_path: Path) -> list[dict]:
         if not title and body:
             title = body[0].splitlines()[0][:80]
         slides.append({"n": number, "title": " ".join(_clean(title).split()),
-                       "text": _clean("\n".join(body)), "notes": _clean(notes)})
+                       "text": _clean("\n".join(body)), "notes": _clean(notes),
+                       "links": links})
     return slides
 
 
@@ -315,7 +389,7 @@ def image_key(data: bytes) -> str:
 
 def build_materials(specs: list[DeckSpec], package_dir: str | Path, *, log=print,
                     descriptions: dict | None = None, units: list[UnitSpec] | None = None,
-                    unit_types: list[dict] | None = None) -> dict:
+                    unit_types: list[dict] | None = None, code: dict | None = None) -> dict:
     """Write every deck under ``<package_dir>/mcp_materials``; return the manifest.
 
     A PDF whose page count differs from the deck's slide count is stale --
@@ -328,7 +402,8 @@ def build_materials(specs: list[DeckSpec], package_dir: str | Path, *, log=print
 
     *units* (``read_units``) are copied to ``mcp_materials/units/``, each with
     its images folder, and *unit_types* (``read_unit_types``) go into the
-    manifest as they are.
+    manifest as they are.  So does *code* (``read_code(...).config``), the
+    demo repo the portal keeps a copy of.
     """
     descriptions = descriptions or {}
     out_root = Path(package_dir) / MATERIALS_DIR
@@ -378,6 +453,11 @@ def build_materials(specs: list[DeckSpec], package_dir: str | Path, *, log=print
             + (f"  WARNING: {warning}" if warning else ""))
     manifest["units"] = [_build_unit(spec, out_root, log) for spec in units or []]
     manifest["unit_types"] = list(unit_types or [])
+    if code:
+        # The pointer only: the portal syncs the code itself (read_code).
+        manifest["code"] = code
+        log(f"  [code] {code['repo']} ({code['branch']}): "
+            + ", ".join(i["path"] for i in code["includes"]))
     (out_root / MANIFEST).write_text(json.dumps(manifest, indent=1), encoding="utf-8")
     return manifest
 
@@ -697,6 +777,7 @@ class Materials:
     decks: list[dict]
     units: list[dict] = field(default_factory=list)       # manifest entries
     unit_types: list[dict] = field(default_factory=list)
+    code: dict | None = None                              # <code>: the demo repo
     _deck_cache: dict = field(default_factory=dict)
     _index: list | None = None
     _parsed_units: tuple | None = None
@@ -820,6 +901,7 @@ def load_materials(soln_pkg: str | None) -> Materials | None:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         materials = Materials(root=root, decks=manifest.get("decks", []),
                               units=manifest.get("units", []),
-                              unit_types=manifest.get("unit_types", []))
+                              unit_types=manifest.get("unit_types", []),
+                              code=manifest.get("code"))
         _CACHE[key] = (mtime, materials)
         return materials

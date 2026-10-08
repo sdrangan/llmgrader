@@ -8,6 +8,8 @@
     llmgrader_mcp_build --describe                      # describe them (OpenAI; costs money)
     llmgrader_mcp_build --describe --deck fsm --force   # redo one deck's descriptions
 
+    llmgrader_mcp_build --links                         # check the demo links (free)
+
 ``create_soln_pkg`` runs the same build when ``llmgrader_mcp_config.xml`` sits
 beside ``llmgrader_config.xml``, so this is mostly for checking what will be
 published, and for --describe.
@@ -20,6 +22,12 @@ build (including create_soln_pkg) reads it for free.  After editing slides,
 plain --describe redoes just the ones whose image changed; --force redoes
 slides that already have a description (a better --model, or a poor result).  Only slides with an
 image can be described: a deck with no PDF, or a stale one, is skipped.
+
+--links reports what the portal will derive from the demo repo in <code>
+(plans/demo_code_mcp.md): each demo, its docs, code, slides and unit, and every
+reference in a slide or docs page that points at nothing.  It reads the local
+checkout that <code root=...> names and the slides already built into
+--package; it builds nothing and calls nothing.
 
 Needs python-pptx and PyMuPDF: ``pip install "llmgrader[mcp-build]"``;
 --describe also needs OPENAI_API_KEY.
@@ -40,6 +48,7 @@ from llmgrader.coursemcp.materials import (
     estimate_cost,
     load_descriptions,
     plan_descriptions,
+    read_code,
     read_config,
     read_unit_types,
     read_units,
@@ -111,6 +120,32 @@ def run_describe(args, specs) -> int:
     return 0
 
 
+def print_link_report(code, package: str | None) -> None:
+    """The demo link report, when <code> names a local checkout.  Never fails
+    the build: a broken link is the instructor's to fix, not a reason to stop."""
+    from llmgrader.coursemcp.demo_links import local_report
+
+    if code is None or code.local_root is None:
+        return
+    try:
+        for line in local_report(code.config, code.local_root, package):
+            print(f"  {line}")
+    except Exception as exc:
+        print(f"  Demo link report failed: {exc}")
+
+
+def run_links(args) -> int:
+    code = read_code(args.config, parse_roots(args.root))
+    if code is None:
+        raise MaterialsError(f"{args.config} has no <code> element: no demos are published")
+    if code.local_root is None:
+        raise MaterialsError("<code> needs root=\"<root id>\" naming a local checkout of the "
+                             "demo repo for --links")
+    package = args.package if os.path.isdir(args.package) else None
+    print_link_report(code, package)
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--config", default=DEFAULT_CONFIG,
@@ -133,6 +168,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--redo-empty", action="store_true",
                         help="with --describe, redo only slides whose description is empty "
                              "(judged text-only)")
+    parser.add_argument("--links", action="store_true",
+                        help="report the demo links the portal will derive from <code> "
+                             "(free; builds nothing)")
     parser.add_argument("--deck", action="append", default=[], metavar="ID",
                         help="with --describe, only these decks (by id); may be repeated")
     args = parser.parse_args(argv)
@@ -148,6 +186,8 @@ def main(argv: list[str] | None = None) -> int:
                 raise MaterialsError(f"unknown deck(s) {', '.join(unknown)}; "
                                      f"decks in the config: {', '.join(sorted(known))}")
             specs = [spec for spec in specs if spec.id in args.deck]
+        if args.links:
+            return run_links(args)
         if args.describe:
             return run_describe(args, specs)
         if args.dry_run:
@@ -163,13 +203,22 @@ def main(argv: list[str] | None = None) -> int:
                 for unit in units:
                     print(f"  [{unit.name}]" + (f" section={unit.section!r}" if unit.section else ""))
                     print(f"      {unit.path}")
+            code = read_code(args.config, parse_roots(args.root))
+            if code is not None:
+                print(f"Would point the MCP at {code.config['repo']} "
+                      f"({code.config['branch']}): "
+                      + ", ".join(i["path"] for i in code.config["includes"])
+                      + " -- synced by the portal, not packaged")
             print("\nNothing else from these repositories is published.")
             return 0
         print(f"Building course MCP material into {args.package}:")
+        code = read_code(args.config, parse_roots(args.root))
         build_materials(specs, args.package,
                         descriptions=load_descriptions(descriptions_dir(args.config)),
                         units=read_units(args.config, parse_roots(args.root)),
-                        unit_types=read_unit_types(args.config))
+                        unit_types=read_unit_types(args.config),
+                        code=code.config if code else None)
+        print_link_report(code, args.package)
     except MaterialsError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1

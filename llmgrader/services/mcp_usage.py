@@ -41,6 +41,11 @@ SCHEMA = {
     "result_images": "INTEGER",
     "result_bytes": "INTEGER",
     "package_version": "TEXT",
+    # The demo tools (plans/demo_code_mcp.md): the demo and file asked
+    # about, and the demo repo's commit that answered.
+    "demo": "TEXT",
+    "path": "TEXT",
+    "code_version": "TEXT",
 }
 
 INDEXES = {

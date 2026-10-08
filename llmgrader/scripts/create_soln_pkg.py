@@ -216,17 +216,22 @@ def main():
     mcp_config = config_dir / 'llmgrader_mcp_config.xml'
     if mcp_config.exists():
         from llmgrader.coursemcp.materials import (
-            MaterialsError, build_materials, descriptions_dir, load_descriptions, read_config,
-            read_unit_types, read_units)
+            MaterialsError, build_materials, descriptions_dir, load_descriptions, read_code,
+            read_config, read_unit_types, read_units)
+        from llmgrader.scripts.llmgrader_mcp_build import print_link_report
         print(f"Building course MCP material from {mcp_config.name}:")
         try:
             # Slide descriptions are read from the cache llmgrader_mcp_build
             # --describe writes; this build itself never calls a model.
             decks = read_config(mcp_config)
             mcp_units = read_units(mcp_config)
+            # Demo code is only pointed at: the portal syncs it from GitHub.
+            code = read_code(mcp_config)
             build_materials(decks, output_dir,
                             descriptions=load_descriptions(descriptions_dir(mcp_config)),
-                            units=mcp_units, unit_types=read_unit_types(mcp_config))
+                            units=mcp_units, unit_types=read_unit_types(mcp_config),
+                            code=code.config if code else None)
+            print_link_report(code, output_dir)
         except (MaterialsError, ImportError) as exc:
             print(f"Error: {exc}")
             if isinstance(exc, ImportError):
