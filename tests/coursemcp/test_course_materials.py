@@ -155,6 +155,65 @@ def test_materials_reload_when_the_manifest_changes(tmp_path) -> None:
     assert len(load_materials(str(tmp_path)).decks) == 1
 
 
+@pytest.mark.parametrize("text, expected", [
+    ("s_axilite", ["s_axilite", "axilite"]),          # the "s" alone is not a term
+    ("ap_ctrl_none", ["ap_ctrl_none", "ap", "ctrl", "none"]),
+    ("readBuffer", ["readbuffer", "read", "buffer"]),
+    ("FIFOs and AXI4-Lite", ["fifos", "and", "axi4", "lite"]),   # prose: as before
+    ("it's _private_", ["it", "s", "private"]),
+])
+def test_identifiers_are_terms_whole_and_by_part(text, expected) -> None:
+    from llmgrader.coursemcp.materials import tokenize
+
+    assert tokenize(text) == expected
+
+
+def write_deck(package: Path, slides: list[tuple[str, str]]) -> None:
+    """One deck, ``procif``, of ``(title, text)`` slides."""
+    deck_dir = package / "mcp_materials" / "slides" / "procif"
+    deck_dir.mkdir(parents=True)
+    (deck_dir / "deck.json").write_text(json.dumps({
+        "id": "procif", "unit": "Unit 4", "title": "Interfaces", "source": "procif.pptx",
+        "slides": [{"n": n, "title": title, "text": text, "notes": "", "image": None}
+                   for n, (title, text) in enumerate(slides, start=1)]}), encoding="utf-8")
+    (package / "mcp_materials" / "manifest.json").write_text(json.dumps({"version": 1, "decks": [
+        {"id": "procif", "unit": "Unit 4", "title": "Interfaces", "slides": len(slides),
+         "images": False, "warning": ""}]}), encoding="utf-8")
+
+
+def test_search_finds_an_identifier_and_not_its_fragments(tmp_path) -> None:
+    write_deck(tmp_path, [
+        ("Kernel types", "#pragma HLS INTERFACE s_axilite port=return"),
+        ("Bus roles", "The AXI-Lite subordinate's registers, and the manager's writes"),
+        ("Signed numbers", "It's two's complement: the sign bit's weight is negative"),
+        ("Register map", "Each axilite register sits at a fixed offset"),
+    ])
+    materials = load_materials(str(tmp_path))
+    hits = [h["slide"] for h in materials.search("s_axilite")]
+    assert hits[0] == 1                 # the exact identifier first
+    assert 3 not in hits                # "it's", "two's": the "s" is not a match
+    # A part still finds the whole identifier, as well as the bare word.
+    assert {h["slide"] for h in materials.search("axilite")} == {1, 4}
+
+
+def test_an_exact_identifier_outranks_a_slide_that_only_shares_its_parts(tmp_path) -> None:
+    write_deck(tmp_path, [
+        ("Control", "ap ctrl ap ctrl none of these ap ctrl handshakes ap ctrl"),
+        ("Free running", "ap_ctrl_none"),
+    ])
+    hits = load_materials(str(tmp_path)).search("ap_ctrl_none")
+    assert hits[0]["slide"] == 2
+
+
+def test_weak_hits_are_cut(tmp_path) -> None:
+    write_deck(tmp_path, [
+        ("Mealy machine", "A Mealy machine: outputs depend on state and inputs. Mealy Mealy."),
+        ("Machines", "Every machine in the lab"),
+    ])
+    hits = load_materials(str(tmp_path)).search("mealy machine")
+    assert [h["slide"] for h in hits] == [1]
+
+
 # ---------------------------------------------------------------------------
 # Config and build
 # ---------------------------------------------------------------------------

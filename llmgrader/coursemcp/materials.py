@@ -762,11 +762,44 @@ def describe_slides(plan: DescribePlan, directory: Path, *, model_spec, api_key:
 # Serve
 # ---------------------------------------------------------------------------
 
-_TOKEN_RE = re.compile(r"[a-z0-9]+")
+_WORD_RE = re.compile(r"[A-Za-z0-9_]+")
+_CAMEL_BOUNDARY = re.compile(r"(?<=[a-z0-9])(?=[A-Z])")
+# A piece of an identifier shorter than this is not a term: the "s" of
+# s_axilite would otherwise match every plural and possessive in the course.
+MIN_PART_CHARS = 2
+# Hits scoring under this fraction of the best one are dropped: a term the
+# best slide shares with a weak one says little about the weak one.
+RELATIVE_CUTOFF = 0.3
+
+
+def _split_word(word: str) -> tuple[str, list[str]]:
+    """``(whole, parts)``: a word, lowercased, and the pieces of an identifier.
+
+    snake_case and camelCase split into parts; a plain word ("FIFOs",
+    "AXI4") has none, and is a term exactly as before.
+    """
+    pieces = [p for chunk in word.split("_") for p in _CAMEL_BOUNDARY.split(chunk) if p]
+    whole = word.strip("_").lower()
+    return whole, ([p.lower() for p in pieces] if len(pieces) > 1 else [])
 
 
 def tokenize(text: str) -> list[str]:
-    return _TOKEN_RE.findall(text.lower())
+    """Search terms in *text*.  An identifier counts whole and by its parts:
+    ``s_axilite`` is ``s_axilite`` and ``axilite``, so searching for either
+    finds it, and the whole identifier -- rare, so heavily weighted -- ranks
+    an exact match first."""
+    terms = []
+    for word in _WORD_RE.findall(text):
+        whole, parts = _split_word(word)
+        if whole:
+            terms.append(whole)
+        terms.extend(p for p in parts if len(p) >= MIN_PART_CHARS)
+    return terms
+
+
+def identifiers(text: str) -> set[str]:
+    """The identifiers (snake_case, camelCase) in *text*, lowercased."""
+    return {whole for whole, parts in map(_split_word, _WORD_RE.findall(text)) if parts}
 
 
 @dataclass
@@ -821,7 +854,9 @@ class Materials:
             return None
         return path
 
-    # BM25 over title (counted twice), text, notes and figure description.
+    # BM25 over title (counted twice), text, notes and figure description,
+    # with identifiers kept whole (tokenize), exact identifier matches first,
+    # and weak hits cut (RELATIVE_CUTOFF).
     K1, B = 1.5, 0.75
 
     def _build_index(self) -> list:
@@ -839,6 +874,7 @@ class Materials:
             self._index = self._build_index()
         docs = self._index
         terms = tokenize(query)
+        wanted_ids = identifiers(query)
         if not docs or not terms:
             return []
         avg_len = sum(d[3] for d in docs) / len(docs) or 1
@@ -856,13 +892,20 @@ class Materials:
                 idf = math.log(1 + (len(docs) - df[term] + 0.5) / (df[term] + 0.5))
                 score += idf * tf * (self.K1 + 1) / (tf + self.K1 * (1 - self.B + self.B * length / avg_len))
             if score > 0:
-                scored.append((score, meta, slide))
-        scored.sort(key=lambda item: -item[0])
+                # A slide with every identifier the query names, whole, ranks
+                # above one that only shares their parts.
+                exact = all(counts.get(i, 0) for i in wanted_ids)
+                scored.append((exact, score, meta, slide))
+        if not scored:
+            return []
+        best = max(score for _, score, _, _ in scored)
+        scored = [item for item in scored if item[1] >= RELATIVE_CUTOFF * best]
+        scored.sort(key=lambda item: (not item[0], -item[1]))
         return [
             {"deck": meta["id"], "unit": meta["unit"], "slide": slide["n"],
              "title": slide["title"], "snippet": _snippet(slide, terms),
              "score": round(score, 2)}
-            for score, meta, slide in scored[:limit]
+            for _, score, meta, slide in scored[:limit]
         ]
 
 
