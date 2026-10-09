@@ -308,3 +308,26 @@ def test_cloning_the_real_repo_skips_the_bitstreams(tmp_path) -> None:
     assert not [p for p in on_disk if p.suffix in (".bit", ".hwh", ".png")]
     pack_bytes = sum(p.stat().st_size for p in (sync.mirror / ".git").rglob("*") if p.is_file())
     assert pack_bytes < 5_000_000      # the 38 MB of bitstreams were never fetched
+
+
+@pytest.mark.skipif(os.environ.get("LLMGRADER_RUN_NETWORK_TESTS") != "1",
+                    reason="clones from GitHub; set LLMGRADER_RUN_NETWORK_TESTS=1")
+def test_the_real_repo_reports_its_commit_and_head(tmp_path) -> None:
+    """What Manage Courses shows (plans/demo_code_admin.md), against GitHub:
+    a shallow partial clone still has the commit's date and subject, and the
+    remote check reads the same head the sync fetched."""
+    config = CodeConfig.from_dict({"repo": "https://github.com/sdrangan/hwdesign",
+                                   "includes": [{"path": "demos"}, {"path": "docs/demos", "kind": "doc"}]})
+    sync = CodeSync("hwdesign", config, tmp_path / "code", ttl=10_000)
+    assert sync.sync_now()
+    state = sync.state()
+    assert state["subject"] and state["committed_at"][:2] == "20"
+    assert sync.remote()["head"] == state["commit"]
+    assert sync.check_remote_in_background()
+    sync._check_thread.join(60)
+    remote = sync.remote()
+    assert remote["error"] is None and len(remote["head"]) == 40
+    assert sync.sync_now()                       # the ls-remote path: nothing new, or a fetch
+    overview = sync.overview()
+    assert overview["status"] in ("up_to_date", "update_available")
+    assert overview["progress"] is None and not sync.progress_path.exists()

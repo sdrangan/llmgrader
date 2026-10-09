@@ -298,6 +298,20 @@ file fails `llmgrader_demos.xsd` is not served. `llmgrader_mcp_build --links`
 prints the same graph from a local checkout. See `plans/demo_code_mcp.md` and
 `docs/admin/mcp/code.md`.
 
+Manage Courses shows each course's served commit and offers Update now
+(`plans/demo_code_admin.md`). **Admin code endpoints never wait on git**:
+`GET /api/admin/courses[/<id>/code]` answers from `CodeSync.overview()`, which
+reads files only, and `.../code/check` and `.../code/update` start a thread
+and return 202; a test holds them to one second while `run_git` hangs. A sync
+writes `progress.json` (its stage) as it goes and deletes it at the end, and
+`state.json` now carries the served commit's `committed_at` and `subject`.
+`check_remote_in_background` and every successful sync write `remote.json`
+(the branch head). Both are files beside `state.json`, not fields in it,
+because `state.json` is rewritten whole at the end of a sync and a second
+writer's fields would be lost, and files rather than memory so a poll that
+reaches another worker sees them. `code_status` decides the status word for
+the column and the dialog alike.
+
 ### Course content format
 
 Courses are defined as **XML files** validated against `llmgrader/schemas/unit.xsd` (questions/solutions/rubrics) and `llmgrader/schemas/llmgrader_config.xsd` (course metadata and unit references). `UnitParser` handles schema validation, CDATA cleaning, and line-number mapping for error reporting.

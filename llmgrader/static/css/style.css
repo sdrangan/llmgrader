@@ -42,6 +42,44 @@ html, body {
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
 }
 
+/* Manage Courses and its Demo code dialog: a table of several columns. */
+.modal-dialog-wide {
+    width: clamp(280px, 94vw, 780px);
+    max-height: 90vh;
+    overflow-y: auto;
+}
+
+/* Demo code (plans/demo_code_admin.md) */
+.course-demo-code {
+    padding: 4px 8px;
+    white-space: nowrap;
+    cursor: pointer;
+}
+.course-demo-code:hover { text-decoration: underline; }
+.course-demo-code .demo-code-sha { font-family: monospace; opacity: 0.8; margin-right: 6px; }
+.demo-code-status { font-size: 0.85em; }
+.demo-code-status-update_available { color: #8a5300; font-weight: bold; }
+.demo-code-status-error { color: #b00020; font-weight: bold; }
+.demo-code-status-up_to_date { color: #2e7d32; }
+.demo-code-repo { margin-bottom: 10px; }
+.demo-code-table { width: 100%; border-collapse: collapse; font-size: 0.9em; }
+.demo-code-table th, .demo-code-table td { text-align: left; padding: 4px 8px 4px 0; vertical-align: top; }
+.demo-code-table thead th { font-weight: normal; opacity: 0.7; }
+.demo-code-table .demo-code-commit { font-family: monospace; white-space: nowrap; }
+.demo-code-table .demo-code-date { white-space: nowrap; }
+.demo-code-note { margin-top: 8px; font-size: 0.9em; }
+.demo-code-error { margin-top: 8px; color: #b00020; font-size: 0.9em; overflow-wrap: anywhere; }
+.demo-code-stages { display: flex; flex-wrap: wrap; gap: 6px 16px; list-style: none; padding: 0; margin: 0 0 10px; font-size: 0.9em; }
+.demo-code-stages li { opacity: 0.5; }
+.demo-code-stages li.is-done { opacity: 1; }
+.demo-code-stages li.is-done::after { content: " \2713"; color: #2e7d32; }
+.demo-code-stages li.is-current { opacity: 1; font-weight: bold; }
+.demo-code-stages li.is-current::after { content: " \2026"; }
+.demo-code-bar { position: relative; height: 4px; background: #eee; border-radius: 2px; overflow: hidden; }
+.demo-code-bar span { position: absolute; top: 0; bottom: 0; width: 30%; background: #57068c; animation: demo-code-slide 1.2s ease-in-out infinite; }
+@keyframes demo-code-slide { from { left: -30%; } to { left: 100%; } }
+.demo-code-result { font-size: 0.95em; }
+
 .modal-dialog h2 {
     margin-top: 0;
     margin-bottom: 16px;
@@ -107,6 +145,16 @@ html, body {
 
 .modal-btn-primary:hover {
     background: #6a0fa5;
+}
+
+.modal-btn:disabled,
+.modal-btn:disabled:hover {
+    opacity: 0.45;
+    cursor: default;
+}
+
+.modal-btn-primary:disabled:hover {
+    background: #57068c;
 }
 
 .hidden {

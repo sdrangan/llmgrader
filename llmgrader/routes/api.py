@@ -1146,10 +1146,83 @@ class APIController:
         def admin_page():
             return render_template("index.html", banner=self.banner_context())
 
+        # -- Demo code (plans/demo_code_admin.md) -----------------------------
+        #
+        # No route here waits on GitHub or on git: Render runs one sync
+        # worker, and a request that stays open freezes grading for every
+        # student.  The code object is read from the files a sync and a remote
+        # check leave behind; checking and updating start a thread and return.
+
+        def _code_library():
+            """The portal's CodeLibrary, or None when demo code is off."""
+            runner = getattr(app, "course_mcp", None)
+            return getattr(runner, "code", None)
+
+        def _code_sync(course_id):
+            """``(library, sync)``; sync is None when the package has no <code>.
+            Builds a CodeSync if need be, which starts nothing."""
+            library = _code_library()
+            if library is None:
+                return None, None
+            return library, library.sync_for(course_id)
+
+        def _course_code(course_id):
+            """The ``code`` object of a live course: ``{"enabled": false}``
+            when demo code is off, None when the course publishes none."""
+            try:
+                library, sync = _code_sync(course_id)
+            except Exception as exc:     # an unreadable package must not break the list
+                print(f"[CourseCode] {course_id}: {exc!r}")
+                return {"enabled": True, "status": "error",
+                        "last_error": f"could not read the course's <code>: {exc}"}
+            if library is None:
+                return {"enabled": False}
+            return sync.overview() if sync is not None else None
+
+        def _code_target(course_id):
+            """The CodeSync a check or an update acts on, or an error response."""
+            if self.registry.get(course_id) is None:
+                return None, (jsonify({"error": f"no course {course_id!r}"}), 404)
+            library, sync = _code_sync(course_id)
+            if library is None:
+                return None, (jsonify({"error": "demo code is off on this portal "
+                                                "(LLMGRADER_MCP_CODE)"}), 409)
+            if sync is None:
+                return None, (jsonify({"error": f"{course_id} publishes no demo code"}), 404)
+            return sync, None
+
+        @app.get("/api/admin/courses/<course_id>/code")
+        @self.require_admin
+        def admin_course_code(course_id):
+            """The code object alone, for the dialog to poll."""
+            if self.registry.get(course_id) is None:
+                return jsonify({"error": f"no course {course_id!r}"}), 404
+            return jsonify({"code": _course_code(course_id)})
+
+        @app.post("/api/admin/courses/<course_id>/code/check")
+        @self.require_admin
+        def admin_course_code_check(course_id):
+            """Read the branch head from GitHub, on a thread."""
+            sync, error = _code_target(course_id)
+            if error:
+                return error
+            return jsonify({"started": sync.check_remote_in_background()}), 202
+
+        @app.post("/api/admin/courses/<course_id>/code/update")
+        @self.require_admin
+        def admin_course_code_update(course_id):
+            """Update now: a sync on a thread.  ``started: false`` means one
+            was already running here."""
+            sync, error = _code_target(course_id)
+            if error:
+                return error
+            return jsonify({"started": sync.refresh_in_background()}), 202
+
         def _admin_course_payload(entry) -> dict:
             grader = None
             if not entry.deleted:
                 grader = self.registry.grader_for(entry.id)
+            extra = {} if entry.deleted else {"code": _course_code(entry.id)}
             return {
                 "id": entry.id,
                 "name": entry.name or entry.id,
@@ -1161,6 +1234,7 @@ class APIController:
                 "loaded": bool(getattr(grader, "units", None)) if grader else False,
                 "package_version": getattr(grader, "package_version", None) if grader else None,
                 "submissions": self.registry.storage.count_submissions_for_course(entry.id),
+                **extra,
             }
 
         @app.get("/api/admin/courses")

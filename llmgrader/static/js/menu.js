@@ -608,6 +608,7 @@ function initializeMenuSystem() {
     function renderManageCourses(payload) {
         var courses = (payload && payload.courses) || [];
         manageCoursesBody.innerHTML = '';
+        manageCoursesById = {};
         manageCoursesMessage.textContent = courses.length
             ? 'Archiving a course stops serving it. Its package and its grades are kept.'
             : 'No courses are registered on this portal.';
@@ -635,6 +636,16 @@ function initializeMenuSystem() {
             version.style.fontFamily = 'monospace';
             version.style.opacity = '0.8';
             row.appendChild(version);
+
+            // Which commit of the demo repo the course MCP serves, and
+            // whether GitHub has a newer one.  Nothing for an archived course.
+            var demoCode = document.createElement('td');
+            demoCode.className = 'course-demo-code';
+            row.appendChild(demoCode);
+            if (!course.deleted_at) {
+                manageCoursesById[course.id] = course;
+                renderDemoCodeCell(demoCode, course);
+            }
 
             var count = document.createElement('td');
             count.textContent = course.submissions + ' graded';
@@ -672,12 +683,355 @@ function initializeMenuSystem() {
         try {
             var resp = await fetch('/api/admin/courses');
             if (!resp.ok) throw new Error('GET /api/admin/courses failed: ' + resp.status);
-            renderManageCourses(await resp.json());
+            var payload = await resp.json();
+            renderManageCourses(payload);
+            checkDemoCodeRemotes(payload.courses || []);
         } catch (err) {
             console.error('Could not load the course list:', err);
             manageCoursesMessage.textContent = 'Could not load the course list.';
         }
     }
+
+    // ---------------------------------------------------------------
+    //  Demo code (plans/demo_code_admin.md)
+    // ---------------------------------------------------------------
+    //
+    // The server never waits on GitHub for these: /code/check and
+    // /code/update start a thread and return, and this side polls /code,
+    // which reads the files a sync leaves on disk.  `status` is decided on the
+    // server so the column and the dialog always agree.
+    var manageCoursesById = {};
+    var manageCoursesGeneration = 0;     // bumped on open and close: stops the column's polls
+    var DEMO_CODE_POLL_MS = 1000;
+    var DEMO_CODE_CHECK_LIMIT_MS = 15000;
+    var DEMO_CODE_UPDATE_LIMIT_MS = 180000;
+    var DEMO_CODE_STAGES = ['checking', 'fetching', 'building', 'validating'];
+    var DEMO_CODE_WORDS = {
+        up_to_date: 'Up to date',
+        update_available: 'Update available',
+        syncing: 'Syncing…',
+        error: 'Error',
+        never_synced: 'Not synced yet',
+        unknown: 'Not checked'
+    };
+
+    var demoCodeModal = document.getElementById('demo-code-modal');
+    var demoCodeCheckBtn = document.getElementById('demo-code-check-btn');
+    var demoCodeUpdateBtn = document.getElementById('demo-code-update-btn');
+    var demoCodeCloseBtn = document.getElementById('demo-code-close-btn');
+    var demoCodeDialog = { course: null, token: 0, updating: false };
+
+    function shortSha(sha) { return sha ? String(sha).slice(0, 12) : ''; }
+
+    function pad2(n) { return (n < 10 ? '0' : '') + n; }
+
+    function formatWhen(date) {
+        if (!date || isNaN(date.getTime())) return '';
+        return date.getFullYear() + '-' + pad2(date.getMonth() + 1) + '-' + pad2(date.getDate())
+            + ' ' + pad2(date.getHours()) + ':' + pad2(date.getMinutes());
+    }
+
+    function fromEpoch(seconds) { return seconds ? new Date(seconds * 1000) : null; }
+
+    function ago(seconds) {
+        var age = Math.max(0, Math.round(Date.now() / 1000 - seconds));
+        if (age < 60) return age + ' s ago';
+        if (age < 3600) return Math.round(age / 60) + ' min ago';
+        return Math.round(age / 3600) + ' h ago';
+    }
+
+    function commitLink(code, sha) {
+        var link = document.createElement('a');
+        link.href = code.repo + '/commit/' + sha;
+        link.target = '_blank';
+        link.rel = 'noopener';
+        link.textContent = shortSha(sha);
+        return link;
+    }
+
+    function renderDemoCodeCell(cell, course) {
+        cell.innerHTML = '';
+        cell.onclick = null;
+        var code = course.code;
+        if (code === undefined) return;
+        if (code === null) {
+            cell.textContent = '—';
+            cell.title = 'This course publishes no demo code';
+            cell.style.cursor = 'default';
+            return;
+        }
+        if (!code.enabled) {
+            cell.textContent = 'off';
+            cell.title = 'Demo code is off on this portal (LLMGRADER_MCP_CODE)';
+            cell.style.cursor = 'default';
+            return;
+        }
+        var sha = document.createElement('span');
+        sha.className = 'demo-code-sha';
+        sha.textContent = code.served ? shortSha(code.served.commit) : '—';
+        cell.appendChild(sha);
+        var word = document.createElement('span');
+        word.className = 'demo-code-status demo-code-status-' + code.status;
+        word.textContent = DEMO_CODE_WORDS[code.status] || code.status;
+        cell.appendChild(word);
+        cell.title = 'Demo code: which commit the course MCP serves';
+        cell.style.cursor = '';
+        cell.onclick = function () { openDemoCodeDialog(course.id); };
+    }
+
+    // A fresh code object for a course: kept, and drawn in its row and, if
+    // the dialog shows that course, in the dialog.
+    function applyDemoCode(courseId, code) {
+        var course = manageCoursesById[courseId];
+        if (!course) return;
+        course.code = code;
+        var row = manageCoursesBody && Array.prototype.find.call(
+            manageCoursesBody.querySelectorAll('tr'),
+            function (tr) { return tr.dataset.courseId === courseId; });
+        var cell = row && row.querySelector('.course-demo-code');
+        if (cell) renderDemoCodeCell(cell, course);
+        if (demoCodeDialog.course === courseId) renderDemoCodeDialog();
+    }
+
+    async function fetchDemoCode(courseId) {
+        var resp = await fetch('/api/admin/courses/' + encodeURIComponent(courseId) + '/code');
+        if (!resp.ok) throw new Error('GET /code failed: ' + resp.status);
+        var code = (await resp.json()).code;
+        applyDemoCode(courseId, code);
+        return code;
+    }
+
+    function sleep(ms) { return new Promise(function (resolve) { setTimeout(resolve, ms); }); }
+
+    // Poll /code once a second until done(code), *alive()* turns false, or
+    // the time is up.  Resolves to 'done', 'stopped' or 'timeout'.
+    async function pollDemoCode(courseId, done, limitMs, alive) {
+        var deadline = Date.now() + limitMs;
+        while (Date.now() < deadline) {
+            await sleep(DEMO_CODE_POLL_MS);
+            if (!alive()) return 'stopped';
+            try {
+                if (done(await fetchDemoCode(courseId))) return 'done';
+            } catch (err) {
+                console.warn('Demo code poll failed:', err);
+            }
+        }
+        return 'timeout';
+    }
+
+    async function startRemoteCheck(courseId, alive) {
+        var course = manageCoursesById[courseId];
+        var code = course && course.code;
+        var before = code && code.remote ? code.remote.checked_at : null;
+        var resp = await fetch('/api/admin/courses/' + encodeURIComponent(courseId) + '/code/check',
+                               { method: 'POST' });
+        if (!resp.ok) throw new Error('Check failed: ' + resp.status);
+        return pollDemoCode(courseId, function (fresh) {
+            return !!(fresh && fresh.remote && fresh.remote.checked_at !== before);
+        }, DEMO_CODE_CHECK_LIMIT_MS, alive);
+    }
+
+    // Opening Manage Courses asks GitHub about every course with demo code,
+    // so the column fills in by itself.
+    function checkDemoCodeRemotes(courses) {
+        var generation = manageCoursesGeneration;
+        var alive = function () { return generation === manageCoursesGeneration; };
+        courses.forEach(function (course) {
+            if (course.deleted_at || !course.code || !course.code.enabled) return;
+            startRemoteCheck(course.id, alive).catch(function (err) {
+                console.warn('Demo code check for ' + course.id + ' failed:', err);
+            });
+        });
+    }
+
+    function setDemoCodeCell(rowId, cells) {
+        var row = document.getElementById(rowId);
+        var tds = row.querySelectorAll('td');
+        cells.forEach(function (content, i) {
+            if (!tds[i]) return;
+            tds[i].innerHTML = '';
+            if (content instanceof Node) tds[i].appendChild(content);
+            else tds[i].textContent = content || '';
+        });
+    }
+
+    function renderDemoCodeDialog() {
+        var course = manageCoursesById[demoCodeDialog.course];
+        if (!course) return;
+        var code = course.code || {};
+        var name = course.name || course.id;
+        if (course.semester) name += ' (' + course.semester + ')';
+        document.getElementById('demo-code-title').textContent = 'Demo code: ' + name;
+
+        var repo = document.getElementById('demo-code-repo');
+        repo.innerHTML = '';
+        if (code.repo) {
+            var repoLink = document.createElement('a');
+            repoLink.href = code.repo;
+            repoLink.target = '_blank';
+            repoLink.rel = 'noopener';
+            repoLink.textContent = code.repo.replace(/^https?:\/\/(www\.)?github\.com\//, '');
+            repo.appendChild(repoLink);
+            repo.appendChild(document.createTextNode(' @ ' + (code.branch || 'main')));
+        }
+
+        var served = code.served;
+        setDemoCodeCell('demo-code-served', served
+            ? [commitLink(code, served.commit), formatWhen(served.committed_at ? new Date(served.committed_at) : null),
+               served.subject || '']
+            : ['—', 'not synced yet', '']);
+
+        var remote = code.remote;
+        var remoteNote;
+        if (!remote) remoteNote = 'not checked';
+        else if (remote.error) remoteNote = 'check failed: ' + remote.error;
+        else remoteNote = 'checked ' + ago(remote.checked_at);
+        setDemoCodeCell('demo-code-remote', [
+            remote && remote.head ? commitLink(code, remote.head) : '—', remoteNote]);
+
+        var compare = document.getElementById('demo-code-compare');
+        compare.innerHTML = '';
+        if (served && remote && remote.head && remote.head !== served.commit) {
+            var compareLink = document.createElement('a');
+            compareLink.href = code.repo + '/compare/' + served.commit + '...' + remote.head;
+            compareLink.target = '_blank';
+            compareLink.rel = 'noopener';
+            compareLink.className = 'demo-code-compare-link';
+            compareLink.textContent = 'See what changed on GitHub';
+            compare.appendChild(compareLink);
+        }
+
+        var synced = document.getElementById('demo-code-synced');
+        if (code.synced_at) {
+            synced.textContent = 'Last synced ' + formatWhen(fromEpoch(code.synced_at))
+                + (code.last_error ? '' : '  (no errors)');
+        } else {
+            synced.textContent = code.last_attempt ? 'Never synced successfully' : 'Never synced';
+        }
+
+        var error = document.getElementById('demo-code-error');
+        var problems = [];
+        if (code.last_error) {
+            problems.push('The last sync failed: ' + code.last_error
+                + (served ? '  — still serving ' + shortSha(served.commit) + '.' : ''));
+        }
+        if (code.progress && code.progress.stale) {
+            problems.push('A sync started ' + formatWhen(fromEpoch(code.progress.started_at))
+                + ' stopped without finishing.');
+        }
+        error.textContent = problems.join(' ');
+        error.style.display = problems.length ? 'block' : 'none';
+
+        // Any sync in progress shows its stage, whoever started it.
+        var running = code.progress && !code.progress.stale ? code.progress.stage : null;
+        if (running || demoCodeDialog.updating) renderDemoCodeStages(running);
+        else document.getElementById('demo-code-progress').style.display = 'none';
+
+        demoCodeUpdateBtn.disabled = demoCodeDialog.updating
+            || !(code.status === 'update_available' || code.status === 'error');
+        demoCodeCheckBtn.disabled = demoCodeDialog.updating || !code.enabled;
+    }
+
+    function renderDemoCodeStages(stage) {
+        document.getElementById('demo-code-progress').style.display = 'block';
+        var current = DEMO_CODE_STAGES.indexOf(stage);
+        document.querySelectorAll('#demo-code-progress li').forEach(function (li) {
+            var i = DEMO_CODE_STAGES.indexOf(li.dataset.stage);
+            li.classList.toggle('is-done', current >= 0 && i < current);
+            li.classList.toggle('is-current', i === current);
+        });
+    }
+
+    function showDemoCodeResult(message, isError) {
+        var result = document.getElementById('demo-code-result');
+        result.textContent = message || '';
+        result.style.display = message ? 'block' : 'none';
+        result.style.color = isError ? '#b00020' : '';
+    }
+
+    function openDemoCodeDialog(courseId) {
+        if (!demoCodeModal) return;
+        demoCodeDialog.course = courseId;
+        demoCodeDialog.token += 1;
+        demoCodeDialog.updating = false;
+        showDemoCodeResult('');
+        renderDemoCodeDialog();
+        demoCodeModal.style.display = 'flex';
+    }
+
+    function closeDemoCodeDialog() {
+        demoCodeDialog.token += 1;
+        demoCodeDialog.course = null;
+        demoCodeDialog.updating = false;
+        if (demoCodeModal) demoCodeModal.style.display = 'none';
+    }
+
+    function dialogAlive(token) {
+        return function () { return demoCodeDialog.token === token; };
+    }
+
+    async function checkDemoCodeAgain() {
+        var courseId = demoCodeDialog.course;
+        if (!courseId) return;
+        showDemoCodeResult('');
+        demoCodeCheckBtn.disabled = true;
+        try {
+            var outcome = await startRemoteCheck(courseId, dialogAlive(demoCodeDialog.token));
+            if (outcome === 'timeout') showDemoCodeResult('GitHub has not answered yet; try again shortly.', true);
+        } catch (err) {
+            showDemoCodeResult(err.message, true);
+        } finally {
+            if (demoCodeDialog.course === courseId) renderDemoCodeDialog();
+        }
+    }
+
+    // Update now: start a sync and follow its stages.  The sync is over when
+    // progress is gone and state.json records a new attempt; whether it
+    // worked is last_error.
+    async function updateDemoCodeNow() {
+        var courseId = demoCodeDialog.course;
+        var course = manageCoursesById[courseId];
+        if (!course) return;
+        var before = course.code || {};
+        var oldCommit = before.served ? before.served.commit : null;
+        var token = demoCodeDialog.token;
+        demoCodeDialog.updating = true;
+        showDemoCodeResult('');
+        renderDemoCodeDialog();
+        try {
+            var resp = await fetch('/api/admin/courses/' + encodeURIComponent(courseId) + '/code/update',
+                                   { method: 'POST' });
+            if (!resp.ok) {
+                var err = await resp.json().catch(function () { return {}; });
+                throw new Error(err.error || 'Update failed: ' + resp.status);
+            }
+            var outcome = await pollDemoCode(courseId, function (code) {
+                var running = code && code.progress && !code.progress.stale;
+                return !!code && !running && code.last_attempt !== before.last_attempt;
+            }, DEMO_CODE_UPDATE_LIMIT_MS, dialogAlive(token));
+            if (outcome === 'stopped') return;
+            demoCodeDialog.updating = false;
+            var code = manageCoursesById[courseId].code || {};
+            if (outcome === 'timeout') {
+                showDemoCodeResult('The sync is taking longer than expected. It carries on in '
+                    + 'the background; use Check again to see where it is.', true);
+            } else if (code.last_error) {
+                showDemoCodeResult('The sync failed: ' + code.last_error
+                    + (oldCommit ? '  — still serving ' + shortSha(oldCommit) + '.' : ''), true);
+            } else {
+                showDemoCodeResult('Now serving ' + shortSha(code.served && code.served.commit)
+                    + (code.served && code.served.subject ? ': ' + code.served.subject : '') + '.');
+            }
+        } catch (err) {
+            demoCodeDialog.updating = false;
+            showDemoCodeResult(err.message, true);
+        }
+        if (demoCodeDialog.token === token) renderDemoCodeDialog();
+    }
+
+    if (demoCodeCheckBtn) demoCodeCheckBtn.addEventListener('click', checkDemoCodeAgain);
+    if (demoCodeUpdateBtn) demoCodeUpdateBtn.addEventListener('click', updateDemoCodeNow);
+    if (demoCodeCloseBtn) demoCodeCloseBtn.addEventListener('click', closeDemoCodeDialog);
 
     async function archiveCourse(course) {
         var name = course.name || course.id;
@@ -709,6 +1063,7 @@ function initializeMenuSystem() {
             if (!manageCoursesModal) return;
             showManageCoursesError('');
             if (addCourseFile) addCourseFile.value = '';
+            manageCoursesGeneration += 1;
             manageCoursesModal.style.display = 'flex';
             closeMenus();
             refreshManageCourses();
@@ -748,6 +1103,7 @@ function initializeMenuSystem() {
 
     if (manageCoursesCloseBtn) {
         manageCoursesCloseBtn.addEventListener('click', function () {
+            manageCoursesGeneration += 1;
             manageCoursesModal.style.display = 'none';
         });
     }
