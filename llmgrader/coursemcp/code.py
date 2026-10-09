@@ -77,6 +77,12 @@ GIT_TIMEOUT_S = 60
 FIRST_FETCH_WAIT_S = 5.0
 DEFAULT_LINKS_FILE = "demos/demos.xml"
 
+# The stages a sync reports in progress.json, in order (plans/demo_code_admin.md).
+SYNC_STAGES = ("checking", "fetching", "building", "validating")
+# A progress.json not rewritten for this long belongs to a sync that died
+# without cleaning up: no one stage runs more than a few git commands.
+PROGRESS_STALE_S = 4 * GIT_TIMEOUT_S
+
 
 class CodeError(Exception):
     """A problem with a request, worded for the model that made it."""
@@ -649,7 +655,10 @@ def run_git(args: list[str], *, cwd: str | Path | None = None,
     try:
         result = subprocess.run(
             ["git", "-c", "credential.helper=", "-c", "core.askPass=", *args],
-            cwd=cwd, env=env, capture_output=True, text=True, timeout=timeout,
+            # git writes UTF-8 (a commit subject may not be ASCII), whatever
+            # the locale; Windows' would be cp1252.
+            cwd=cwd, env=env, capture_output=True, encoding="utf-8", errors="replace",
+            timeout=timeout,
         )
     except subprocess.TimeoutExpired as exc:
         raise GitError(f"git {args[0]} timed out after {timeout:.0f}s") from exc
@@ -670,6 +679,23 @@ def _rmtree(path: Path) -> None:
             pass
     if path.exists():
         shutil.rmtree(path, onerror=make_writable)
+
+
+def _read_json(path: Path) -> dict | None:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _write_json(path: Path, data: dict) -> None:
+    """Write *path* whole, through a temp file of this thread's own, so two
+    writers never share a half-written temp file and a reader never sees one."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f"{path.name}.{os.getpid()}.{threading.get_ident()}.tmp")
+    tmp.write_text(json.dumps(data, indent=1), encoding="utf-8")
+    tmp.replace(path)
 
 
 class _FileLock:
@@ -731,11 +757,18 @@ class CodeSync:
         self.dir = Path(directory)
         self.mirror = self.dir / "mirror"
         self.state_path = self.dir / "state.json"
+        # Beside state.json, not in it: state.json is rewritten whole at the
+        # end of a sync, so a second writer's fields would be lost.
+        self.progress_path = self.dir / "progress.json"
+        self.remote_path = self.dir / "remote.json"
         self.ttl = ttl if ttl is not None else _ttl_from_env()
         self._snapshot: CodeSnapshot | None = None
         self._sync_lock = threading.Lock()
         self._load_lock = threading.Lock()
+        self._check_lock = threading.Lock()
         self._thread: threading.Thread | None = None
+        self._check_thread: threading.Thread | None = None
+        self._sync_started_at: float | None = None
         self._index_key = None
         self._index = None
         self._index_refs = None     # keeps the keyed objects alive, so ids are not reused
@@ -753,10 +786,112 @@ class CodeSync:
             return {}
 
     def _write_state(self, state: dict) -> None:
-        self.dir.mkdir(parents=True, exist_ok=True)
-        tmp = self.state_path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(state, indent=1), encoding="utf-8")
-        tmp.replace(self.state_path)
+        _write_json(self.state_path, state)
+
+    # -- progress.json and remote.json --------------------------------------
+    #
+    # What Manage Courses shows (plans/demo_code_admin.md).  Files, not
+    # memory, so a poll that lands on another gunicorn worker sees them too.
+    # Nothing here runs git: an admin request reads these and returns.
+
+    def progress(self) -> dict | None:
+        """The stage of a sync in progress, or None.  ``stale`` marks one whose
+        sync died without removing the file; it is reported, never deleted."""
+        data = _read_json(self.progress_path)
+        if not data or data.get("stage") not in SYNC_STAGES:
+            return None
+        updated = data.get("updated_at") or data.get("started_at") or 0
+        stale = time.time() - updated > PROGRESS_STALE_S
+        if data.get("pid") == os.getpid() and not _is_syncing(self.dir):
+            stale = True    # this process wrote it, and is not syncing
+        return {"stage": data["stage"], "started_at": data.get("started_at"), "stale": stale}
+
+    def _set_stage(self, stage: str) -> None:
+        now = time.time()
+        try:
+            _write_json(self.progress_path, {"stage": stage, "started_at": self._sync_started_at or now,
+                                             "updated_at": now, "pid": os.getpid()})
+        except OSError as exc:
+            print(f"[CourseCode] {self.course_id}: could not write progress: {exc}")
+
+    def _clear_progress(self) -> None:
+        try:
+            self.progress_path.unlink(missing_ok=True)
+        except OSError as exc:
+            print(f"[CourseCode] {self.course_id}: could not remove progress: {exc}")
+
+    def remote(self) -> dict | None:
+        """The branch head on GitHub as last checked: ``head``, ``checked_at``, ``error``."""
+        return _read_json(self.remote_path)
+
+    def _write_remote(self, head: str | None, error: str | None) -> None:
+        try:
+            _write_json(self.remote_path, {"head": head, "checked_at": time.time(), "error": error})
+        except OSError as exc:
+            print(f"[CourseCode] {self.course_id}: could not write remote.json: {exc}")
+
+    def check_remote_in_background(self) -> bool:
+        """Read the branch head with ``ls-remote`` on a thread, into remote.json.
+
+        True if a check started; False if one is already running here.  A
+        failure is recorded in remote.json's ``error``, never raised.
+        """
+        if not self._check_lock.acquire(blocking=False):
+            return False
+
+        def run():
+            try:
+                self._check_remote()
+            except Exception as exc:  # a thread must never die loudly mid-request
+                print(f"[CourseCode] {self.course_id}: remote check crashed: {exc!r}")
+            finally:
+                self._check_lock.release()
+
+        try:
+            thread = threading.Thread(target=run, daemon=True,
+                                      name=f"course-code-check-{self.course_id}")
+            self._check_thread = thread
+            thread.start()
+        except Exception:
+            self._check_lock.release()
+            raise
+        return True
+
+    def _check_remote(self) -> None:
+        head, error = None, None
+        try:
+            listing = run_git(["ls-remote", remote_url(self.config),
+                               f"refs/heads/{self.config.branch}"])
+            head = listing.split()[0] if listing.strip() else None
+            if head is None:
+                error = f"branch {self.config.branch!r} not found in {self.config.repo}"
+        except GitError as exc:
+            error = str(exc)[:500]
+        self._write_remote(head, error)
+
+    def overview(self) -> dict:
+        """What Manage Courses shows for this course: built from state.json,
+        remote.json and progress.json alone, so it never waits on git."""
+        state = self.state()
+        remote = self.remote()
+        progress = self.progress()
+        commit = state.get("commit")
+        served = ({"commit": commit, "committed_at": state.get("committed_at"),
+                   "subject": state.get("subject")} if commit else None)
+        remote_view = ({"head": remote.get("head"), "checked_at": remote.get("checked_at"),
+                        "error": remote.get("error")} if remote else None)
+        return {
+            "enabled": True,
+            "repo": self.config.repo,
+            "branch": self.config.branch,
+            "served": served,
+            "synced_at": state.get("synced_at"),
+            "last_attempt": state.get("last_attempt"),
+            "last_error": state.get("last_error"),
+            "remote": remote_view,
+            "progress": progress,
+            "status": code_status(commit, state.get("last_error"), remote_view, progress),
+        }
 
     def _stale(self, state: dict) -> bool:
         last = max(state.get("synced_at") or 0, state.get("last_attempt") or 0)
@@ -850,16 +985,21 @@ class CodeSync:
             if not got:
                 return False
             state = self.state()
-            state["last_attempt"] = time.time()
+            state["last_attempt"] = self._sync_started_at = time.time()
             ok = False
+            _mark_syncing(self.dir, True)
             try:
                 commit = self._fetch(state)
                 if self._snapshot is None or self._snapshot.commit != commit:
+                    self._set_stage("building")
                     snapshot = build_snapshot(self.mirror, self.config, commit)
+                    self._set_stage("validating")
                     validate_snapshot(snapshot)
                     self._snapshot = snapshot
                     print(f"[CourseCode] {self.course_id}: serving {commit[:12]} "
                           f"({len(snapshot.files)} files)")
+                if state.get("commit") != commit or state.get("committed_at") is None:
+                    state.update(self._commit_info())
                 state.update(commit=commit, synced_at=time.time(), last_error=None)
                 ok = True
             except (GitError, SnapshotRejected, OSError) as exc:
@@ -871,7 +1011,25 @@ class CodeSync:
                     self._write_state(state)
                 except OSError as exc:
                     print(f"[CourseCode] {self.course_id}: could not write state: {exc}")
+                if ok:
+                    # The mirror is at the branch head it just fetched.
+                    self._write_remote(state["commit"], None)
+                # Last, so a poll that finds no progress finds the new state.
+                self._clear_progress()
+                _mark_syncing(self.dir, False)
+                self._sync_started_at = None
             return ok
+
+    def _commit_info(self) -> dict:
+        """The mirror head's commit date and subject.  Local: a partial clone
+        leaves out file contents, not commits."""
+        try:
+            out = run_git(["log", "-1", "--format=%cI%x00%s"], cwd=self.mirror, timeout=15)
+        except GitError as exc:
+            print(f"[CourseCode] {self.course_id}: could not read the commit: {exc}")
+            return {"committed_at": None, "subject": None}
+        committed_at, _, subject = out.strip("\r\n").partition("\0")
+        return {"committed_at": committed_at or None, "subject": subject or None}
 
     def _mirror_head(self) -> str | None:
         if not (self.mirror / ".git").is_dir():
@@ -887,13 +1045,16 @@ class CodeSync:
         patterns = self.config.sparse_patterns()
         head = self._mirror_head()
         if head is None or state.get("remote") != remote:
+            self._set_stage("fetching")
             self._clone(remote, patterns)
         else:
+            self._set_stage("checking")
             listing = run_git(["ls-remote", remote, f"refs/heads/{self.config.branch}"])
             remote_head = listing.split()[0] if listing.strip() else None
             if remote_head is None:
                 raise GitError(f"branch {self.config.branch!r} not found in {self.config.repo}")
             if remote_head != head or state.get("patterns") != patterns:
+                self._set_stage("fetching")
                 try:
                     if state.get("patterns") != patterns:
                         run_git(["sparse-checkout", "set", "--no-cone", *patterns], cwd=self.mirror)
@@ -903,6 +1064,7 @@ class CodeSync:
                 except GitError as exc:
                     print(f"[CourseCode] {self.course_id}: mirror update failed ({exc}); "
                           "cloning afresh")
+                    self._set_stage("fetching")    # restarts the stale clock
                     self._clone(remote, patterns)
         state.update(remote=remote, patterns=patterns)
         head = self._mirror_head()
@@ -924,6 +1086,38 @@ class CodeSync:
             self.mirror.rename(old)
         new.rename(self.mirror)
         _rmtree(old)
+
+
+# The code directories a sync is running in, in this process: how progress()
+# tells a progress.json this process left behind from one it is still writing.
+_SYNCING: set[str] = set()
+_SYNCING_LOCK = threading.Lock()
+
+
+def _mark_syncing(directory: Path, running: bool) -> None:
+    with _SYNCING_LOCK:
+        (_SYNCING.add if running else _SYNCING.discard)(str(directory))
+
+
+def _is_syncing(directory: Path) -> bool:
+    with _SYNCING_LOCK:
+        return str(directory) in _SYNCING
+
+
+def code_status(served_commit: str | None, last_error: str | None,
+                remote: dict | None, progress: dict | None) -> str:
+    """One word for the Manage Courses column and dialog, decided here so the
+    two always agree.  The first rule that holds wins."""
+    if progress and not progress.get("stale"):
+        return "syncing"
+    if last_error or (remote and remote.get("error")):
+        return "error"
+    if not served_commit:
+        return "never_synced"
+    head = remote.get("head") if remote else None
+    if head:
+        return "up_to_date" if head == served_commit else "update_available"
+    return "unknown"
 
 
 def _ttl_from_env() -> float:

@@ -592,3 +592,148 @@ def test_a_forked_process_gets_its_own_syncs(app, client, monkeypatch) -> None:
     real_pid = os.getpid()
     monkeypatch.setattr(os, "getpid", lambda: real_pid + 1)
     assert lib.sync_for("alpha") is not first
+
+
+# ---------------------------------------------------------------------------
+# What Manage Courses reads: plans/demo_code_admin.md
+# ---------------------------------------------------------------------------
+
+
+def synced(app, client):
+    """alpha's sync, after a first sync has completed."""
+    search(client, "s_axilite")
+    sync = library(app).sync_for("alpha")
+    if sync._thread is not None:
+        sync._thread.join(30)
+    return sync
+
+
+def test_a_sync_records_the_served_commits_date_and_subject(app, client, tmp_path) -> None:
+    sync = synced(app, client)
+    state = sync.state()
+    assert state["subject"] == "demos"
+    assert state["committed_at"][:4].isdigit() and "T" in state["committed_at"]
+    repo = tmp_path / "hwdesign"
+    (repo / "demos/fsm/counter.sv").write_text("module counter;\nendmodule\n", encoding="utf-8")
+    commit_all(repo, "Rebuild the démos — streaming")      # not ASCII
+    assert sync.sync_now() is True
+    assert sync.state()["subject"] == "Rebuild the démos — streaming"
+
+
+def test_progress_shows_each_stage_and_is_removed_after(app, client, tmp_path,
+                                                        monkeypatch) -> None:
+    sync = synced(app, client)
+    repo = tmp_path / "hwdesign"
+    (repo / "demos/fsm/counter.sv").write_text("module counter;\n// v2\nendmodule\n",
+                                               encoding="utf-8")
+    commit_all(repo)
+    gates = {stage: (threading.Event(), threading.Event()) for stage in code_module.SYNC_STAGES}
+
+    def hold(stage):
+        reached, release = gates[stage]
+        reached.set()
+        release.wait(30)
+
+    real_git = code_module.run_git
+    real_build, real_validate = code_module.build_snapshot, code_module.validate_snapshot
+
+    def run_git(args, **kwargs):
+        if args[0] == "ls-remote":
+            hold("checking")
+        elif args[0] == "fetch":
+            hold("fetching")
+        return real_git(args, **kwargs)
+
+    monkeypatch.setattr(code_module, "run_git", run_git)
+    monkeypatch.setattr(code_module, "build_snapshot",
+                        lambda *a, **k: hold("building") or real_build(*a, **k))
+    monkeypatch.setattr(code_module, "validate_snapshot",
+                        lambda *a, **k: hold("validating") or real_validate(*a, **k))
+    try:
+        assert sync.refresh_in_background()
+        for stage in code_module.SYNC_STAGES:
+            reached, release = gates[stage]
+            assert reached.wait(30), stage
+            progress = sync.progress()
+            assert progress["stage"] == stage and progress["stale"] is False
+            assert sync.overview()["status"] == "syncing"
+            release.set()
+    finally:
+        for _, release in gates.values():
+            release.set()
+        sync._thread.join(30)
+    assert sync.progress() is None and not sync.progress_path.exists()
+    assert sync.overview()["status"] == "up_to_date"
+
+
+def test_progress_is_removed_after_a_failed_sync(app, client, tmp_path, monkeypatch) -> None:
+    sync = synced(app, client)
+    monkeypatch.setattr(code_module, "remote_url", lambda config: (tmp_path / "gone").as_uri())
+    assert sync.sync_now() is False
+    assert not sync.progress_path.exists()
+    assert sync.overview()["status"] == "error"
+
+
+def test_a_sync_records_the_head_it_fetched(app, client) -> None:
+    sync = synced(app, client)
+    remote = sync.remote()
+    assert remote["head"] == sync.state()["commit"] and remote["error"] is None
+    assert sync.overview()["status"] == "up_to_date"
+
+
+def test_check_remote_writes_the_branch_head(app, client, tmp_path) -> None:
+    sync = synced(app, client)
+    repo = tmp_path / "hwdesign"
+    (repo / "demos/fsm/counter.sv").write_text("module counter;\n// v3\nendmodule\n",
+                                               encoding="utf-8")
+    new = commit_all(repo)
+    assert sync.check_remote_in_background() is True
+    sync._check_thread.join(30)
+    assert sync.remote()["head"] == new
+    overview = sync.overview()
+    assert overview["status"] == "update_available"
+    assert overview["served"]["commit"] != new
+
+
+def test_one_remote_check_at_a_time(app, client, monkeypatch) -> None:
+    sync = synced(app, client)
+    release, calls = threading.Event(), []
+    blocking_git(monkeypatch, release, calls)
+    try:
+        assert sync.check_remote_in_background() is True
+        assert sync.check_remote_in_background() is False
+    finally:
+        release.set()
+        sync._check_thread.join(30)
+    assert calls.count("ls-remote") == 1
+
+
+def test_a_failed_remote_check_is_recorded_not_raised(app, client, tmp_path,
+                                                      monkeypatch) -> None:
+    sync = synced(app, client)
+    monkeypatch.setattr(code_module, "remote_url", lambda config: (tmp_path / "gone").as_uri())
+    assert sync.check_remote_in_background() is True
+    sync._check_thread.join(30)
+    remote = sync.remote()
+    assert remote["head"] is None and remote["error"] and remote["checked_at"]
+    assert sync.overview()["status"] == "error"
+
+
+def test_an_abandoned_progress_file_is_reported_stale(app, client) -> None:
+    sync = synced(app, client)
+    now = time.time()
+
+    def write(pid, age):
+        sync.progress_path.write_text(json.dumps(
+            {"stage": "fetching", "started_at": now - age, "updated_at": now - age, "pid": pid}),
+            encoding="utf-8")
+
+    write(os.getpid(), 0)                   # this process left it, and is not syncing
+    assert sync.progress()["stale"] is True
+    write(os.getpid() + 1, 5)               # another worker, mid-sync
+    assert sync.progress()["stale"] is False
+    assert sync.overview()["status"] == "syncing"
+    write(os.getpid() + 1, code_module.PROGRESS_STALE_S + 5)
+    assert sync.progress()["stale"] is True
+    assert sync.overview()["status"] != "syncing"
+    assert sync.progress_path.exists()      # reported, never deleted by a reader

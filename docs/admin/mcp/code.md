@@ -163,6 +163,56 @@ nothing is reported by `--links`.
 
 ---
 
+## Checking and updating the served commit
+
+**Admin ▸ Manage Courses** has a **Demo code** column. For each course that
+publishes demo code it shows the commit the course MCP is serving, and a
+status:
+
+| Status | Meaning |
+| --- | --- |
+| Up to date | GitHub's branch head is the commit being served. |
+| Update available | GitHub has a newer commit. Students get it within ten minutes anyway, or now with **Update now**. |
+| Syncing… | A sync is running. |
+| Error | The last sync or the last check of GitHub failed. The last good copy is still being served. |
+| Not checked | GitHub has not been asked yet. |
+| Not synced yet | No copy has been made. The first MCP request makes one. |
+
+The column shows "—" for a course whose package has no `<code>`, and "off"
+when `LLMGRADER_MCP_CODE` is not set. Opening Manage Courses asks GitHub for
+the branch head of every course with demo code, so the column fills in by
+itself within a few seconds.
+
+Click the cell to open the course's **Demo code** dialog. It shows:
+
+- the commit being served, with its date and message, and the branch head on
+  GitHub, with how long ago it was checked. Each commit links to GitHub. When
+  they differ, **See what changed on GitHub** opens the comparison, which is
+  worth a look before updating;
+- when the copy was last synced and, if the last sync failed, why, and which
+  commit is still being served.
+
+**Check again** asks GitHub for the branch head again. **Update now**, offered
+when an update is available or the last sync failed, pulls the new commit in
+at once rather than waiting for the next refresh. The dialog shows the sync's
+stages as it goes (checking remote, fetching, building snapshot, validating),
+then "Now serving" and the new commit. A sync with nothing new takes a second
+or two; one that fetches takes a few seconds. If the new commit is refused
+(say its overrides file does not validate), the dialog says so and the old
+commit stays served.
+
+Nothing in the dialog waits on GitHub: checking and updating run in the
+background on the portal, and the dialog follows them. Grading carries on
+throughout.
+
+**With several gunicorn workers**, the sync runs in the worker that received
+the click; a second worker cannot start one on top of it. The others pick up
+the new commit on their next MCP request. So "Now serving" is true of the copy
+on disk at once and of every worker after its next MCP call. Render runs one
+worker, so there the two are the same.
+
+---
+
 ## What is recorded
 
 Demo calls are recorded like every other MCP call

@@ -332,7 +332,7 @@
      <name>, <semester> and usually <course_id>, so nothing here asks the admin
      to type an identity that could disagree with the XML. -->
 <div id="manage-courses-modal" class="modal-overlay" style="display: none;">
-    <div class="modal-dialog">
+    <div class="modal-dialog modal-dialog-wide">
         <h2>Manage Courses</h2>
         <div class="modal-content">
             <div id="manage-courses-message" style="font-size:0.9em; opacity:0.8;">Loading courses…</div>
@@ -351,6 +351,52 @@
         <div class="modal-buttons">
             <button id="add-course-btn" class="modal-btn modal-btn-primary">Add Course</button>
             <button id="manage-courses-close-btn" class="modal-btn">Close</button>
+        </div>
+    </div>
+</div>
+
+<!-- Demo code, opened from a course's row in Manage Courses
+     (plans/demo_code_admin.md).  Every figure here comes from files a sync
+     leaves on disk; Check again and Update now start a thread on the server
+     and this dialog polls, so nothing here waits on GitHub. -->
+<div id="demo-code-modal" class="modal-overlay" style="display: none;">
+    <div class="modal-dialog modal-dialog-wide">
+        <h2 id="demo-code-title">Demo code</h2>
+        <div class="modal-content">
+            <div id="demo-code-repo" class="demo-code-repo"></div>
+            <table class="demo-code-table">
+                <thead>
+                    <tr><th></th><th>Commit</th><th>Date</th><th>Message</th></tr>
+                </thead>
+                <tbody>
+                    <tr id="demo-code-served">
+                        <th scope="row">Serving</th>
+                        <td class="demo-code-commit"></td><td class="demo-code-date"></td><td class="demo-code-subject"></td>
+                    </tr>
+                    <tr id="demo-code-remote">
+                        <th scope="row">On GitHub</th>
+                        <td class="demo-code-commit"></td><td class="demo-code-date" colspan="2"></td>
+                    </tr>
+                </tbody>
+            </table>
+            <div id="demo-code-compare" class="demo-code-note"></div>
+            <div id="demo-code-synced" class="demo-code-note"></div>
+            <div id="demo-code-error" class="demo-code-error" style="display:none;"></div>
+        </div>
+        <div id="demo-code-progress" class="modal-content" style="display:none;">
+            <ol class="demo-code-stages">
+                <li data-stage="checking">checking remote</li>
+                <li data-stage="fetching">fetching</li>
+                <li data-stage="building">building snapshot</li>
+                <li data-stage="validating">validating</li>
+            </ol>
+            <div class="demo-code-bar" role="progressbar" aria-label="Syncing demo code"><span></span></div>
+        </div>
+        <div id="demo-code-result" class="modal-content demo-code-result" style="display:none;"></div>
+        <div class="modal-buttons">
+            <button id="demo-code-check-btn" type="button" class="modal-btn">Check again</button>
+            <button id="demo-code-update-btn" type="button" class="modal-btn modal-btn-primary">Update now</button>
+            <button id="demo-code-close-btn" type="button" class="modal-btn">Close</button>
         </div>
     </div>
 </div>

@@ -142,3 +142,137 @@ def test_the_dialog_warns_that_a_wrong_package_is_refused(load_course) -> None:
     text = load_course.locator("#load-course-modal").inner_text().lower()
     assert "soln_package.zip" in text
     assert "refused" in text
+
+
+# ---------------------------------------------------------------------------
+# Demo code (plans/demo_code_admin.md)
+# ---------------------------------------------------------------------------
+#
+# The live server runs without the course MCP, so its courses report demo code
+# as off.  These tests stub the course list and the /code routes through route
+# interception: what is checked is the browser side -- the column, the dialog
+# and the progress display -- against payloads of the shape the server sends.
+# The routes themselves are tested in tests/coursemcp/test_code_admin.py.
+
+import time  # noqa: E402
+
+SERVED = "a1b2c3d4e5f6" + "0" * 28
+NEWER = "9e8d7c6b5a43" + "1" * 28
+REPO = "https://github.com/sdrangan/hwdesign"
+
+
+def code_object(status, *, served=SERVED, head=NEWER, progress=None, last_attempt=100.0,
+                last_error=None, subject="Rebuild the streaming demos as build DAGs"):
+    return {
+        "enabled": True, "repo": REPO, "branch": "main",
+        "served": {"commit": served, "committed_at": "2026-10-08T21:14:03-04:00",
+                   "subject": subject},
+        "synced_at": last_attempt, "last_attempt": last_attempt, "last_error": last_error,
+        "remote": {"head": head, "checked_at": time.time() - 12, "error": None},
+        "progress": progress, "status": status,
+    }
+
+
+class CodeStub:
+    """Answers /api/admin/courses and the /code routes for COURSE1_ID.
+
+    Before Update now, /code answers with an update available; after it, with
+    each stage of a sync in turn, then the new commit.
+    """
+
+    def __init__(self):
+        self.updates = 0
+        self.after_update = [
+            code_object("syncing", progress={"stage": stage, "started_at": 200.0, "stale": False})
+            for stage in ("checking", "fetching", "building", "validating")
+        ] + [code_object("up_to_date", served=NEWER, head=NEWER, last_attempt=200.0,
+                         subject="Second commit")]
+
+    def current(self):
+        if not self.updates:
+            return code_object("update_available")
+        if len(self.after_update) > 1:
+            return self.after_update.pop(0)
+        return self.after_update[0]
+
+    def handle(self, route):
+        request = route.request
+        path = request.url.split("?", 1)[0]
+        if path.endswith("/api/admin/courses") and request.method == "GET":
+            response = route.fetch()
+            data = response.json()
+            for course in data["courses"]:
+                course["code"] = code_object("update_available") if course["id"] == COURSE1_ID else None
+            route.fulfill(response=response, json=data)
+        elif path.endswith(f"/{COURSE1_ID}/code/check"):
+            route.fulfill(status=202, json={"started": True})
+        elif path.endswith(f"/{COURSE1_ID}/code/update"):
+            self.updates += 1
+            route.fulfill(status=202, json={"started": True})
+        elif path.endswith(f"/{COURSE1_ID}/code"):
+            route.fulfill(json={"code": self.current()})
+        else:
+            route.continue_()
+
+
+@pytest.fixture()
+def demo_code(page, live_server):
+    stub = CodeStub()
+    page.route("**/api/admin/courses**", stub.handle)
+    open_admin_dialog(page, live_server, "manage-courses-menu-item", "manage-courses-modal")
+    page.wait_for_function(
+        "document.querySelectorAll('#manage-courses-body .course-demo-code .demo-code-sha').length > 0",
+        timeout=5_000,
+    )
+    return page, stub
+
+
+def demo_cell(page, course_id):
+    return page.locator(f'#manage-courses-body tr[data-course-id="{course_id}"] .course-demo-code')
+
+
+def test_the_column_shows_the_served_commit_and_its_status(demo_code) -> None:
+    page, _ = demo_code
+    cell = demo_cell(page, COURSE1_ID)
+    assert cell.locator(".demo-code-sha").inner_text() == SERVED[:12]
+    assert cell.locator(".demo-code-status").inner_text() == "Update available"
+    assert demo_cell(page, COURSE2_ID).inner_text() == "—"     # no <code>
+
+
+def test_the_dialog_compares_the_served_commit_with_github(demo_code) -> None:
+    page, _ = demo_code
+    demo_cell(page, COURSE1_ID).click()
+    page.wait_for_selector("#demo-code-modal", state="visible", timeout=3_000)
+    served = page.locator("#demo-code-served").inner_text()
+    assert SERVED[:12] in served and "Rebuild the streaming demos" in served
+    remote = page.locator("#demo-code-remote").inner_text()
+    assert NEWER[:12] in remote and "s ago" in remote
+    compare = page.locator("#demo-code-compare a").get_attribute("href")
+    assert compare == f"{REPO}/compare/{SERVED}...{NEWER}"
+    assert page.locator("#demo-code-served a").get_attribute("href") == f"{REPO}/commit/{SERVED}"
+    assert page.locator("#demo-code-update-btn").is_enabled()
+
+
+def test_update_now_shows_the_stages_then_the_new_commit(demo_code) -> None:
+    page, stub = demo_code
+    demo_cell(page, COURSE1_ID).click()
+    page.wait_for_selector("#demo-code-modal", state="visible", timeout=3_000)
+    page.click("#demo-code-update-btn")
+
+    page.wait_for_selector("#demo-code-progress", state="visible", timeout=3_000)
+    assert page.locator("#demo-code-update-btn").is_disabled()
+    page.wait_for_selector('#demo-code-progress li[data-stage="validating"].is-current',
+                           timeout=10_000)
+    done = page.locator("#demo-code-progress li.is-done").evaluate_all(
+        "items => items.map(li => li.dataset.stage)")
+    assert done == ["checking", "fetching", "building"]
+
+    result = page.locator("#demo-code-result")
+    result.wait_for(state="visible", timeout=10_000)
+    assert f"Now serving {NEWER[:12]}" in result.inner_text()
+    assert page.locator("#demo-code-progress").is_hidden()
+    assert stub.updates == 1
+    # The row behind the dialog follows.
+    cell = demo_cell(page, COURSE1_ID)
+    assert cell.locator(".demo-code-sha").inner_text() == NEWER[:12]
+    assert cell.locator(".demo-code-status").inner_text() == "Up to date"
