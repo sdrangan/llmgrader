@@ -2,6 +2,12 @@
 
 **Status: proposed (2026-10-12).  Nothing built.**
 
+**No backward compatibility.**  One course (hwdesign) uses the portal, and it
+is migrated in the same change.  The old config elements (`<slides>`,
+`<code>`, `demos/demos.xml`), the eight old tools and their analytics presets
+are replaced, not kept alongside: no fallback for an unmigrated course, no
+aliases, no dual-name queries.
+
 Today the course MCP has two separate machines for course material: one for
 lecture slide decks (`list_materials`, `get_outline`, `get_slide`,
 `search_slides`) and one for demo code and its docs walkthroughs
@@ -92,8 +98,9 @@ solutions.  The two should share one implementation of the instruction text.
 
 ## Configuration
 
-A new `<materials>` element in `llmgrader_mcp_config.xml`, beside `<slides>`
-and `<code>`, which it eventually absorbs.  hwdesign's, in full:
+A new `<materials>` element in `llmgrader_mcp_config.xml` replaces `<slides>`
+and `<code>`'s `<include>` list; `<code>` keeps only the mirror's repo and
+branch.  hwdesign's, in full:
 
 ```xml
 <materials>
@@ -136,7 +143,7 @@ Rules:
   Derived links (a slide that cites a demo's code) may supply a unit; the
   build prints where each unit came from.
 - **Repo-side corrections stay possible.**  The mirror may carry a
-  `materials.xml` (successor to `demos/demos.xml`, same schema as the
+  `materials.xml` (replacing `demos/demos.xml`, same schema as the
   `<item id>` refinements) read on every sync, so retitling or re-unit-ing a
   mirrored item needs no package rebuild.  Its refinements apply after the
   config's.
@@ -189,13 +196,13 @@ once after the deploy.
 
 ## Analytics
 
-- New columns: `material` (the item id) and `format`.  `path`, `slide` (now
-  also a PDF page) stay.  `deck` and `demo` stay for old rows and are no
-  longer written.
-- `IDENTIFIER_ARGUMENTS` gains `id`, `page`, `format`; `query` stays redacted.
-- The MCP presets in `static/js/analytics.js` query both the old and new tool
-  names, so a "Calls per day, by tool" chart spans the change.  New preset:
-  "Calls per material and kind".
+- New columns: `material` (the item id) and `format`.  `path` and `slide`
+  (now also a PDF page) stay.  `deck` and `demo` are no longer written; old
+  rows keep them as history, and nothing queries them.
+- `IDENTIFIER_ARGUMENTS` gains `id`, `page`, `format` and loses `deck` and
+  `demo`; `query` stays redacted.
+- The MCP presets in `static/js/analytics.js` are rewritten for the new tool
+  names only.  New preset: "Calls per material and kind".
 
 ## Migration of hwdesign
 
@@ -215,11 +222,12 @@ work to carry over.
 ## Phases
 
 **1. Model and config, no tool changes.**  `materials.py`: the `Material`,
-`Part`, `Kind` and `Unit` types; the schema; building the index from
-`<materials>`, or, when it is absent, from today's `<slides>` and `<code>`
-(so an unmigrated course behaves exactly as now).  `llmgrader_mcp_build
---materials` prints the index: every item, its units and where each came
-from, its parts and formats.
+`Part`, `Kind` and `Unit` types; the schema, with `<slides>` and
+`<code><include>` removed; building the index from `<materials>`; and
+hwdesign's config migrated (steps 1 to 3 below) in the same change.
+`llmgrader_mcp_build --materials` prints the index: every item, its units and
+where each came from, its parts and formats.  Until phase 2, the old tools
+read the new index.
 
 *Tests:* the hwdesign config builds the same items as today's decks plus
 demos plus labs; an `<item id>` refinement with no match fails; an item with
