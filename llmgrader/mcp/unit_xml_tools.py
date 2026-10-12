@@ -403,6 +403,15 @@ def _rubric_item_structure() -> dict:
                 type="string",
                 example="+2",
             ),
+            "scored": make_attribute_description(
+                "Set to false for a feedback-only item: the grader carries out the analysis the "
+                "condition asks for and reports it below the rubric table, with no points and no "
+                "pass/fail. Such an item takes no point_adjustment, condition_type or action.",
+                required=False,
+                type="boolean",
+                example="false",
+                allowed_values=["true", "false"],
+            ),
         },
         children={
             "display_text": _rubric_display_text_structure(),
@@ -580,6 +589,22 @@ def explain_rubric_rules() -> dict:
             "required_item_fields": ["id", "point_adjustment", "display_text", "condition"],
             "optional_item_fields": ["notes", "part"],
             "allowed_rubric_total_values": ["sum_positive", "sum_negative", "flexible"],
+        },
+        "feedback_only_fields": {
+            "description": (
+                "An item with scored=\"false\" is graded for feedback only: the grader carries out the "
+                "analysis its condition asks for on the student's answer (a sanity check, a trace, an "
+                "estimate) and reports it below the rubric table, but it awards no points and passes or "
+                "fails nothing. Works in both grading modes."
+            ),
+            "required_item_fields": ["id", "scored", "display_text", "condition"],
+            "optional_item_fields": ["notes", "part"],
+            "forbidden_item_fields": ["point_adjustment", "condition_type", "action"],
+            "rules": [
+                "Write the condition as an instruction, e.g. 'Evaluate the student's expression at t = 0 and compare with the initial voltage.'",
+                "part='all' is allowed even on multi-part sum_positive questions, since the item counts toward no part.",
+                "A feedback-only item cannot be in a one_of group, and grading tests cannot assert on it.",
+            ],
         },
         "group_rules": {
             "supported_group_types": ["one_of"],
@@ -761,8 +786,11 @@ def _append_question(root: ET.Element, question_spec: dict) -> None:
             item_elem = ET.SubElement(rubrics_elem, "item")
             item_elem.set("id", str(rubric_spec.get("id") or "rubric_item").strip())
 
-            for attr_name in ["part", "condition_type", "action", "point_adjustment"]:
+            for attr_name in ["part", "scored", "condition_type", "action", "point_adjustment"]:
                 attr_value = rubric_spec.get(attr_name)
+                if isinstance(attr_value, bool):
+                    # xs:boolean is lowercase; str(False) is not.
+                    attr_value = "true" if attr_value else "false"
                 if attr_value is not None:
                     item_elem.set(attr_name, str(attr_value).strip())
 

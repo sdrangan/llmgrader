@@ -313,7 +313,9 @@ def _add_content_tools(mcp: MCPServer, require_course, public_url, code=None) ->
         """Get the rubric the portal grades one question against.
 
         Returns each rubric item -- what it checks, its part, the points it is
-        worth (negative for a deduction) and the grader's notes on it -- plus
+        worth (negative for a deduction; null for a feedback-only item, which
+        the grader analyzes and reports but does not score) and the grader's
+        notes on it -- plus
         the question's grading notes, which describe common mistakes and what
         is accepted.  Use it to see what counts and to aim feedback or hints at
         it; it does not contain the worked solution.
@@ -327,7 +329,11 @@ def _add_content_tools(mcp: MCPServer, require_course, public_url, code=None) ->
                 "part": item.get("part", ""),
                 "display_text": item.get("display_text", ""),
                 "condition": cc.plain_text(item.get("condition", "")),
-                "points": item.get("point_adjustment", 0),
+                "points": (
+                    None if item.get("scored", True) is False
+                    else item.get("point_adjustment", 0)
+                ),
+                "feedback_only": item.get("scored", True) is False,
                 "notes": item.get("notes", ""),
             }
             for item_id, item in (question.get("rubrics") or {}).items()

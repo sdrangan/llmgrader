@@ -490,6 +490,29 @@ RUBRIC_TEMPLATES = {
 }
 
 
+FEEDBACK_ONLY_TEMPLATE = """
+
+        Feedback-only items:
+        These items carry no points and pass or fail nothing.  For each one, carry out
+        the analysis its "instruction" asks for on the student's own answer, and report
+        what you found.  Base it on what the student wrote, not on the reference solution,
+        and show the key values or steps so the student can follow it.
+
+        {feedback_items_block}
+
+        Add each of these ids to "rubric_eval" with one field:
+          - "evidence": the analysis, written for the student, in two to four sentences.
+        Do not give these ids "point_awarded" or "result", and do not let them change any
+        score.  They are shown to the student on their own, below the rubric table, so do
+        not repeat them in "feedback".
+"""
+
+
+def is_feedback_only(rubric_data: dict) -> bool:
+    """True for a parsed rubric item marked ``scored="false"``."""
+    return rubric_data.get("scored", True) is False
+
+
 class PromptBuilder:
     """Builds grading prompts from a question dictionary and student submission."""
 
@@ -500,6 +523,8 @@ class PromptBuilder:
     ) -> str:
         relevant_items = []
         for rubric_id, rubric_data in rubrics.items():
+            if is_feedback_only(rubric_data):
+                continue
             rubric_part = rubric_data.get("part", "all")
             if part_label != "all" and rubric_part not in {"all", part_label}:
                 continue
@@ -522,6 +547,32 @@ class PromptBuilder:
                 lines.append(f"  notes: {notes}")
 
         return "\n".join(lines)
+
+    def _format_feedback_only_items(
+        self,
+        rubrics: dict[str, dict],
+        part_label: str = "all",
+    ) -> str:
+        """The feedback-only section, or "" when the question has none for this part."""
+        lines = []
+        for rubric_id, rubric_data in rubrics.items():
+            if not is_feedback_only(rubric_data):
+                continue
+            rubric_part = rubric_data.get("part", "all")
+            if part_label != "all" and rubric_part not in {"all", part_label}:
+                continue
+            lines.append(f"- id: {rubric_id}")
+            lines.append(f"  part: {rubric_part}")
+            lines.append(f"  display_text: {rubric_data.get('display_text', '')}")
+            lines.append(f"  instruction: {rubric_data.get('condition', '')}")
+            notes = rubric_data.get("notes", "")
+            if notes:
+                lines.append(f"  notes: {notes}")
+        if not lines:
+            return ""
+        return textwrap.dedent(FEEDBACK_ONLY_TEMPLATE).format(
+            feedback_items_block="\n".join(lines)
+        )
 
     def _format_rubric_groups(
         self,
@@ -757,12 +808,17 @@ class PromptBuilder:
         mode = self.get_grading_mode(partial_credit, part_labels, part_label)
         max_points_part = self._get_max_points_part(part_labels, max_points, part_label)
 
+        # Feedback-only items get their own section below the scoring
+        # instructions, so a question whose items are all feedback-only is
+        # scored as a question without a rubric.
+        scored_rubrics = {k: v for k, v in rubrics.items() if not is_feedback_only(v)}
+
         prompt = PROMPT_PREAMBLE
-        if rubrics:
+        if scored_rubrics:
             prompt += self.instructions_rubric(
                 mode,
                 JSON_REQUIREMENT,
-                rubrics,
+                scored_rubrics,
                 rubric_groups=rubric_groups,
                 part_label=part_label,
                 part_labels=part_labels,
@@ -779,6 +835,7 @@ class PromptBuilder:
                 max_points=max_points,
                 max_points_part=max_points_part,
             )
+        prompt += self._format_feedback_only_items(rubrics, part_label)
 
         prompt += "\n\n--- QUESTION HTML ---\n" + question_text
         prompt += "\n\n--- REFERENCE SOLUTION HTML ---\n" + ref_solution

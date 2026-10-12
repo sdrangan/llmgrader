@@ -1,0 +1,16 @@
+% RC step-response circuit for example_repo/unit3/circuits.xml.
+% Build:  pdflatex rc_circuit.tex
+%         pdftocairo -png -r 220 -singlefile rc_circuit.pdf rc_circuit
+\documentclass[border=6pt]{standalone}
+\usepackage[american]{circuitikz}
+\begin{document}
+\begin{circuitikz}[scale=1.1, transform shape]
+  \draw (0,0)
+    to[V, l={$V_s = 5\,\mathrm{V}$}, invert] (0,3)
+    to[cspst, l={$t = 0$}] (2.6,3)
+    to[R, l={$R = 10\,\mathrm{k\Omega}$}] (5.6,3)
+    to[C, l_={$C = 100\,\mu\mathrm{F}$}, v^>={$v_C(t)$}] (5.6,0)
+    -- (0,0);
+  \node[font=\small] at (2.8,-0.7) {Capacitor initially charged: $v_C(0^-) = 2\,\mathrm{V}$};
+\end{circuitikz}
+\end{document}

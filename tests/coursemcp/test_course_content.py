@@ -273,6 +273,7 @@ def test_get_rubric_returns_items_and_grading_notes(client) -> None:
     assert body["rubric"][0] == {
         "id": "ball_move", "part": "a", "display_text": "Free motion",
         "condition": "Position advances by v .", "points": 2.0,
+        "feedback_only": False,
         "notes": "Award from the numbers alone.",
     }
     assert NOTES_SENTINEL in body["grading_notes"]

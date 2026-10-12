@@ -1,0 +1,51 @@
+<unit_test unit="../circuits.xml">
+
+  <!-- The feedback-only items (rc_limits, rc_units) award nothing and cannot be
+       asserted on.  These cases pin the scored items; read the "Notes:" section
+       of each case's feedback in the run report to see what the checks said. -->
+
+  <case id="rc_correct" qtag="RC step response">
+    <description>A correct answer. Full marks; the limits check should confirm 2 V at t = 0 and 5 V at infinity.</description>
+    <solution><![CDATA[
+(a) tau = RC = 10e3 * 100e-6 = 1 s.
+(b) The capacitor voltage cannot jump, so v_C(0+) = 2 V, and the final value is 5 V.
+v_C(t) = 5 - 3 e^{-t} V for t >= 0.
+]]></solution>
+    <expected_points>
+      <part label="a" min="2"/>
+      <part label="b" min="4"/>
+    </expected_points>
+  </case>
+
+  <case id="rc_ignores_initial_charge" qtag="RC step response">
+    <description>The classic mistake: v_C(t) = 5(1 - e^{-t}), as if the capacitor started empty. Only the initial-value item is lost; the limits check should point out that the expression gives 0 V at t = 0, not 2 V.</description>
+    <solution><![CDATA[
+(a) tau = RC = 1 s.
+(b) The capacitor charges toward 5 V: v_C(t) = 5(1 - e^{-t}) V.
+]]></solution>
+    <expected_points>
+      <part label="a" min="2"/>
+      <part label="b" min="3" max="3"/>
+    </expected_points>
+    <expected_rubrics>
+      <item id="rc_initial" min="0" max="0"/>
+      <item id="rc_final" min="1" max="1"/>
+      <item id="rc_exponential" min="2" max="2"/>
+    </expected_rubrics>
+  </case>
+
+  <case id="rc_exponent_units" qtag="RC step response">
+    <description>Right limits, wrong exponent: e^{-t RC} with tau written in units of seconds squared. The exponential item is lost; the units check should say the exponent is not dimensionless.</description>
+    <solution><![CDATA[
+(a) tau = RC = 1 s^2.
+(b) v_C(t) = 5 - 3 e^{-t RC} V.
+]]></solution>
+    <expected_rubrics>
+      <item id="rc_tau" min="1" max="1"/>
+      <item id="rc_initial" min="1" max="1"/>
+      <item id="rc_final" min="1" max="1"/>
+      <item id="rc_exponential" min="0" max="0"/>
+    </expected_rubrics>
+  </case>
+
+</unit_test>

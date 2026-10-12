@@ -657,6 +657,16 @@ def _check_case_against_question(
 
         exercised.add(expectation.item_id)
 
+        if not item.get("scored", True):
+            report(
+                LEVEL_ERROR,
+                f"rubric item '{expectation.item_id}' is feedback-only (scored=\"false\"): it awards "
+                "no points and returns no result, so there is nothing to assert. Remove this "
+                "expectation and read the item's note in the run report instead.",
+                line=expectation.line,
+            )
+            continue
+
         if question.partial_credit:
             if expectation.expect is not None:
                 report(
@@ -781,8 +791,11 @@ def _coverage_findings(
         covered = exercised.get(qtag, set())
         grouped = question.grouped_ids()
 
-        for item_id in question.rubric_items:
+        for item_id, item in question.rubric_items.items():
             if item_id in grouped or item_id in covered:
+                continue
+            if not item.get("scored", True):
+                # Feedback-only: nothing to assert, so nothing is missing.
                 continue
             findings.append(
                 CheckFinding(
