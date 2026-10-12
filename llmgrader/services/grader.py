@@ -900,6 +900,24 @@ class Grader:
         feedback = str(raw_grade.get("feedback", ""))
         rubric_eval = raw_grade.get("rubric_eval")
 
+        # A feedback-only item (scored="false") reports an analysis and nothing
+        # else.  Strip any award or outcome the model attached anyway, so no
+        # total, part total or result can count it.
+        feedback_only_ids = {
+            rubric_id
+            for rubric_id, rubric_data in (rubrics or {}).items()
+            if isinstance(rubric_data, dict) and rubric_data.get("scored", True) is False
+        }
+        if isinstance(rubric_eval, dict) and feedback_only_ids:
+            cleaned_eval = {}
+            for rubric_id, rubric_entry in rubric_eval.items():
+                if hasattr(rubric_entry, "model_dump"):
+                    rubric_entry = rubric_entry.model_dump()
+                if rubric_id in feedback_only_ids and isinstance(rubric_entry, dict):
+                    rubric_entry = {"evidence": rubric_entry.get("evidence", "")}
+                cleaned_eval[rubric_id] = rubric_entry
+            rubric_eval = cleaned_eval
+
         def total_max_points(value):
             if isinstance(value, list):
                 return float(sum(value))
@@ -1013,6 +1031,7 @@ class Grader:
                 "| --- | --- | --- |",
             ]
 
+            note_lines = []
             for rubric_id, rubric_entry in rubric_eval_value.items():
                 if hasattr(rubric_entry, "model_dump"):
                     rubric_entry = rubric_entry.model_dump()
@@ -1022,6 +1041,14 @@ class Grader:
                 rubric_meta = rubric_definitions.get(rubric_id, {})
                 part = rubric_meta.get("part", "all")
                 display_text = rubric_meta.get("display_text", rubric_id)
+
+                if rubric_id in feedback_only_ids:
+                    # Not a criterion: listed below the table, with no score cell.
+                    note_text = " ".join(str(rubric_entry.get("evidence", "")).split())
+                    if note_text:
+                        label = display_text if part == "all" else f"Part {part}: {display_text}"
+                        note_lines.append(f"- **{label}:** {note_text}")
+                    continue
                 point_adjustment = rubric_meta.get("point_adjustment")
                 point_awarded = rubric_entry.get("point_awarded")
                 rubric_result = rubric_entry.get("result")
@@ -1043,10 +1070,15 @@ class Grader:
                     + " |"
                 )
 
-            if len(rubric_lines) == 4:
+            sections = []
+            if len(rubric_lines) > 4:
+                sections.append("\n".join(rubric_lines))
+            if note_lines:
+                sections.append("\n".join(["", "Notes:"] + note_lines))
+            if not sections:
                 return feedback_text
 
-            appendix = "\n".join(rubric_lines)
+            appendix = "\n\n".join(section.strip("\n") for section in sections)
             if feedback_text:
                 return feedback_text + "\n\n" + appendix.lstrip("\n")
             return appendix.lstrip("\n")

@@ -72,8 +72,9 @@ python -c "import llmgrader; print('ok')"
 python run.py --soln_pkg example_repo/soln_package
 ```
 
-Open <http://127.0.0.1:5000/> in your browser.  You should see a course with two
-units -- a calculus unit and a Python unit.
+Open <http://127.0.0.1:5000/> in your browser.  You should see a course with three
+units -- a calculus unit, a Python unit, and a circuits unit whose RC question
+shows feedback-only rubric items.
 
 Nothing else needs to be configured.  The `--soln_pkg` flag loads the course
 straight from disk, so you can skip the admin upload entirely while you explore.

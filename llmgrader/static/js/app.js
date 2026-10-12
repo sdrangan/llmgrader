@@ -1057,6 +1057,9 @@ function formatNotesHtml(text) {
 }
 
 function formatRubricScoreCell(question, rubric) {
+    if (rubric?.scored === false) {
+        return "feedback only";
+    }
     if (question?.partial_credit === true) {
         const adjustment = Number(rubric?.point_adjustment ?? 0);
         const prefix = adjustment > 0 ? "+" : "";

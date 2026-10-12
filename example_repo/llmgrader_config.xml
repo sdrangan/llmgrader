@@ -23,6 +23,12 @@
       <source>unit2/python.xml</source>
       <destination>unit2_python.xml</destination>
     </unit>
+
+    <unit>
+      <name>Unit 3:  Circuits</name>
+      <source>unit3/circuits.xml</source>
+      <destination>unit3_circuits.xml</destination>
+    </unit>
   </units>
 
   <assets>
@@ -33,6 +39,10 @@
     <asset>
       <source>unit2/images/</source>
       <destination>unit2_images</destination>
+    </asset>
+    <asset>
+      <source>unit3/images/</source>
+      <destination>unit3_images</destination>
     </asset>
   </assets>
 

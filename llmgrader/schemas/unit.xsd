@@ -62,6 +62,11 @@
     <xs:attribute name="condition_type" type="conditionTypeEnum" use="optional"/>
     <xs:attribute name="action" type="actionTypeEnum" use="optional"/>
     <xs:attribute name="point_adjustment" type="xs:decimal" use="optional"/>
+    <!-- scored="false" makes a feedback-only item: the grader carries out the
+         analysis its <condition> asks for and reports it below the rubric
+         table, but the item awards no points and passes or fails nothing.
+         Omitted means scored. -->
+    <xs:attribute name="scored" type="xs:boolean" use="optional"/>
     <!-- The skill this item assesses: an id declared in the course's
          skills.xml.  Optional, and nothing consumes it yet.  Tagged on the
          item rather than the question because the grader already decides

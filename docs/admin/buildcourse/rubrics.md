@@ -255,6 +255,74 @@ Partial-credit rubrics work poorly when:
 - an item mixes multiple concepts, such as correctness, efficiency, and style
 
 
+## Feedback-Only Items
+
+Sometimes you want the grader to *work something out* for the student without
+scoring it: check an answer at its limits, trace a few steps of a program or a
+state machine, estimate how long a design will take to build, or remind the
+student what the next part will look for. A **feedback-only item** does that.
+Mark the item `scored="false"`:
+
+```xml
+<item id="rc_limits" part="b" scored="false">
+    <display_text>Check at the limits</display_text>
+    <condition>Evaluate the student's own expression for v_C(t) at t = 0 and as t goes
+    to infinity, and compare each with the physical values: the capacitor starts at
+    2 V, and ends at 5 V once the current stops.  State both values the expression
+    gives.  If one disagrees, say which.</condition>
+</item>
+```
+
+The grader carries out the analysis the `<condition>` asks for on the student's
+own answer, and reports it in a **Notes** section below the rubric table:
+
+```text
+Notes:
+- Part b: Check at the limits: Using your expression, v_C(0) = 5(1 - e^0) = 0 V,
+  while v_C(t) approaches 5 V as t goes to infinity. The final value agrees with
+  the physical value, but the initial value disagrees with the required 2 V.
+```
+
+The item awards no points and passes or fails nothing. If the model returns a
+score for it anyway, the grader drops it before any total is computed.
+
+### Feedback-Only Fields
+
+- `id`: Unique internal identifier, as for any item.
+- `scored="false"`: Makes the item feedback-only. Omitting `scored`, or setting
+  it to `true`, means an ordinary scored item.
+- `part`: Optional. Any part, or `all`. `all` is allowed even on a multi-part
+  `sum_positive` question, because the item counts toward no part.
+- `<display_text>`: The label shown in the Notes section.
+- `<condition>`: An *instruction*, not a criterion: say what to analyze and what
+  to report. Required.
+- `<notes>`: Optional private guidance to the grading model, as for any item.
+
+`point_adjustment`, `condition_type` and `action` have no meaning on a
+feedback-only item, and the validator rejects them. A feedback-only item cannot
+be in a `one_of` group. It works the same way in binary and partial-credit
+questions.
+
+### Writing Good Feedback-Only Items
+
+- **Ask for the student's own work.** "Evaluate the student's expression at
+  t = 0" gives a specific, checkable report. "Check whether the answer is
+  right" duplicates the scored items.
+- **Ask for the numbers.** The report is most useful when it shows the values
+  or steps, so the student can follow it and find the error themselves.
+- **Keep the scored items independent of it.** The scored items decide the
+  grade; a feedback-only item explains or adds context. Do not write a scored
+  item that depends on what the feedback-only item found.
+
+In grading tests (`llmgrader_test`), a feedback-only item needs no assertion,
+and `check` refuses one: there is no score to compare. Read the Notes section of
+each case's feedback in the run report instead.
+
+The demo course has a complete example: `example_repo/unit3/circuits.xml`, an RC
+step response with two feedback-only items (a check at the limits and a units
+check), and its grading tests in `example_repo/unit3/tests/circuits_tests.xml`.
+
+
 ## Avoiding Double Counting
 
 Yes, double counting is a real risk.

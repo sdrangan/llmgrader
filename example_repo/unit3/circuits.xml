@@ -1,0 +1,84 @@
+<unit id="circuits" title="Unit 3:  Circuits" version="1.0">
+
+    <!--
+    A first-order RC step response, written to show feedback-only rubric items
+    (scored="false").  The scored items decide the grade.  The two feedback-only
+    items ask the grader to check the student's own expression, at the limits
+    and for units, and report what it found below the rubric table, without
+    changing any score.  Figures: images/rc_circuit.tex (circuitikz) and
+    images/rc_figs.py (matplotlib); each file says how to rebuild its PNG.
+    -->
+    <question qtag="RC step response" preferred_model="simple">
+        <question_text><![CDATA[
+        <p>In the circuit below, the capacitor has been charged to \(v_C(0^-) = 2\) V and the switch
+        has been open for a long time.  At \(t = 0\) the switch closes, connecting the 5 V source.</p>
+
+        <img src="/pkg_assets/unit3_images/rc_circuit.png" alt="A 5 V source, a switch that closes at t = 0, a 10 kilohm resistor and a 100 microfarad capacitor in series; the capacitor voltage v_C(t) is measured across the capacitor" width="480"/>
+
+        <ol type="a">
+            <li>Find the time constant \(\tau\) of the circuit for \(t \ge 0\).</li>
+            <li>Find the capacitor voltage \(v_C(t)\) for \(t \ge 0\).</li>
+        </ol>
+        ]]></question_text>
+
+        <solution><![CDATA[
+        <p>(a) With the switch closed, the capacitor sees the resistor in series with an ideal source,
+        so \(\tau = RC = (10 \times 10^3\,\Omega)(100 \times 10^{-6}\,\mathrm{F}) = 1\) s.</p>
+
+        <p>(b) A first-order circuit moves from its initial value to its final value exponentially:</p>
+        \[
+            v_C(t) = v_C(\infty) + \big(v_C(0^+) - v_C(\infty)\big)\, e^{-t/\tau}.
+        \]
+        <p>The capacitor voltage cannot jump, so \(v_C(0^+) = v_C(0^-) = 2\) V.  As \(t \to \infty\) the
+        current stops, there is no drop across \(R\), and \(v_C(\infty) = 5\) V.  So</p>
+        \[
+            v_C(t) = 5 - 3\, e^{-t}\ \mathrm{V}, \qquad t \ge 0 .
+        \]
+        <p>Check: at \(t = 0\) this gives 2 V, and as \(t \to \infty\) it gives 5 V.</p>
+
+        <img src="/pkg_assets/unit3_images/rc_step_soln.png" alt="v_C(t) rising from 2 V at t = 0 toward 5 V, reaching 3.90 V at t = 1 s" width="480"/>
+        ]]></solution>
+
+        <grading_notes><![CDATA[
+        - Accept the answer in any equivalent form, for example 2 + 3(1 - e^{-t}) V, or with tau or RC left symbolic in part (b) if part (a) gives its value.
+        - A common error is v_C(t) = 5(1 - e^{-t}), which ignores the initial charge.  It has the right final value and time constant but the wrong initial value.
+        ]]></grading_notes>
+
+        <partial_credit>true</partial_credit>
+        <required>false</required>
+        <parts>
+            <part><part_label>a</part_label><points>2</points></part>
+            <part><part_label>b</part_label><points>4</points></part>
+        </parts>
+        <rubrics>
+            <item id="rc_tau" part="a" point_adjustment="+2">
+                <display_text>Time constant</display_text>
+                <condition>The student gives tau = RC = 1 s.  Award 1 if the method is right but the arithmetic or the units are wrong.</condition>
+            </item>
+            <item id="rc_initial" part="b" point_adjustment="+1">
+                <display_text>Initial value</display_text>
+                <condition>The student's v_C(t) equals 2 V at t = 0, the capacitor's initial voltage.</condition>
+            </item>
+            <item id="rc_final" part="b" point_adjustment="+1">
+                <display_text>Final value</display_text>
+                <condition>The student's v_C(t) approaches 5 V as t goes to infinity.</condition>
+            </item>
+            <item id="rc_exponential" part="b" point_adjustment="+2">
+                <display_text>Exponential with the time constant</display_text>
+                <condition>The transition between the initial and final values is an exponential e^{-t/tau} with tau = RC = 1 s.  Award 0 if the exponent is not t divided by the time constant, for example e^{-t RC}.</condition>
+            </item>
+
+            <!-- Feedback-only: analyzed and reported below the rubric table, worth no points. -->
+            <item id="rc_limits" part="b" scored="false">
+                <display_text>Check at the limits</display_text>
+                <condition>Evaluate the student's own expression for v_C(t) at t = 0 and as t goes to infinity, and compare each with the physical values: the capacitor starts at 2 V, and ends at 5 V once the current stops.  State both values the expression gives.  If one disagrees, say which, and that this check is a quick way to catch the error.</condition>
+            </item>
+            <item id="rc_units" scored="false">
+                <display_text>Units</display_text>
+                <condition>Check the units in the student's answers: tau should come out in seconds, and the exponent of e must be dimensionless (t divided by a time).  If an exponent has units, for example t times RC, which has units of seconds squared, point it out.  If the units are all consistent, say so in one sentence.</condition>
+            </item>
+        </rubrics>
+        <rubric_total>sum_positive</rubric_total>
+    </question>
+
+</unit>

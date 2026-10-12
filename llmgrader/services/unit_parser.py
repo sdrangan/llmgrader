@@ -333,6 +333,11 @@ class UnitParser:
         return parts
 
     @staticmethod
+    def is_feedback_only(rubric_item: ET.Element) -> bool:
+        """True for an item marked ``scored="false"``: graded for feedback, worth no points."""
+        return (rubric_item.get("scored") or "").strip().lower() in {"false", "0"}
+
+    @staticmethod
     def _parse_partial_credit_for_validation(question: ET.Element) -> bool:
         partial_credit_elem = question.find("partial_credit")
         if partial_credit_elem is not None and partial_credit_elem.text:
@@ -369,6 +374,7 @@ class UnitParser:
                     "id": item_id,
                     "part": part,
                     "point_adjustment": point_adjustment,
+                    "scored": not UnitParser.is_feedback_only(rubric_item),
                 }
             )
 
@@ -405,6 +411,13 @@ class UnitParser:
                 rubric_part = rubric_item["part"]
                 rubric_id = rubric_item["id"]
 
+                if not rubric_item["scored"]:
+                    if rubric_part != "all" and rubric_part not in part_points:
+                        validation_errors.append(
+                            f"{unit_path}: {question_path}: rubric item '{rubric_id}' references unknown part '{rubric_part}'."
+                        )
+                    continue
+
                 if rubric_part == "all":
                     validation_errors.append(
                         f"{unit_path}: {question_path}: rubric_total '{effective_rubric_total}' on a multi-part question does not allow rubric item '{rubric_id}' with part='all'."
@@ -423,6 +436,8 @@ class UnitParser:
             for rubric_item in rubric_items:
                 rubric_part = rubric_item["part"]
                 point_adjustment = rubric_item["point_adjustment"]
+                if not rubric_item["scored"]:
+                    continue
                 if rubric_part in positive_sums and point_adjustment is not None and point_adjustment > 0:
                     positive_sums[rubric_part] += float(point_adjustment)
 
@@ -515,6 +530,7 @@ class UnitParser:
 
             part_labels = cls._extract_part_labels_for_validation(question)
             rubric_ids: set[str] = set()
+            feedback_only_ids: set[str] = set()
             rubrics_elem = question.find("rubrics")
             rubric_items = rubrics_elem.findall("item") if rubrics_elem is not None else []
 
@@ -549,6 +565,23 @@ class UnitParser:
                             f"'{repeated.group(0)}'; the grader already prefixes the part, so this "
                             f"renders as 'Part {rubric_part}: Part {rubric_part}: ...'. Drop the label."
                         )
+
+                scored_attr = rubric_item.get("scored")
+                if scored_attr is not None and scored_attr.strip().lower() not in {"true", "false", "1", "0"}:
+                    errors.append(f"{source_label}: {rubric_path}: scored must be 'true' or 'false'.")
+
+                if cls.is_feedback_only(rubric_item):
+                    feedback_only_ids.add(rubric_id)
+                    if not (rubric_item.findtext("condition") or "").strip():
+                        errors.append(
+                            f"{source_label}: {rubric_path}: A feedback-only item needs a <condition> saying what to analyze."
+                        )
+                    for attr_name in ("point_adjustment", "condition_type", "action"):
+                        if rubric_item.get(attr_name) is not None:
+                            errors.append(
+                                f"{source_label}: {rubric_path}: {attr_name} has no meaning on a feedback-only item (scored='false'); remove it."
+                            )
+                    continue
 
                 if partial_credit:
                     if rubric_item.get("point_adjustment") is None:
@@ -611,6 +644,11 @@ class UnitParser:
                         if child_id not in rubric_ids:
                             warnings.append(
                                 f"{source_label}: {group_path}: Unknown rubric id '{child_id}' is ignored."
+                            )
+                            continue
+                        if child_id in feedback_only_ids:
+                            errors.append(
+                                f"{source_label}: {group_path}: '{child_id}' is feedback-only (scored='false') and cannot be in a one_of group, which chooses between scored items."
                             )
                             continue
                         valid_ids.append(child_id)
@@ -832,8 +870,11 @@ class UnitParser:
             self._log_question_warning(log, unit_name, qtag, "has rubric item without an id; ignoring.")
             return None, None
 
-        allowed_attrs = {"id", "part"}
-        if partial_credit:
+        feedback_only = self.is_feedback_only(rubric_item)
+        allowed_attrs = {"id", "part", "scored"}
+        if feedback_only:
+            pass
+        elif partial_credit:
             allowed_attrs.update({"point_adjustment"})
         else:
             allowed_attrs.update({"condition_type", "action"})
@@ -882,6 +923,12 @@ class UnitParser:
             "notes": notes,
             "part": part,
         }
+
+        if feedback_only:
+            # Graded for its analysis alone: no points, no pass/fail, so none of the
+            # scoring attributes apply and the dict carries none of them.
+            rubric_data["scored"] = False
+            return item_id, rubric_data
 
         if partial_credit:
             if rubric_item.get("condition_type") is not None:
