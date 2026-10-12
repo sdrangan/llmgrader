@@ -22,7 +22,7 @@ import threading
 from typing import Union, Literal
 from llmgrader.services.parselatex import parse_latex_soln
 import sys
-from pydantic import ValidationError, ConfigDict, model_validator
+from pydantic import ValidationError, ConfigDict, field_validator, model_validator
 
 
 import sys
@@ -263,6 +263,17 @@ class GraderRawResult(BaseModel):
     feedback: str
     points: float | None = None
     rubric_eval: dict[str, dict] | None = None
+
+    @field_validator("rubric_eval", mode="before")
+    @classmethod
+    def _drop_stray_rubric_entries(cls, value):
+        # The model sometimes puts a stray non-object entry in rubric_eval,
+        # such as "feedback": "<text>" beside the rubric ids.  Every rubric id
+        # maps to an object, so such an entry is not an evaluation; drop it
+        # rather than fail the whole grade over it.
+        if isinstance(value, dict):
+            return {key: entry for key, entry in value.items() if isinstance(entry, dict)}
+        return value
 
 def summarize_tool_calls(response) -> str:
     """
