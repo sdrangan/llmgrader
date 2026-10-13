@@ -396,6 +396,11 @@ def _add_material_tools(mcp: MCPServer, require_course, public_url, code) -> Non
         if kind:
             items = [i for i in items if i.kind == kind.strip().lower()]
         if unit:
+            if not catalog.unit_names_matching(unit):
+                names = list(dict.fromkeys(n for i in catalog.items.values()
+                                           for n in i.unit_names))
+                raise ToolError(f"No unit matches {unit!r}. Units with materials: "
+                                + "; ".join(repr(n) for n in names))
             items = [i for i in items if catalog.matches_unit(i, unit)]
         return items
 
@@ -409,8 +414,11 @@ def _add_material_tools(mcp: MCPServer, require_course, public_url, code) -> Non
         what a student is pointed to: a deck, a demo with its docs pages and
         code, a lab with its starting files.  It has an id, a title, a kind,
         the units it goes with and a count of its parts; get_material opens
-        it.  Pass unit (a name from list_units) or kind to narrow the list.
-        An item with readable false exists but is not available to read.
+        it.  Pass unit or kind to narrow the list.  unit is matched loosely:
+        a name from list_units in any case and spacing, or the part before its
+        colon ("unit 5").  units in the result are the units the listed items
+        go with, not your filter echoed back.  An item with readable false
+        exists but is not available to read.
         """
         log_call("list_materials", course=course_id, unit=unit, kind=kind)
         grader, catalog, note = course_catalog(course_id)
@@ -621,9 +629,10 @@ def _add_material_tools(mcp: MCPServer, require_course, public_url, code) -> Non
         not meanings: if a search misses, try the course's own terms or
         synonyms ("FSM", "state machine"), or an exact identifier.  Each hit
         names its item (id) and kind, its part (path) and a page or lines;
-        pass those to read_material.  Narrow with unit, kind, or format
-        ("slides", "pdf", "page" for docs pages, "text" for code and other
-        files).  more counts hits left out: narrow the search to see them.
+        pass those to read_material.  Narrow with unit (matched loosely, as in
+        list_materials: "unit 5" will do), kind, or format ("slides", "pdf",
+        "page" for docs pages, "text" for code and other files).  more counts
+        hits left out: narrow the search to see them.
         """
         log_call("search_materials", course=course_id, unit=unit, kind=kind,
                  format=format)     # never the query: it is the student's words
