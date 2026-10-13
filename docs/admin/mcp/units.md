@@ -46,13 +46,13 @@ it:
 
 ```xml
 <llmgrader_mcp>
-  <slides>
-    ...
-  </slides>
-
   <units>
     <unit section="Past exams">exams/MidtermS2026/midterm_s2026.xml</unit>
   </units>
+
+  <materials>
+    ...
+  </materials>
 </llmgrader_mcp>
 ```
 
@@ -61,9 +61,16 @@ it:
 | `<unit>` text | The unit XML file, relative to this config file (or to `root`). |
 | `section` | Optional. A heading the unit is listed under in `list_units`, after the portal's units. Consecutive units with the same section share one heading. |
 | `name` | Optional. What the assistant calls the unit. Default: the unit's `title` attribute. |
-| `root` | Optional. A `<root>` the path is relative to, as for slide decks. |
+| `root` | Optional. A `<root>` the path is relative to, as for an item's files. |
 
-The `<units>` element goes after `<slides>` (and `<slides>` may be left out).
+The `<units>` element goes after `<roots>` and before `<unit_types>`, `<code>`
+and `<materials>`.
+
+These are units **with questions**. A unit that holds only material -- course
+setup, a lecture with no problem set -- is a material `<unit>` inside
+`<materials>` instead ([Packaging](./package.md#step-3-write-llmgrader_mcp_configxml)).
+An item can name an MCP-only unit, so a past exam's own handout can go with
+it.
 
 **A unit listed in both configs is an error**, and so is a `name` the portal
 already uses: the second list is for units the portal does not have.
@@ -113,13 +120,14 @@ themselves untouched.
 llmgrader_mcp_build --dry-run
 ```
 
-now lists the MCP-only units after the slide decks, with their files. Then
+now lists the MCP-only units after the items, with their files. Then
 build and upload as usual (`create_soln_pkg`, then **Load Course Package**).
 The build prints one line per unit:
 
 ```text
 Building course MCP material from llmgrader_mcp_config.xml:
   [fsm] 41 slides, with images, 41 described
+  [fsm] slides: 1 paged, 0 text file(s)
   [unit] Midterm, Spring 2026 (Past exams)
 ```
 

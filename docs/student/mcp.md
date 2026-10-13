@@ -15,9 +15,10 @@ up the course material for itself, so you can ask it things like:
 - *Give me a similar problem to practice on.*
 - *Where is this described in the class slides?*
 - *Show me how the class demo declares AXI4-Lite registers.*
+- *Where do I start the take-home part of the lab?*
 
-and it answers from this course's actual questions and slides, not from whatever
-it remembers about the topic in general.
+and it answers from this course's actual questions, slides, demos and labs,
+not from whatever it remembers about the topic in general.
 
 ---
 
@@ -48,11 +49,14 @@ Once connected, your assistant can:
 - **read the rubric** the portal grades a problem against, including the common
   mistakes it looks for;
 - **read the worked solution**, to check your reasoning or give you a hint;
-- **find where a topic is taught in the lecture slides**, and look at a slide
+- **list the course materials** -- lecture slides, class demos, labs, and
+  whatever else your instructor publishes, such as handouts -- unit by unit;
+- **find where a topic is taught or shown**, with one search across the
+  slides, the docs pages and the code, and look at a slide or a handout page
   -- its image, its text and the instructor's speaker notes;
-- **read the class demos** -- their code and the docs pages that walk through
-  them -- search them for a pragma or a signal name, and give you a link to the
-  exact lines, when your instructor publishes them;
+- **read the class demos and labs** -- their code, the docs pages that walk
+  through them, and the files a lab starts you from, such as a prompt
+  template -- and give you a link to the published page or the exact lines;
 - **read past exams** your instructor has published, with their rubrics and
   solutions, and your instructor's description of what this term's exams are
   like -- so it can write practice problems in the style of the real exam.
@@ -61,6 +65,12 @@ Once connected, your assistant can:
 When your assistant looks at a slide, it sees the image but cannot paste it
 into the chat. Ask it to **"give me the link to that slide"**: each slide has a
 link that opens its image in your browser.
+
+Your instructor may publish worked solutions to labs as well. Your assistant
+treats them like the problems' worked solutions: it uses them to check your
+reasoning and give hints, and shows them only if you ask. Some materials,
+such as answer keys, may be listed without being readable: your assistant can
+tell you they exist, not what is in them.
 
 It is set up to help you study rather than hand you answers: it will usually
 start with a hint and show the full solution only if you ask for it. To get the
@@ -71,12 +81,12 @@ most from it, try asking things like:
 - *"Give me a similar problem, then check my answer."*
 - *"Which slide explains this? Show me."*
 - *"Which demo shows how to write a testbench for this? Link me to the lines."*
+- *"What do I need for the take-home part of the command-response lab?"*
 - *"Give me a midterm-style problem on FSMs, like the past midterm."*
 
 Nothing you do through the MCP is graded. The portal counts its use
-anonymously -- which problems, slides and demo files are looked at, and how
-often -- so
-your instructor can see what helps. It never records your name, your
+anonymously -- which problems, slides, demos and lab files are looked at,
+and how often -- so your instructor can see what helps. It never records your name, your
 questions or what your assistant says to you.
 
 ---
@@ -233,7 +243,9 @@ anything, or says it has no such tool:
 - **Is the address exactly right?** It ends in `/mcp` -- or in `/mcp/<token>`
   if you put the token in the address.
 - **Did you start a new chat** after adding it? Some apps only pick up a new
-  connector in a new conversation.
+  connector in a new conversation. The same goes after the course's tools
+  change: if your assistant mentions a tool it cannot find, start a new chat,
+  or remove the connector and add it again.
 - **Ask it explicitly:** "Use the course tools to list the units." An assistant
   that still cannot find the tools is not connected.
 

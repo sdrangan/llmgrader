@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- materials.xml: corrections to the course's mirrored materials, kept in
+     the mirrored repo itself.  Optional, and meant to stay short.
+
+     The course config (llmgrader_mcp_config.xml) makes the items (one per
+     folder an <items> pattern matches), and the portal derives which slides
+     and units go with each from the references the slides and docs pages
+     already make.  This file says what neither does: a unit, a title, a
+     description, a different kind, slides to add or a wrong slide link to
+     drop.  It is read on every sync, after the config's own refinements, so
+     a change here reaches students without a package rebuild.  A commit
+     whose file fails this schema is not served.  See
+     plans/unified_materials.md. -->
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" elementFormDefault="qualified">
+
+  <!-- An item id or a deck id, as the config gives them. -->
+  <xs:simpleType name="idType">
+    <xs:restriction base="xs:string">
+      <xs:pattern value="[a-z0-9][a-z0-9_-]{0,63}"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <!-- Slides of one deck that go with the item.  Without first, the deck's
+       units alone. -->
+  <xs:complexType name="slidesType">
+    <xs:attribute name="deck" type="idType" use="required"/>
+    <xs:attribute name="first" type="xs:positiveInteger" use="optional"/>
+    <xs:attribute name="last" type="xs:positiveInteger" use="optional"/>
+  </xs:complexType>
+
+  <!-- Drop every link derived from one deck: its slides and its units. -->
+  <xs:complexType name="notSlidesType">
+    <xs:attribute name="deck" type="idType" use="required"/>
+  </xs:complexType>
+
+  <!-- A refinement of one item.  unit, also and each <unit> name a unit: a
+       <name> from llmgrader_config.xml, or a material unit by id or name. -->
+  <xs:complexType name="itemType">
+    <xs:sequence>
+      <xs:element name="description" type="xs:string" minOccurs="0"/>
+      <xs:choice minOccurs="0" maxOccurs="unbounded">
+        <xs:element name="unit" type="xs:string"/>
+        <xs:element name="slides" type="slidesType"/>
+        <xs:element name="not_slides" type="notSlidesType"/>
+      </xs:choice>
+    </xs:sequence>
+    <xs:attribute name="id" type="idType" use="required"/>
+    <xs:attribute name="kind" type="idType" use="optional"/>
+    <xs:attribute name="title" type="xs:string" use="optional"/>
+    <xs:attribute name="unit" type="xs:string" use="optional"/>
+    <xs:attribute name="also" type="xs:string" use="optional"/>
+  </xs:complexType>
+
+  <xs:element name="materials">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element name="item" type="itemType" minOccurs="0" maxOccurs="unbounded"/>
+      </xs:sequence>
+    </xs:complexType>
+  </xs:element>
+</xs:schema>

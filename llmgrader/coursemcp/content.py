@@ -20,8 +20,22 @@ from dataclasses import dataclass
 
 from mcp.server.mcpserver.exceptions import ToolError
 
-from llmgrader.coursemcp.materials import load_materials
+from llmgrader.coursemcp.materials import UnitResolver, load_materials
 from llmgrader.services.unit_parser import DEFAULT_UNIT_TYPE
+
+# The unit_type of a unit that holds material and no questions
+# (plans/unified_materials.md): course setup, a lecture with no problem set.
+MATERIAL_UNIT_TYPE = "material"
+MATERIAL_SECTION = "Course material"
+
+# What a worked solution comes with, whether it is a question's (get_solution)
+# or a material of a kind with the tutor policy: one text, so the two cannot
+# drift apart.
+TUTOR_INSTRUCTION = (
+    "This is a worked solution. Use it to help the student reason toward the "
+    "answer: check their reasoning, find where it goes wrong, or build a hint. "
+    "Show it to them only if they ask to see it."
+)
 
 # A figure larger than this is described rather than sent.  Tool results are
 # context: one oversized image can exhaust a client's window on its own.
@@ -49,11 +63,13 @@ class Figure:
 
 @dataclass
 class CourseUnits:
-    """Every unit the MCP serves: the portal's, then the MCP-only ones.
+    """Every unit the MCP serves: the portal's, the MCP-only ones, and the
+    units that hold only material.
 
     ``order`` is list_units' sequence of section headings and units;
     ``units`` maps a unit name to its questions, as ``Grader.units`` does;
-    ``meta`` maps it to ``unit_type`` and ``semester``.
+    ``meta`` maps it to ``unit_type`` and ``semester`` (and a material unit's
+    ``description``).
     """
     units: dict
     order: list[dict]
@@ -90,6 +106,15 @@ def course_units(grader) -> CourseUnits:
             order.append({"type": "unit", "name": name})
             units[name] = parsed[name]
             meta[name] = parsed_meta.get(name, {})
+    material_units = [u for u in (materials.material_units if materials else [])
+                      if u["name"] not in units]
+    if material_units:
+        order.append({"type": "section", "name": MATERIAL_SECTION})
+        for unit in material_units:
+            order.append({"type": "unit", "name": unit["name"]})
+            units[unit["name"]] = {}
+            meta[unit["name"]] = {"unit_type": MATERIAL_UNIT_TYPE,
+                                  "description": unit.get("description", "")}
     for name in meta:
         meta[name].setdefault("unit_type", DEFAULT_UNIT_TYPE)
         meta[name].setdefault("semester", "")
@@ -99,6 +124,16 @@ def course_units(grader) -> CourseUnits:
 def unit_names(grader) -> list[str]:
     """The course's unit names in the order list_units gives them."""
     return [item["name"] for item in course_units(grader).order if item["type"] == "unit"]
+
+
+def unit_resolver(grader) -> UnitResolver:
+    """What a material's unit reference resolves against: every unit, and
+    the material units by id as well (``materials.UnitResolver``)."""
+    materials = load_materials(grader.soln_pkg)
+    material_units = materials.material_units if materials else []
+    material_names = {u["name"] for u in material_units}
+    return UnitResolver([n for n in unit_names(grader) if n not in material_names],
+                        material_units)
 
 
 def resolve_unit(grader, unit: str) -> str:

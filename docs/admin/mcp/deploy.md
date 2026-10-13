@@ -15,8 +15,10 @@ start command: it is switched on with environment variables.
 
 ## Step 1: Decide whether to require a token
 
-The MCP serves your questions, rubrics, **worked solutions** and slides. Turning
-it on publishes them to anyone with the address.
+The MCP serves your questions, rubrics, **worked solutions** and course
+materials -- everything but the items of a `private` kind
+([Packaging](./package.md#the-model)). Turning it on publishes them to anyone
+with the address.
 
 - **No token (the default).** Students need nothing but the address, so you can
   put it on the course web page. Choose this when the problems are study
@@ -45,7 +47,7 @@ In the Render dashboard, open your portal's web service, go to
 | --- | --- | --- |
 | `LLMGRADER_MCP_ENABLED` | `1` | Serves the course MCP at `/mcp`. Off when unset. |
 | `LLMGRADER_MCP_TOKEN` | the token from step 1 | **Optional.** When set, required on every MCP request. Unset, the MCP is open. |
-| `LLMGRADER_MCP_CODE` | `1` | **Optional.** Serves the demo code tools, for a course whose package points at a demo repository. See [Demo Code and Docs](./code.md). |
+| `LLMGRADER_MCP_CODE` | `1` | **Optional.** Serves material from a public repository, for a course whose package points at one. Unset, only the package's items are served. See [Material from a Public Repository](./sources.md). |
 
 Save. Render redeploys the service. When it starts, the deploy log shows one of:
 
@@ -74,8 +76,15 @@ does not load the MCP code at all.
 
 Nothing separate: the MCP serves the course packages the portal already has.
 [Upload the course package](../buildcourse/upload.md) as usual -- built with
-slides if you followed [Packaging](./package.md) -- and the MCP serves it as
-soon as the upload finishes.
+its materials if you followed [Packaging](./package.md) -- and the MCP serves
+it as soon as the upload finishes.
+
+{: .warning }
+**After updating the portal past `<materials>`, rebuild and upload every
+course's package.** A package built before it serves its questions and past
+exams but no slides or demos. Then reconnect claude.ai (remove and add the
+connector, or start a new chat): it caches a server's tool list, and the
+material tools have new names.
 
 ---
 
@@ -107,10 +116,9 @@ curl -s -X POST https://<portal>/mcp \
 ```
 
 A working server replies with JSON listing its tools: `list_courses`,
-`list_units`, `list_questions`, `get_question`, `get_rubric`, `get_solution`,
-`list_materials`, `get_outline`, `search_slides` and `get_slide` -- and, with
-`LLMGRADER_MCP_CODE` set, `list_demos`, `list_demo_files`, `get_demo_file` and
-`search_demos`.
+`list_units`, `list_unit_types`, `list_questions`, `get_question`,
+`get_rubric`, `get_solution`, `list_materials`, `get_material`,
+`read_material` and `search_materials`.
 
 | Reply | Meaning |
 | --- | --- |
@@ -122,7 +130,7 @@ A working server replies with JSON listing its tools: `list_courses`,
 Connect it as a student would, following
 [Studying with Your Own AI](../../student/mcp.md), and try the questions on
 that page -- "List the problems in unit 2", "Where is this described in the
-class slides?". Do this from claude.ai at least once: it is the path most
+class slides?", "Where do I start the take-home lab?". Do this from claude.ai at least once: it is the path most
 students will use, and it reaches your portal from Anthropic's servers rather
 than from your own machine.
 
@@ -169,23 +177,22 @@ Read it in **Analytics ▸ MCP DB** ([MCP usage](../../analytics/mcp_usage.md)).
 **Recorded:**
 
 - when, which tool, and whether it succeeded, failed or was refused;
-- the course, unit, question, deck and slide asked about -- as the tool
-  resolved them, so *"unit 2"* is recorded as the unit's real name -- and the
-  demo and demo file;
+- the course, unit and question asked about, and for a material, the item,
+  its kind, the file and its format, and the slide or page -- as the tool
+  resolved them, so *"unit 2"* is recorded as the unit's real name;
 - how big the answer was: its size in bytes, how many items a list held, how
   many images it carried;
 - which kind of assistant made the call -- `claude.ai`, `vscode`,
   `claude-code` or `other` -- and the MCP protocol version;
 - an anonymous session id, so calls from one chat can be grouped (below);
 - the version of the course package that answered (see
-  [package versions](./package.md#package-versions)), and for a demo call, the
-  commit of the demo repository that answered.
+  [package versions](./package.md#package-versions)), and for a material
+  call, the commit of the public repository that answered.
 
 **Never recorded:**
 
-- **the student's words.** A slide or demo search is recorded with its query
-  replaced by `<redacted>`; the two searches are the only tools that take free
-  text.
+- **the student's words.** A search is recorded with its query replaced by
+  `<redacted>`; `search_materials` is the only tool that takes free text.
 - **who the student is.** No name, email, IP address or browser string. The
   MCP has no sign-in, so there is no identity to record; with a course token
   set, every student sends the same token, and it is not recorded either.
@@ -211,9 +218,9 @@ Before…** (MCP DB only). Grades are never touched by it.
 ## Notes for operators
 
 - **What is logged.** Besides the usage database, one log line per tool call:
-  the tool, the course, and the unit, question, deck or slide asked about --
-  never the student's words. A slide search logs its course and unit, and a
-  demo search its course and demo, not the query.
+  the tool, the course, and the unit, question, item, file or page asked
+  about -- never the student's words. A search logs its course, unit, kind
+  and format, not the query.
 - **`/mcp` is not behind Google sign-in.** MCP requests go to the MCP directly,
   not through the portal's login; the token is what protects it.
 - **A bad token gets 403, not 401.** A 401 would make claude.ai start an OAuth

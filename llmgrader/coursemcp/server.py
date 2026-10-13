@@ -1,7 +1,8 @@
 """The course MCP tools: what a student's own AI can ask the portal.
 
-Read-only: the course's titles, questions, rubrics, solutions and slides,
-and the units it publishes here alone, such as past exams.
+Read-only: the course's titles, questions, rubrics and solutions, the units
+it publishes here alone, such as past exams, and its materials -- slides,
+demos, labs, whatever kinds the course declares (plans/unified_materials.md).
 Who may call it -- anyone, or only holders of a course token -- is
 ``mount.py``'s business, not the tools'.
 """
@@ -14,8 +15,14 @@ from mcp.server.mcpserver import Image, MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 
 from llmgrader.coursemcp import content as cc
-from llmgrader.coursemcp.code import FIRST_FETCH_WAIT_S, CodeError
-from llmgrader.coursemcp.materials import load_materials
+from llmgrader.coursemcp.catalog import catalog_for, page_url
+from llmgrader.coursemcp.code import (
+    FIRST_FETCH_WAIT_S,
+    CodeError,
+    normalize_request_path,
+    read_source,
+)
+from llmgrader.coursemcp.materials import PAGE, PAGED_FORMATS, TEXT, load_materials
 from llmgrader.services.course_registry import CourseRegistry
 from llmgrader.services.unit_parser import DEFAULT_UNIT_TYPE
 
@@ -32,31 +39,25 @@ CONTENT_INSTRUCTIONS = (
     "writing a practice problem or practice exam like a midterm or another "
     "type, read that type's description from list_unit_types -- it says what "
     "this term's assessments of that type are like -- and model the problem "
-    "on that type's past units. Lecture slides: list_materials, then get_outline or "
-    "search_slides to find where a topic is taught, and get_slide to see a "
-    "slide -- most of a slide's content is in its figure, so look at the "
-    "image, and cite slides by deck and number. This is practice material for a student who is "
+    "on that type's past units. The course's materials -- lecture slides, "
+    "demos, labs, handouts: each course names its own kinds -- come from "
+    "list_materials, which says what each kind is and which unit each item "
+    "goes with. When a student asks where something is taught or shown, or "
+    "how to do it, search_materials for its exact identifiers or a phrase "
+    "(one search covers slides, docs pages and code), then get_material to "
+    "open an item and see its parts, and read_material to read one slide, "
+    "page or file. Most of a slide's content is in its figure, so look at "
+    "the image. Cite a slide by item and page, and code as path:line; give "
+    "the student view_url for a slide or docs page and source_url for exact "
+    "lines of code. This is practice material for a student who is "
     "studying: when they are working on a problem, help them reason toward "
     "the answer -- use the rubric to see what counts, and the worked solution "
     "to check their reasoning or build a hint -- rather than reproducing the "
-    "solution, unless they ask for it. The portal grades their submitted "
+    "solution, unless they ask for it. A result that carries an instruction "
+    "is a worked solution: follow it. The portal grades their submitted "
     "answers; nothing done through these tools is graded. The portal counts "
-    "which tools are called and on which questions and slides, anonymously "
-    "and without the student's words."
-)
-
-# Added when the portal serves demo code (LLMGRADER_MCP_CODE).
-CODE_INSTRUCTIONS = (
-    " Demos: the instructor's in-class demos -- SystemVerilog, Vitis HLS C++ "
-    "and Tcl, Python build scripts and notebooks -- and the docs pages that "
-    "walk through them often show what the slides only describe. When a "
-    "student asks where something is shown or how to do it (a pragma, an "
-    "interface, a testbench, a build step), search_demos for its exact "
-    "identifiers or a phrase, then get_demo_file to read the docs page or the "
-    "code; list_demos says which unit and slides each demo goes with, so you "
-    "can point the student to a demo to study. Give the student view_url for "
-    "a docs page and source_url for exact lines of code, and cite code as "
-    "path:line. Demo calls are counted the same way, by demo and file."
+    "which tools are called and on which questions, materials and files, "
+    "anonymously and without the student's words."
 )
 
 
@@ -75,12 +76,12 @@ def build_course_mcp(registry: CourseRegistry, *, content: bool = False,
                      public_url=lambda: None, code=None) -> MCPServer:
     """An MCP server whose tools read the courses *registry* serves.
 
-    *content* adds the question, rubric, solution and slide tools; ``mount.py``
-    always passes it -- a token, if any, is checked before a request gets
-    here.  *public_url* returns the portal's public address, for links a
-    student can open, or None.  *code*, a ``CodeLibrary``, adds the demo
-    tools (``plans/demo_code_mcp.md``); ``mount.py`` passes one only when
-    ``LLMGRADER_MCP_CODE`` is set.
+    *content* adds the question, rubric, solution and material tools;
+    ``mount.py`` always passes it -- a token, if any, is checked before a
+    request gets here.  *public_url* returns the portal's public address, for
+    links a student can open, or None.  *code*, a ``CodeLibrary``, adds each
+    course's mirrored items to its materials; ``mount.py`` passes one only
+    when ``LLMGRADER_MCP_CODE`` is set.
 
     Only the tools are defined here.  How it is served over HTTP is
     ``mount.py``'s business: in mcp 2 those settings belong to the app, not
@@ -88,8 +89,7 @@ def build_course_mcp(registry: CourseRegistry, *, content: bool = False,
     """
     mcp = MCPServer(
         "llmgrader-course",
-        instructions=INSTRUCTIONS + (CONTENT_INSTRUCTIONS if content else "")
-        + (CODE_INSTRUCTIONS if content and code is not None else ""),
+        instructions=INSTRUCTIONS + (CONTENT_INSTRUCTIONS if content else ""),
         # No subscriptions/listen.  A listen request is a POST held open to
         # stream change notifications, and under gunicorn's sync worker an
         # open stream holds the whole portal.  Course content changes only on
@@ -117,7 +117,7 @@ def build_course_mcp(registry: CourseRegistry, *, content: bool = False,
         """
         # The version is here and in no other tool's result: an assistant
         # reads every result, and on any other call it would be noise.  So
-        # is the demo repo's commit, for a course that publishes demos.
+        # is the mirrored repo's commit, for a course that has one.
         courses = []
         for entry in registry.courses():
             item = {"course_id": entry.id, "name": entry.name, "semester": entry.semester,
@@ -136,6 +136,8 @@ def build_course_mcp(registry: CourseRegistry, *, content: bool = False,
         of questions and its unit_type -- problem_set for homework, or a type
         such as midterm for a past exam -- and, for past material, the
         semester it was given.  list_unit_types says what each type is like.
+        A unit of type material holds material and no questions (course
+        setup, say); list_materials lists what is in it.
         course_id must come from list_courses.
         """
         units = cc.course_units(require_course(course_id))
@@ -148,6 +150,8 @@ def build_course_mcp(registry: CourseRegistry, *, content: bool = False,
                          "unit_type": meta.get("unit_type", DEFAULT_UNIT_TYPE)}
                 if meta.get("semester"):
                     entry["semester"] = meta["semester"]
+                if meta.get("description"):
+                    entry["description"] = meta["description"]
                 items.append(entry)
             else:
                 items.append({"type": item["type"], "name": item["name"]})
@@ -172,6 +176,8 @@ def build_course_mcp(registry: CourseRegistry, *, content: bool = False,
         for item in units.order:
             if item["type"] == "unit":
                 unit_type = units.meta.get(item["name"], {}).get("unit_type", DEFAULT_UNIT_TYPE)
+                if unit_type == cc.MATERIAL_UNIT_TYPE:
+                    continue        # not an assessment: list_materials covers it
                 by_type.setdefault(unit_type, []).append(item["name"])
         # A described type with no unit yet still says what this term's will be.
         for type_id in described:
@@ -188,9 +194,8 @@ def build_course_mcp(registry: CourseRegistry, *, content: bool = False,
         return result
 
     if content:
-        _add_content_tools(mcp, require_course, public_url, code)
-        if code is not None:
-            _add_code_tools(mcp, require_course, public_url, code)
+        _add_content_tools(mcp, require_course)
+        _add_material_tools(mcp, require_course, public_url, code)
 
     return mcp
 
@@ -220,32 +225,7 @@ def _slide_url(public_url, course_id: str, deck: str, number: int) -> str | None
     return f"{base}/c/{course_id}/slides/{deck}/{number}" if base else None
 
 
-def _slide_demos(code, require_course, course_id: str):
-    """``(deck, n) -> [{"demo", "title"}]``: the demos a slide cites.
-
-    Never waits and never fails a slide tool: with no copy of the demos yet,
-    or any problem building the links, a slide simply has no demos.
-    """
-    if code is None:
-        return lambda deck, n: []
-    try:
-        sync = code.sync_for(course_id)
-        snapshot = sync.ensure(wait=0) if sync is not None else None
-        if snapshot is None:
-            return lambda deck, n: []
-        index = sync.index(snapshot, load_materials(require_course(course_id).soln_pkg))
-    except Exception as exc:
-        print(f"[CourseCode] {course_id}: no demo links for slides: {exc!r}")
-        return lambda deck, n: []
-    return lambda deck, n: [{"demo": d.id, "title": d.title}
-                            for d in index.demos_for_slide(deck, n)]
-
-
-def _add_content_tools(mcp: MCPServer, require_course, public_url, code=None) -> None:
-
-    def slide_url(course_id: str, deck: str, number: int) -> str | None:
-        return _slide_url(public_url, course_id, deck, number)
-
+def _add_content_tools(mcp: MCPServer, require_course) -> None:
 
     @mcp.tool()
     def list_questions(course_id: str, unit: str | None = None,
@@ -348,14 +328,11 @@ def _add_content_tools(mcp: MCPServer, require_course, public_url, code=None) ->
             "grading_notes": question.get("grading_notes", ""),
         }
 
-    @mcp.tool()
+    @mcp.tool(description=(
+        "Get the instructor's worked solution to one question, with its "
+        "figures. unit and qtag come from list_questions.\n\n"
+        + cc.TUTOR_INSTRUCTION + " The result carries this as its instruction."))
     def get_solution(course_id: str, unit: str, qtag: str):
-        """Get the instructor's worked solution to one question, with its figures.
-
-        Prefer using this to check the student's reasoning, find where it goes
-        wrong, or build a hint, rather than showing it to them -- unless they
-        ask to see the solution.  unit and qtag come from list_questions.
-        """
         log_call("get_solution", course=course_id, unit=unit, qtag=qtag)
         grader = require_course(course_id)
         unit_name, tag, question = cc.resolve_question(grader, unit, qtag)
@@ -364,272 +341,305 @@ def _add_content_tools(mcp: MCPServer, require_course, public_url, code=None) ->
             "unit": unit_name,
             "qtag": tag,
             "solution": cc.tidy_html(question.get("solution", "")),
+            "instruction": cc.TUTOR_INSTRUCTION,
         }, figures)
 
-    def require_materials(grader):
-        materials = load_materials(grader.soln_pkg)
-        if materials is None or not materials.decks:
-            raise ToolError("This course has not published any lecture slides.")
-        return materials
-
-    def require_deck(materials, deck: str) -> dict:
-        found = materials.deck(deck.strip().lower())
-        if found is None:
-            raise ToolError(f"Unknown deck {deck!r}. Valid decks, from list_materials: "
-                            + ", ".join(repr(d) for d in materials.deck_ids()))
-        return found
-
-    @mcp.tool()
-    def list_materials(course_id: str, unit: str | None = None) -> list[dict]:
-        """List the course's lecture slide decks: id, unit, title and slide count.
-
-        Pass unit to list one unit's decks.  images is false for a deck served
-        as text only.  Use the id as deck in get_outline, search_slides and
-        get_slide.
-        """
-        log_call("list_materials", course=course_id, unit=unit)
-        materials = require_materials(require_course(course_id))
-        wanted = " ".join(unit.lower().split()) if unit else None
-        return [
-            {"deck": d["id"], "unit": d["unit"], "title": d["title"],
-             "slides": d["slides"], "images": d["images"]}
-            for d in materials.decks
-            if wanted is None or " ".join(d["unit"].lower().split()) == wanted
-        ]
-
-    @mcp.tool()
-    def get_outline(course_id: str, deck: str) -> list[dict]:
-        """A deck's outline: every slide's number and title, and a short excerpt.
-
-        Use it to see how a lecture is organised, or which slides cover a topic
-        before opening them with get_slide.
-        """
-        log_call("get_outline", course=course_id, deck=deck)
-        found = require_deck(require_materials(require_course(course_id)), deck)
-        outline = []
-        for slide in found["slides"]:
-            # A figure-only slide has no text; its description says what it shows.
-            excerpt = " ".join((slide["text"] or slide.get("description", "")).split())
-            outline.append({"slide": slide["n"], "title": slide["title"],
-                            "excerpt": excerpt[:100] + ("…" if len(excerpt) > 100 else "")})
-        return outline
-
-    @mcp.tool()
-    def search_slides(course_id: str, query: str, unit: str | None = None) -> list[dict]:
-        """Find the slides that mention a topic: deck, slide number, title, snippet.
-
-        A keyword search over slide titles, text, speaker notes and (where the
-        instructor has generated them) descriptions of each slide's figures,
-        best match first.  It matches words, not meanings, so if the first
-        search misses, try the course's own terms and synonyms (e.g. "FSM",
-        "state machine", "next-state logic"), or browse get_outline.  An
-        identifier such as s_axilite or ap_ctrl_none matches whole, and a
-        slide that has it ranks first.
-
-        A hit on a slide with an image carries view_url, a link the student
-        can open to see it.
-        """
-        log_call("search_slides", course=course_id, unit=unit)  # not the query: student words
-        materials = require_materials(require_course(course_id))
-        hits = materials.search(query, unit=unit)
-        demos_of = _slide_demos(code, require_course, course_id) if hits else None
-        for hit in hits:
-            deck = materials.deck(hit["deck"])
-            if deck and deck["slides"][hit["slide"] - 1].get("image"):
-                url = slide_url(course_id, hit["deck"], hit["slide"])
-                if url:
-                    hit["view_url"] = url
-            demos = demos_of(hit["deck"], hit["slide"])
-            if demos:
-                hit["demos"] = demos
-        return hits
-
-    @mcp.tool()
-    def get_slide(course_id: str, deck: str, slide: int):
-        """One lecture slide: its image, title, text and the speaker notes.
-
-        deck comes from list_materials or search_slides, and slide is its
-        number in the deck.  Look at the image: diagrams, waveforms and
-        equations are usually only there.
-
-        The image comes to you, not into the student's chat: they cannot see
-        it.  To show them the slide, give them view_url, a link that opens
-        the slide's image in their browser.
-        """
-        log_call("get_slide", course=course_id, deck=deck, slide=slide)
-        materials = require_materials(require_course(course_id))
-        found = require_deck(materials, deck)
-        slides = found["slides"]
-        if not 1 <= slide <= len(slides):
-            raise ToolError(f"Deck {found['id']!r} has slides 1 to {len(slides)}.")
-        entry = slides[slide - 1]
-        payload = {"deck": found["id"], "unit": found["unit"], "deck_title": found["title"],
-                   "slide": entry["n"], "of": len(slides), "title": entry["title"],
-                   "text": entry["text"], "notes": entry["notes"]}
-        if entry.get("description"):
-            payload["figure_description"] = entry["description"]
-        demos = _slide_demos(code, require_course, course_id)(found["id"], entry["n"])
-        if demos:
-            payload["demos"] = demos    # list_demos / get_demo_file take it from here
-        blocks: list = []
-        image = materials.image_path(found["id"], entry["image"]) if entry.get("image") else None
-        if image is None:
-            payload["image"] = "not available: this deck is served as text only"
-        else:
-            url = slide_url(course_id, found["id"], entry["n"])
-            if url:
-                payload["view_url"] = url
-        blocks.append(json.dumps(payload, indent=2, ensure_ascii=False))
-        if image is not None:
-            blocks.append(Image(data=image.read_bytes(), format="jpeg"))
-        return blocks
 
 
-def _add_code_tools(mcp: MCPServer, require_course, public_url, code) -> None:
-    """The demo tools: plans/demo_code_mcp.md.  Every result is bounded."""
+def _add_material_tools(mcp: MCPServer, require_course, public_url, code) -> None:
+    """The material tools: plans/unified_materials.md.  Every result is bounded."""
 
-    def require_demos(course_id: str):
+    def course_catalog(course_id: str, *, wait: bool = True):
+        """``(grader, catalog, note)``.  Waits for the mirror only when there
+        is no copy of it at all, and then briefly; *note* says what is
+        missing meanwhile."""
         grader = require_course(course_id)
-        sync = code.sync_for(course_id)
-        if sync is None:
-            raise ToolError("This course has not published demos.")
-        # Waits only when there is no copy at all, and then briefly.
-        snapshot = sync.ensure(wait=FIRST_FETCH_WAIT_S)
-        if snapshot is None:
-            error = sync.last_error()
-            if error:
-                raise ToolError(f"The demos could not be fetched ({error}); try again later.")
-            raise ToolError("The demos are being fetched for the first time; "
-                            "try again in a minute.")
-        try:
-            index = sync.index(snapshot, load_materials(grader.soln_pkg))
-        except Exception as exc:
-            raise ToolError(f"The demo links could not be built: {exc}") from exc
-        return snapshot, index
+        materials = load_materials(grader.soln_pkg)
+        if materials is None or not (materials.items or materials.mirror_items
+                                     or materials.patterns):
+            raise ToolError("This course has not published any materials.")
+        snapshot, note = None, None
+        if materials.code and code is not None:
+            sync = code.sync_for(course_id)
+            snapshot = sync.ensure(wait=FIRST_FETCH_WAIT_S if wait else 0) if sync else None
+            if snapshot is None:
+                error = sync.last_error() if sync else None
+                note = ("Some of this course's materials could not be fetched "
+                        f"({error}); try again later." if error else
+                        "Some of this course's materials are being fetched for the "
+                        "first time; try again in a minute for the rest.")
+        return grader, catalog_for(materials, snapshot, cc.unit_resolver(grader)), note
 
-    def require_demo(index, demo: str):
-        found = index.demos.get((demo or "").strip())
-        if found is None or found.hidden:
-            raise ToolError(f"Unknown demo {demo!r}. Valid demos, from list_demos: "
-                            + ", ".join(repr(d.id) for d in index.visible()))
-        return found
+    def require_item(catalog, item_id: str, *, readable: bool = True):
+        item = catalog.get(item_id)
+        if item is None:
+            raise ToolError(f"Unknown material {item_id!r}. Valid ids, from list_materials: "
+                            + ", ".join(repr(i) for i in catalog.items))
+        if readable and not item.readable:
+            raise ToolError(f"{item.id!r} is listed so you know it exists, but the "
+                            "instructor has not made it available to read.")
+        return item
 
-    def unit_matches(unit_name: str, wanted: str) -> bool:
-        name = " ".join(unit_name.lower().split())
-        return name == wanted or name.startswith(wanted + ":")
+    def slide_url_for(course_id: str):
+        return lambda deck, n: _slide_url(public_url, course_id, deck, n)
+
+    def with_policy(payload: dict, item) -> dict:
+        if item.policy == "tutor":
+            payload["instruction"] = cc.TUTOR_INSTRUCTION
+        return payload
+
+    def filtered(catalog, unit: str | None, kind: str | None) -> list:
+        if kind and kind.strip().lower() not in catalog.kinds:
+            raise ToolError(f"Unknown kind {kind!r}. Kinds, from list_materials: "
+                            + ", ".join(repr(k) for k in catalog.kinds))
+        items = list(catalog.items.values())
+        if kind:
+            items = [i for i in items if i.kind == kind.strip().lower()]
+        if unit:
+            items = [i for i in items if catalog.matches_unit(i, unit)]
+        return items
 
     @mcp.tool()
-    def list_demos(course_id: str, unit: str | None = None) -> list[dict]:
-        """List the course's in-class demos: each one's docs pages, code,
-        slides and unit.
+    def list_materials(course_id: str, unit: str | None = None,
+                       kind: str | None = None) -> dict:
+        """List the course's materials: its kinds, its units, and every item.
 
-        A demo is a worked example the instructor builds in class --
-        SystemVerilog, a Vitis HLS kernel, a Python build script or notebook --
-        usually with docs pages that walk through it.  Use this to point a
-        student to a demo that shows a topic, or to find the demo that goes
-        with a slide or unit.  Pass unit (a name from list_units) for one
-        unit's demos.  Each unit says how the link was found ("via").
+        Each course names its own kinds -- lecture slides, demos, labs,
+        handouts -- and each kind's description says what it is.  An item is
+        what a student is pointed to: a deck, a demo with its docs pages and
+        code, a lab with its starting files.  It has an id, a title, a kind,
+        the units it goes with and a count of its parts; get_material opens
+        it.  Pass unit (a name from list_units) or kind to narrow the list.
+        An item with readable false exists but is not available to read.
         """
-        log_call("list_demos", course=course_id, unit=unit)
-        snapshot, index = require_demos(course_id)
-        wanted = " ".join(unit.lower().split()) if unit else None
-        result = []
-        for demo in index.visible():
-            if wanted and not any(unit_matches(u["unit"], wanted) for u in demo.units):
+        log_call("list_materials", course=course_id, unit=unit, kind=kind)
+        grader, catalog, note = course_catalog(course_id)
+        items = filtered(catalog, unit, kind)
+        material_units = {u["name"]: u for u in catalog.material_units}
+        used = list(dict.fromkeys(name for item in items for name in item.unit_names))
+        # Course order first; a name the course does not list (a package
+        # built against another llmgrader_config.xml) after, as items give it.
+        ordered = [n for n in cc.unit_names(grader) if n in used]
+        units = []
+        for name in ordered + [n for n in used if n not in ordered]:
+            entry = {"unit": name}
+            if name in material_units:
+                entry["material_only"] = True
+                if material_units[name].get("description"):
+                    entry["description"] = material_units[name]["description"]
+            units.append(entry)
+        kinds = []
+        for kind_id, spec in catalog.kinds.items():
+            entry = {"kind": kind_id, "description": spec["description"],
+                     "items": sum(1 for i in items if i.kind == kind_id)}
+            if spec.get("policy", "open") != "open":
+                entry["policy"] = spec["policy"]
+            kinds.append(entry)
+        listed = []
+        for item in items:
+            entry = {"id": item.id, "title": item.title, "kind": item.kind,
+                     "units": item.unit_names, "parts": item.part_count()}
+            if item.description:
+                entry["description"] = item.description
+            if not item.readable:
+                entry["readable"] = False
+            listed.append(entry)
+        result = {"kinds": kinds, "units": units, "items": listed}
+        if note:
+            result["note"] = note
+        return result
+
+    def part_summary(catalog, part, course_id: str) -> dict:
+        entry = {"path": part.path, "format": part.format}
+        if part.format in PAGED_FORMATS:
+            paged = catalog.paged(part)
+            entry.update({"title": paged.title, "pages": len(paged.pages),
+                          "images": paged.images})
+            if paged.error:
+                entry["note"] = paged.error
+            outline = []
+            for page in paged.pages:
+                # A figure-only slide has no text; its description says what it shows.
+                excerpt = " ".join((page.get("text") or page.get("description", "")).split())
+                outline.append({"page": page["n"], "title": page.get("title", ""),
+                                "excerpt": excerpt[:100] + ("…" if len(excerpt) > 100 else "")})
+            entry["outline"] = outline
+            return entry
+        try:
+            source = catalog.text(part)
+        except CodeError as exc:
+            entry["note"] = str(exc)
+            return entry
+        if part.format == PAGE:
+            entry["title"] = source.title
+        else:
+            entry["language"] = source.language
+        entry["lines"] = source.last_line
+        links = catalog.links_for(part)
+        if links is not None:
+            entry.update(links(part.path))
+        return entry
+
+    @mcp.tool()
+    def get_material(course_id: str, id: str) -> dict:
+        """Open one item: what it is, its units, and its parts.
+
+        id comes from list_materials or search_materials.  Each part is a
+        file: a slide deck or PDF (with its outline: each page's number,
+        title and an excerpt), a docs page (with view_url, the page as
+        published) or a text file such as code (with source_url).  Pass a
+        part's path, and a page for a deck or PDF, to read_material.  slides
+        are lecture slides that cite this item; related are other items its
+        docs pages point to.
+        """
+        log_call("get_material", course=course_id, id=id)
+        _, catalog, _ = course_catalog(course_id)
+        item = require_item(catalog, id)
+        payload = {"id": item.id, "title": item.title, "kind": item.kind}
+        if item.description:
+            payload["description"] = item.description
+        payload["units"] = [{"unit": u["unit"], "via": u["via"]} for u in item.units]
+        payload["parts"] = [part_summary(catalog, part, course_id) for part in item.parts]
+        slides = []
+        for link in item.slides:
+            deck_item = catalog.item_for_deck(link["deck"])
+            if deck_item is None or not deck_item.readable:
                 continue
-            slides = []
-            for s in demo.slides:
-                item = {"deck": s["deck"], "slide": s["slide"]}
-                url = _slide_url(public_url, course_id, s["deck"], s["slide"])
-                if url:
-                    item["view_url"] = url
-                slides.append(item)
-            docs = []
-            for path in demo.docs:
-                page = {"path": path, "title": snapshot.files[path].title}
-                view = snapshot.view_url(path)
-                if view:
-                    page["view_url"] = view
-                docs.append(page)
-            result.append({
-                "demo": demo.id, "title": demo.title, "description": demo.description,
-                "units": [{"unit": u["unit"], "via": u["via"]} for u in demo.units],
-                "slides": slides, "docs": docs, "code": list(demo.code),
-                "related": list(demo.related),
-                "files": len(index.files_of(demo, snapshot)),
-            })
-        return result
+            part = next(p for p in deck_item.parts if p.deck == link["deck"])
+            entry = {"id": deck_item.id, "path": part.path, "page": link["slide"]}
+            url = _slide_url(public_url, course_id, link["deck"], link["slide"])
+            if url:
+                entry["view_url"] = url
+            slides.append(entry)
+        if slides:
+            payload["slides"] = slides
+        if item.related:
+            payload["related"] = [r for r in item.related
+                                  if catalog.get(r) is not None and catalog.get(r).readable]
+        return with_policy(payload, item)
+
+    def choose_part(catalog, item, path: str | None, page: int | None):
+        if path:
+            repo_name = catalog.snapshot.config.repo_name if catalog.snapshot else None
+            paths = {p.path for p in item.parts}
+            try:
+                wanted = normalize_request_path(path, repo_name, lambda p: p in paths)
+            except CodeError as exc:
+                raise ToolError(str(exc)) from exc
+            found = next((p for p in item.parts if p.path == wanted), None)
+            if found is not None:
+                return found
+            inside = [p.path for p in item.parts if p.path.startswith(wanted + "/")]
+            if inside:
+                raise ToolError(f"{wanted!r} is a folder; pass one of its files: "
+                                + ", ".join(inside[:20]))
+            raise ToolError(f"{item.id!r} has no part {wanted!r}. Its parts, from "
+                            "get_material: " + ", ".join(p.path for p in item.parts[:30]))
+        if len(item.parts) == 1:
+            return item.parts[0]
+        paged = [p for p in item.parts if p.format in PAGED_FORMATS]
+        if page is not None and len(paged) == 1:
+            return paged[0]
+        raise ToolError(f"{item.id!r} has {len(item.parts)} parts; pass path, one of: "
+                        + ", ".join(p.path for p in item.parts[:30]))
 
     @mcp.tool()
-    def list_demo_files(course_id: str, demo: str) -> list[dict]:
-        """List one demo's files: its docs pages first, in reading order, then
-        its code.
+    def read_material(course_id: str, id: str, path: str | None = None,
+                      page: int | None = None, start_line: int | None = None,
+                      end_line: int | None = None):
+        """Read one part of an item: a slide or PDF page, or a file's lines.
 
-        demo comes from list_demos.  Paths are relative to the repository;
-        pass them to get_demo_file as they are.  Build output, bitstreams,
-        binaries and generated scripts are not served.
+        id comes from list_materials; path is one of the item's parts, from
+        get_material or search_materials (it may be left out when the item
+        has one part).  For a slide deck or PDF, page is the slide or page
+        number: you get its image, its text, the speaker notes and a
+        description of its figures.  Look at the image: diagrams, waveforms
+        and equations are usually only there.  The image comes to you, not
+        into the student's chat; give them view_url to see it.
+
+        For a docs page or a text file, at most 400 numbered lines come back
+        per call: when truncated is true, call again with start_line =
+        end_line + 1.  Give the student view_url (a docs page as published)
+        or source_url (the exact lines on GitHub), and cite code as path:line.
         """
-        log_call("list_demo_files", course=course_id, demo=demo)
-        snapshot, index = require_demos(course_id)
-        found = require_demo(index, demo)
-        files = []
-        for path in index.files_of(found, snapshot):
-            source = snapshot.files[path]
-            item = {"path": path, "kind": source.kind, "demo": found.id}
-            if source.kind == "doc":
-                item["title"] = source.title
+        log_call("read_material", course=course_id, id=id, path=path, page=page)
+        _, catalog, _ = course_catalog(course_id)
+        item = require_item(catalog, id)
+        part = choose_part(catalog, item, path, page)
+        base = {"id": item.id, "kind": item.kind, "path": part.path, "format": part.format}
+
+        if part.format in PAGED_FORMATS:
+            paged = catalog.paged(part)
+            if paged.error and not paged.pages:
+                raise ToolError(f"{part.path!r} cannot be read here: {paged.error}.")
+            if page is None and len(paged.pages) == 1:
+                page = 1
+            if page is None or not 1 <= page <= len(paged.pages):
+                raise ToolError(f"{part.path!r} has pages 1 to {len(paged.pages)}; pass page.")
+            entry = paged.pages[page - 1]
+            payload = {**base, "document": paged.title, "page": entry["n"],
+                       "of": len(paged.pages), "title": entry.get("title", ""),
+                       "text": entry.get("text", ""), "notes": entry.get("notes", "")}
+            if entry.get("description"):
+                payload["figure_description"] = entry["description"]
+            cited_by = [{"id": other.id, "title": other.title}
+                        for other in (catalog.items_for_slide(paged.deck, entry["n"])
+                                      if paged.deck else [])]
+            if cited_by:
+                payload["materials"] = cited_by    # items this slide points to
+            image = paged.image_path(entry.get("image")) if entry.get("image") else None
+            if image is None:
+                payload["image"] = "not available: this document is served as text only"
             else:
-                item["language"] = source.language
-            item["lines"] = source.last_line
-            item.update(snapshot.links_for(path))
-            files.append(item)
-        return files
+                url = page_url(catalog, part, paged, entry["n"], slide_url_for(course_id))
+                if url:
+                    payload["view_url"] = url
+            blocks: list = [json.dumps(with_policy(payload, item), indent=2, ensure_ascii=False)]
+            if image is not None:
+                blocks.append(Image(data=image.read_bytes(), format="jpeg"))
+            return blocks
 
-    @mcp.tool()
-    def get_demo_file(course_id: str, path: str, start_line: int | None = None,
-                      end_line: int | None = None) -> dict:
-        """Read one demo file -- a docs page or code -- with line numbers.
-
-        path comes from list_demo_files or search_demos (a leading
-        "hwdesign/", as the docs write paths, is accepted).  At most 400 lines
-        come back per call: when truncated is true, call again with
-        start_line = end_line + 1.  A docs page lists the code it cites in
-        cites; demos says which demos the file belongs to.  Give the student
-        view_url (a docs page as published) or source_url (the exact lines on
-        GitHub).
-        """
-        log_call("get_demo_file", course=course_id, path=path)
-        snapshot, index = require_demos(course_id)
         try:
-            result = snapshot.read(path, start_line, end_line)
+            source = catalog.text(part)
+            result = read_source(source, start_line, end_line, links=catalog.links_for(part))
         except CodeError as exc:
             raise ToolError(str(exc)) from exc
-        result["demos"] = index.demos_for_path(result["path"])
-        if result["kind"] == "doc":
-            result["cites"] = index.doc_cites.get(result["path"], [])
+        payload = {**base, **{k: v for k, v in result.items() if k not in ("path", "format")}}
+        if part.format == PAGE:
+            payload["cites"] = catalog.doc_cites.get(part.path, [])
+        return [json.dumps(with_policy(payload, item), indent=2, ensure_ascii=False)]
+
+    @mcp.tool()
+    def search_materials(course_id: str, query: str, unit: str | None = None,
+                         kind: str | None = None, format: str | None = None) -> dict:
+        """Find a topic, identifier or phrase across all of the course's materials.
+
+        One search covers lecture slides, PDF pages and docs pages -- ranked
+        by keyword, best first, with an identifier such as s_axilite or
+        ap_ctrl_none matched whole -- and the lines of code and other text
+        files, matched literally and case-insensitively.  It matches words,
+        not meanings: if a search misses, try the course's own terms or
+        synonyms ("FSM", "state machine"), or an exact identifier.  Each hit
+        names its item (id) and kind, its part (path) and a page or lines;
+        pass those to read_material.  Narrow with unit, kind, or format
+        ("slides", "pdf", "page" for docs pages, "text" for code and other
+        files).  more counts hits left out: narrow the search to see them.
+        """
+        log_call("search_materials", course=course_id, unit=unit, kind=kind,
+                 format=format)     # never the query: it is the student's words
+        if not (query or "").strip():
+            raise ToolError("query is empty.")
+        if format is not None and format not in (*PAGED_FORMATS, PAGE, TEXT):
+            raise ToolError("format must be one of 'slides', 'pdf', 'page' or 'text'.")
+        _, catalog, note = course_catalog(course_id)
+        items = filtered(catalog, unit, kind)
+        try:
+            result = catalog.search(query, items=items, fmt=format,
+                                    slide_url=slide_url_for(course_id))
+        except CodeError as exc:
+            raise ToolError(str(exc)) from exc
+        if any(hit.get("policy") == "tutor" for hit in result["hits"]):
+            result["instruction"] = cc.TUTOR_INSTRUCTION
+        if note:
+            result["note"] = note
         return result
-
-    @mcp.tool()
-    def search_demos(course_id: str, query: str, demo: str | None = None,
-                     kind: str | None = None) -> dict:
-        """Find a word, identifier or phrase in the demo code and docs pages.
-
-        A literal, case-insensitive search -- not a regex, and not by meaning
-        -- so search for exact identifiers (s_axilite, ap_ctrl_none,
-        always_ff) or a short phrase, and try other terms if it misses.
-        Docs pages come first, then hand-written source, scripts and
-        notebooks.  Neighbouring matches come back as one hit with a line
-        range.  Pass demo (from list_demos) to search one demo, or kind
-        ("code" or "doc").  more counts hits left out: narrow the search to
-        see them.
-        """
-        log_call("search_demos", course=course_id, demo=demo, kind=kind)  # not the query
-        snapshot, index = require_demos(course_id)
-        if kind is not None and kind not in ("code", "doc"):
-            raise ToolError("kind must be 'code' or 'doc'.")
-        paths = set(index.files_of(require_demo(index, demo), snapshot)) if demo else None
-        try:
-            return snapshot.search(query, paths=paths, kind=kind,
-                                   demos_for=index.demos_for_path)
-        except CodeError as exc:
-            raise ToolError(str(exc)) from exc

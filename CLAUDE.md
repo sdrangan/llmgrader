@@ -29,6 +29,9 @@ llmgrader_test check example_repo/unit1/tests/calculus_tests.xml
 # Grade those cases for real (costs money; --dry-run prints the call count)
 llmgrader_test run example_repo/unit1/tests/calculus_tests.xml --repeat 3 --html report.html
 
+# Print every course material the MCP will serve, its units and where each came from
+llmgrader_mcp_build --materials      # run beside llmgrader_mcp_config.xml
+
 # Print a unit's <print> block as an exam (title page, answer pages, Page n of N)
 create_qfile --input exams/midterm.xml --print exam --pdf      # --soln for the key
 
@@ -268,35 +271,88 @@ server keeps no state), and writes from the response iterable's `close()` --
 so a test client must buffer (`buffered=True`) to see the row. A write never
 fails a call. Every tool argument must be in `IDENTIFIER_ARGUMENTS` or
 `REDACTED_ARGUMENTS`; a test fails otherwise, and an unlisted one is redacted
-anyway.
+anyway. A material call's row carries `material` (the item id), `kind`,
+`path`, `format` and `slide` (the page); `deck` and `demo` are no longer
+written and stay only on old rows.
 
 The Analytics routes take `db=grade|mcp` (default `grade`, anything else
 refused) and open the file read-only. Presets live in `static/js/analytics.js`;
 the UI suite runs each one, since nothing else parses them.
 
-### Demo code in the MCP
+### Course materials in the MCP
 
-`coursemcp/code.py` + `coursemcp/demo_links.py` serve a course's demo repo
-(`<code>` in `llmgrader_mcp_config.xml`: a public GitHub repo and the
-`<include>` paths) through `list_demos`, `list_demo_files`, `get_demo_file`
-and `search_demos`, only when `LLMGRADER_MCP_CODE` is set. Only the pointer is
-packaged; the portal keeps a shallow, sparse, partial clone under
-`<storage>/courses/<id>/code/mirror` and serves an immutable in-memory
-`CodeSnapshot` built from it, so readers take no lock and a sync swaps the
-snapshot in one assignment.
+One model for everything a course publishes besides its questions
+(`plans/unified_materials.md`). `<materials>` in `llmgrader_mcp_config.xml`
+declares **kinds** (the instructor's labels -- `slides`, `demo`, `lab` --
+each with a description and a policy), **material units** (units with no
+questions; `list_units` shows them with `unit_type` `material`), and
+**items**: an id, a kind, one or more units, and parts. A part's **format**
+follows from the file, never the kind: `slides` (.pptx + PDF export), `pdf`
+(page by page), `page` (Markdown in a published docs tree), `text`
+(everything else). Four tools read them all: `list_materials`,
+`get_material`, `read_material`, `search_materials`. The eight slide and demo
+tools they replaced are gone, with no aliases.
+
+**Two sources, kept apart on purpose.** The **package** (`materials.py`):
+explicit paths from any `<root>`, including the private repo, built into
+`mcp_materials/` -- decks under `slides/<deck>/`, text under
+`files/<item>/`. **No patterns there**: a new exam key must never be
+published because nobody excluded it. The **mirror** (`code.py`): the public
+repo `<code>` names, synced by the portal; `<items source="mirror"
+path="labs/*" docs="docs/labs/*">` makes one item per matched folder name,
+and the schema fixes `source` to `mirror`. A pattern name another item has
+gets `-<kind>` (`fsm-demo` beside the `fsm` deck); a folder an explicit item
+serves is skipped.
+
+**Policies**, per kind: `open`; `tutor`, whose content always carries
+`content.TUTOR_INSTRUCTION` -- the same text `get_solution` returns as
+`instruction`; `private`, listed with `readable: false`, refused by the
+other three tools, and never copied into the package at all.
+
+**`catalog.py` is the one index the tools read.** `build_catalog(materials,
+snapshot, resolver)` adds package items, mirror items and pattern items, then
+the links `links.py` derives from slides and docs pages (a slide citing an
+item's files gives it the deck item's units; a deck named like an item's
+folder too; docs pages citing other items relate them), then refinements --
+the config's `<item id>`, then the repo's `materials.xml`
+(`llmgrader_materials.xsd`) -- and sets each item's policy last. Every unit
+records its `via`. `catalog_for` caches by the identity of the `Materials`
+and `CodeSnapshot` objects, which are replaced, never edited. Units resolve
+through `materials.UnitResolver` (a name in any spacing, or a material
+unit's id), the same at build and serve.
+
+**The build checks what the portal will serve.** `create_soln_pkg` and
+`llmgrader_mcp_build` run `build_catalog` against a local checkout
+(`<code root=...>`, tracked files only) and stop on what `catalog_problems`
+returns: a refinement that matches nothing, an unknown unit or kind, a
+missing path, an item with no unit. `llmgrader_mcp_build --materials` prints
+the index with every unit's source. A manifest older than version 2 loads
+its exam units and no materials.
+
+**Search** ranks slides, PDF pages and docs sections (cut at headings) in one
+`materials.TermIndex` (BM25, identifiers whole and by part, exact matches
+first, 30% relative cutoff) and merges literal line hits from text files
+(`code.find_lines`) at a fixed score by language, below the best ranked hit.
+
+### The mirror and its sync
+
+The portal keeps a shallow, sparse, partial clone under
+`<storage>/courses/<id>/code/mirror` of exactly the `includes` the build
+derived from the mirror items and patterns (`materials.mirror_includes`),
+only when `LLMGRADER_MCP_CODE` is set; without it, package items are served
+alone. A sync builds an immutable `CodeSnapshot` -- every servable file as a
+`SourceFile` with format `text` or `page`, and each PDF rendered once into
+`code/pdf/<sha256>/` (`attach_pdfs`, PyMuPDF if present) -- so readers take
+no lock and a sync swaps it in one assignment. A commit whose
+`materials.xml` fails its schema is not served.
 
 **No request waits on GitHub.** `CodeLibrary.warm()` runs on every `/mcp`
 POST; a copy older than the TTL is refreshed on a background thread while the
 call is answered from the copy in hand, and a failed sync keeps the last good
-one. Only a course with no copy at all waits, for `FIRST_FETCH_WAIT_S`. Tests
-reach git through `code.run_git` and `code.remote_url`, which they patch.
-
-Which demo is which, and its slides and unit, is derived each sync from paths
-and links already in the slides and docs pages (`build_index`); an optional
-`demos/demos.xml` in the demo repo corrects it, and a commit whose overrides
-file fails `llmgrader_demos.xsd` is not served. `llmgrader_mcp_build --links`
-prints the same graph from a local checkout. See `plans/demo_code_mcp.md` and
-`docs/admin/mcp/code.md`.
+one. Only a course with no copy at all waits, for `FIRST_FETCH_WAIT_S`, and
+then `list_materials` serves the package items with a `note`. Tests reach git
+through `code.run_git` and `code.remote_url`, which they patch. See
+`plans/demo_code_mcp.md` and `docs/admin/mcp/sources.md`.
 
 Manage Courses shows each course's served commit and offers Update now
 (`plans/demo_code_admin.md`). **Admin code endpoints never wait on git**:

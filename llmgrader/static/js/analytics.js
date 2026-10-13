@@ -287,7 +287,8 @@ function defaultMcpQuery() {
     const courseId = currentCourseId();
     const where = courseId ? `\nWHERE course_id = '${courseId}' OR course_id IS NULL` : "";
     return `
-SELECT id, ts, client, method, tool, course_id, unit, qtag, deck, slide, status, result_items, duration_ms
+SELECT id, ts, client, method, tool, course_id, unit, qtag, material, path, slide AS page,
+       status, result_items, duration_ms
 FROM mcp_calls${where}
 ORDER BY id DESC
 LIMIT 20
@@ -406,24 +407,36 @@ ORDER BY solution_views DESC
 `.trim()
         },
         {
-            label: "Most-viewed slides",
+            label: "Calls per material and kind",
             sql: `
-SELECT course_id, deck, slide, COUNT(*) AS views
+SELECT course_id, kind, material,
+       SUM(tool = 'get_material') AS opened,
+       SUM(tool = 'read_material') AS reads,
+       COUNT(*) AS calls
 FROM mcp_calls
-WHERE tool = 'get_slide' AND status = 'ok'${course("AND")}
-GROUP BY course_id, deck, slide
+WHERE tool IN ('get_material', 'read_material') AND status = 'ok'${course("AND")}
+GROUP BY course_id, kind, material
+ORDER BY calls DESC
+`.trim()
+        },
+        {
+            label: "Most-read slides and pages",
+            sql: `
+SELECT course_id, material, path, slide AS page, COUNT(*) AS views
+FROM mcp_calls
+WHERE tool = 'read_material' AND slide IS NOT NULL AND status = 'ok'${course("AND")}
+GROUP BY course_id, material, path, slide
 ORDER BY views DESC
 `.trim()
         },
         {
-            label: "Demos: calls by demo and file",
+            label: "Most-read files",
             sql: `
-SELECT course_id, demo, path, tool, COUNT(*) AS calls
+SELECT course_id, material, path, format, COUNT(*) AS reads
 FROM mcp_calls
-WHERE tool IN ('list_demos', 'list_demo_files', 'get_demo_file', 'search_demos')
-  AND status = 'ok'${course("AND")}
-GROUP BY course_id, demo, path, tool
-ORDER BY calls DESC
+WHERE tool = 'read_material' AND slide IS NULL AND status = 'ok'${course("AND")}
+GROUP BY course_id, material, path, format
+ORDER BY reads DESC
 `.trim()
         },
         {
@@ -432,7 +445,7 @@ ORDER BY calls DESC
 SELECT substr(ts, 1, 10) AS day, COUNT(*) AS searches,
        SUM(result_items = 0) AS found_nothing
 FROM mcp_calls
-WHERE tool = 'search_slides' AND status = 'ok'${course("AND")}
+WHERE tool = 'search_materials' AND status = 'ok'${course("AND")}
 GROUP BY day
 ORDER BY day DESC
 `.trim()
@@ -440,7 +453,8 @@ ORDER BY day DESC
         {
             label: "Errors and refusals",
             sql: `
-SELECT id, ts, status, client, method, tool, course_id, unit, qtag, deck, slide, error
+SELECT id, ts, status, client, method, tool, course_id, unit, qtag, material, path, slide AS page,
+       error
 FROM mcp_calls
 WHERE status <> 'ok'
 ORDER BY id DESC

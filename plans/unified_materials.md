@@ -1,6 +1,14 @@
 # Plan: one materials model for the course MCP
 
-**Status: proposed (2026-10-12).  Nothing built.**
+**Status: built (2026-10-12), phases 1 to 4, on branch
+`feature/unified-materials`; not yet deployed.**  hwdesign is migrated on
+`mcp/unified-materials` in hwdesign-soln and hwdesign.  Departures from the
+text below: a pattern name another item already has gets `-<kind>` after it
+(`fsm-demo`, since hwdesign's decks and demos share names); `<items>` matches
+a folder by `path` *or* `docs`, so a docs-only demo is still an item; the
+repo's corrections file is `materials.xml` at the repo root; usage rows also
+get a `kind` column; units in `llmgrader_config.xml` gained no `id`
+(decision 1: material units are referenced by id, portal units by name).
 
 **No backward compatibility.**  One course (hwdesign) uses the portal, and it
 is migrated in the same change.  The old config elements (`<slides>`,
