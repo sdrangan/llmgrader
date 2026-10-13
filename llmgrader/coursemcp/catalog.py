@@ -166,9 +166,25 @@ class Catalog:
         a package file has no public address."""
         return self.snapshot.links_for if part.source == "mirror" and self.snapshot else None
 
+    def unit_names_matching(self, unit: str) -> list[str]:
+        """Every unit name *unit* refers to: the unit it resolves to (a name
+        in any case and spacing, or a material unit's id), or, failing that,
+        each unit whose name before its colon it is -- "unit 5" for
+        "Unit 5:  FIFOs and Streaming Interfaces", but never "Unit 50"."""
+        names = list(dict.fromkeys(
+            [*self.resolver.all_names(), *(n for i in self.items.values() for n in i.unit_names)]))
+        resolved = self.resolver.resolve(unit)
+        if resolved is not None:
+            return [resolved]
+        wanted = " ".join((unit or "").lower().split())
+        exact = [n for n in names if same_unit(n, wanted)]
+        if exact:
+            return exact
+        return [n for n in names if ":" in n and same_unit(n.split(":", 1)[0], wanted)]
+
     def matches_unit(self, item: Material, unit: str) -> bool:
-        wanted = self.resolver.resolve(unit) or unit
-        return any(same_unit(name, wanted) for name in item.unit_names)
+        wanted = self.unit_names_matching(unit)
+        return any(same_unit(name, w) for name in item.unit_names for w in wanted)
 
     # -- search --------------------------------------------------------------
 

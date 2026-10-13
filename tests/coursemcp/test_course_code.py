@@ -883,3 +883,20 @@ def test_new_paths_on_the_same_commit_are_served_at_once(app, client, tmp_path) 
     calls_before = fresh._thread
     fresh.ensure()                          # paths match now: no further refresh
     assert fresh._thread is calls_before
+
+
+def test_a_unit_filter_takes_the_part_before_the_colon(client) -> None:
+    """claude.ai's report, 2026-10-12: "unit 5" found nothing, where the old
+    list_demos accepted it.  Never "Unit 50" for "unit 5"."""
+    assert item_ids(client, unit="unit 4") == ["procif", "procif-demo"]
+    assert item_ids(client, unit="UNIT 2") == ["fsm", "fsm-demo", "stream"]
+    assert search(client, "s_axilite", unit="unit 2")["hits"] == []
+    assert search(client, "s_axilite", unit="unit 4")["hits"]
+    text = error_text(call_tool(client, "list_materials", {"course_id": "alpha", "unit": "unit 9"}))
+    assert "No unit matches 'unit 9'" in text and "Unit 4:  Memory" in text
+
+
+def test_the_descriptions_say_how_units_match(client) -> None:
+    tools = {t["name"]: t["description"] for t in rpc(client, "tools/list").get_json()["result"]["tools"]}
+    assert '"unit 5"' in tools["list_materials"] and "not your filter" in tools["list_materials"]
+    assert '"unit 5"' in tools["search_materials"]
