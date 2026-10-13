@@ -8,12 +8,14 @@ has_children: true
 # Course MCP
 
 The course MCP publishes a course's material -- units, questions, rubrics,
-solutions and lecture slides -- as a set of tools that a student's own AI
-assistant can call. A student adds one address to Claude, ChatGPT or VS Code,
+solutions, and course materials such as lecture slides, demos and labs -- as
+a set of tools that a student's own AI assistant can call. A student adds one address to Claude, ChatGPT or VS Code,
 and their assistant can then look up the course for itself.
 
 - [Overview](./overview.md) -- this page: what it is, why, and its status
-- [Packaging the course material](./package.md)
+- [Packaging the course material](./package.md) -- kinds, units and items
+- [Past exams and unit types](./units.md)
+- [Material from a public repository](./sources.md) -- demos, labs, docs pages
 - [Deploying and enabling it](./deploy.md)
 
 The student-facing instructions are in
@@ -24,9 +26,9 @@ The student-facing instructions are in
 ## Status
 
 {: .note }
-The course MCP serves questions, rubrics, worked solutions and lecture slides,
-openly or behind an optional course access token. Lab instructions and other
-documents are next.
+The course MCP serves questions, rubrics, worked solutions, and every kind of
+material a course declares -- slides, demos, labs, handouts -- openly or
+behind an optional course access token.
 
 | Piece | Status |
 | --- | --- |
@@ -34,12 +36,14 @@ documents are next.
 | Optional course access token (`LLMGRADER_MCP_TOKEN`) | Done |
 | `list_courses`, `list_units` | Done |
 | `list_questions`, `get_question`, `get_rubric`, `get_solution` | Done |
-| Lecture slides: `list_materials`, `get_outline`, `search_slides`, `get_slide` | Done |
-| Descriptions of slide figures for search (optional, paid once) | Done |
-| `llmgrader_mcp_config.xml` and the slide build | Done |
+| Materials: `list_materials`, `get_material`, `read_material`, `search_materials` | Done |
+| Kinds, material-only units and items in `llmgrader_mcp_config.xml` | Done |
+| Formats: slides, PDFs page by page, docs pages, text and code | Done |
+| Policies per kind: open, tutor, private | Done |
+| Material from a public GitHub repository, synced (`LLMGRADER_MCP_CODE`) | Done |
+| Descriptions of slide and PDF figures for search (optional, paid once) | Done |
 | Unit types, MCP-only units (past exams), `list_unit_types` | Done |
 | Printing a unit as a paper exam (`create_qfile --print`) | Done |
-| Lab instructions and other documents | Planned |
 | Skill tags in rubrics and a skill list | Planned |
 
 ### The tools a student's assistant gets
@@ -47,20 +51,27 @@ documents are next.
 | Tool | Returns |
 | --- | --- |
 | `list_courses` | The courses on this portal |
-| `list_units` | A course's units in teaching order, with question counts, each unit's `unit_type` and, for past material, its semester |
+| `list_units` | A course's units in teaching order, with question counts, each unit's `unit_type` and, for past material, its semester; a unit that holds only material has type `material` and no questions |
 | `list_unit_types` | Each kind of unit (`problem_set`, `midterm`, ...) with your description of it, and its units |
 | `list_questions` | Every question (or one unit's, or one unit type's): unit, qtag, a short label, parts and points |
 | `get_question` | One question's full text and figures, and your `variation_guidance` if any |
 | `get_rubric` | One question's rubric items and grading notes |
 | `get_solution` | One question's worked solution and its figures |
-| `list_materials` | The slide decks, by unit |
-| `get_outline` | A deck's slide titles |
-| `search_slides` | The slides that mention a topic, best match first |
-| `get_slide` | One slide's image, text, speaker notes and figure description |
+| `list_materials` | The course's kinds of material with your description of each, its units, and every item: id, title, kind, units |
+| `get_material` | One item: its units and how each was found, its parts (a deck with its outline, docs pages, files), and the slides that cite it |
+| `read_material` | One slide or PDF page (image, text, notes, figure description), or one file's lines, with a link the student can open |
+| `search_materials` | Slides, PDF pages, docs pages and code that mention a topic or an identifier, best match first |
+
+An **item** is what a student is pointed to: a lecture deck, a demo with its
+docs pages and code, a lab with its instructions and starting files, a
+handout. You name the kinds; the tools are the same for all of them. See
+[Packaging](./package.md#the-model).
 
 The server also tells every assistant that the material is for studying: help
 the student reason toward an answer, use the rubric and solution to check
 their work or build a hint, and show the solution only when they ask for it.
+The same instruction comes with every worked solution, whether it is a
+question's (`get_solution`) or an item of a kind you mark `tutor`.
 
 **Quick check that it is running:** open `https://<portal>/mcp` in a browser.
 *"This is the course MCP server, and it is running."* means the MCP is up; an
@@ -102,7 +113,8 @@ a consumer subscription.
 
 **What the course can uniquely provide is the material, not the chat.** No
 vendor can give a student *this* course's questions, *this* instructor's
-rubrics, the worked solutions, and the slides they were taught from. That is
+rubrics, the worked solutions, and the slides, demos and labs they were
+taught from. That is
 what the MCP publishes. An assistant that can read the rubric gives feedback
 aimed at what the course actually grades, rather than at what a generic answer
 to the topic looks like.
@@ -145,11 +157,24 @@ Grading notes go to students' assistants as part of `get_rubric`, so keep them
 to what you would say to a student: common mistakes and what is accepted, not
 remarks meant only for TAs.
 
-What is published is chosen by an explicit list in the
-[MCP package configuration](./package.md), never by "everything in the repo":
-a course repository typically also holds exams, autograder keys and lab
-solution code, none of which should reach a student.
+What is published is chosen in the [MCP package configuration](./package.md),
+never by "everything in the repo". Material comes from two sources, kept apart
+on purpose:
+
+- **The package**: files from any repository, including your private one, by
+  **explicit path only**. A course repository also holds exams, autograder
+  keys and solutions, and a new one must never be published because nobody
+  remembered to exclude it.
+- **A public repository** the portal keeps a copy of ([Sources](./sources.md)).
+  Patterns such as "one item per folder of `labs/`" are allowed there, because
+  everything in it is public already.
+
+Each kind of material has a policy. `open` material is served as it is.
+`tutor` material -- worked lab solutions, say -- is served with the
+instruction to help the student reason toward the answer. `private` material
+is listed by title, so the assistant can say it exists, and never read,
+searched, or even built into the package.
 
 Nothing a student does through the MCP is graded. The portal counts which tools
-are called and on which questions and slides, anonymously and never with what
+are called and on which questions, materials and files, anonymously and never with what
 the student asked; see [what is recorded](./deploy.md#what-is-recorded).

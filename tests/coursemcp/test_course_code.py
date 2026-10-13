@@ -1,6 +1,7 @@
-"""The demo tools and their sync: ``plans/demo_code_mcp.md``.
+"""The mirror source of materials and its sync: ``plans/unified_materials.md``
+(first built for demos alone, ``plans/demo_code_mcp.md``).
 
-Offline throughout.  The demo repo is a real git repository made in
+Offline throughout.  The mirrored repo is a real git repository made in
 ``tmp_path`` and served to the sync as a ``file://`` remote, so the git
 commands the portal runs on Render run here too -- only the network is
 missing.  Tool calls go through the WSGI mount, as in ``test_course_mcp.py``.
@@ -134,8 +135,8 @@ REPO_BINARIES = {
 
 CODE_CONFIG = {
     "repo": "https://github.com/test/hwdesign", "branch": "main",
-    "includes": [{"path": "demos", "kind": "code"}, {"path": "docs/demos", "kind": "doc"}],
-    "excludes": [], "site": None, "links": None,
+    "includes": [{"path": "demos", "format": "text"}, {"path": "docs/demos", "format": "page"}],
+    "excludes": [], "site": None, "overrides": None,
 }
 
 DECKS = {
@@ -144,6 +145,21 @@ DECKS = {
     "fsm": ("Unit 2:  Sequential Logic and FSMs",
             {35: {"text": "Run the demo", "links": ["https://example.github.io/hwdesign/docs/demos/stream/"]}}),
 }
+
+KINDS = [
+    {"id": "slides", "description": "Lecture slides", "policy": "open"},
+    {"id": "demo", "description": "In-class demos", "policy": "open"},
+]
+
+# hwdesign's shape: the procif walkthrough with the scalar_fun code it
+# builds, named explicitly, and one item per other demos/ folder.
+MIRROR_ITEMS = [{
+    "id": "procif-demo", "kind": "demo", "title": "", "description": "", "units": [],
+    "slides": [], "not_slides": [],
+    "parts": [{"path": "docs/demos/procif", "docs": True},
+              {"path": "demos/scalar_fun", "docs": False}],
+}]
+PATTERNS = [{"kind": "demo", "path": "demos/*", "docs": "docs/demos/*", "units": []}]
 
 
 def git(*args, cwd) -> str:
@@ -172,9 +188,12 @@ def make_repo(root: Path) -> Path:
 
 
 def write_materials(package: Path, code: dict | None = CODE_CONFIG) -> None:
-    """A course package's MCP material: two decks and, optionally, <code>."""
+    """A course package's material: two slide decks and, with *code*, the
+    mirror's items and patterns."""
     root = package / "mcp_materials"
-    manifest = {"version": 1, "decks": [], "units": [], "unit_types": []}
+    manifest = {"version": 2, "kinds": KINDS, "material_units": [], "items": [],
+                "mirror_items": [], "patterns": [], "refinements": [], "decks": [],
+                "units": [], "unit_types": []}
     for deck_id, (unit, slides) in DECKS.items():
         count = max(slides)
         deck_dir = root / "slides" / deck_id
@@ -187,10 +206,16 @@ def write_materials(package: Path, code: dict | None = CODE_CONFIG) -> None:
                             "links": spec.get("links", [])})
         (deck_dir / "deck.json").write_text(json.dumps(
             {"id": deck_id, "unit": unit, "title": deck_id, "slides": entries}), encoding="utf-8")
-        manifest["decks"].append({"id": deck_id, "unit": unit, "title": deck_id,
+        path = f"units/{deck_id}.pptx"
+        manifest["decks"].append({"id": deck_id, "item": deck_id, "unit": unit, "title": deck_id,
+                                  "format": "slides", "path": path,
                                   "slides": count, "images": False, "warning": ""})
+        manifest["items"].append({"id": deck_id, "kind": "slides", "title": deck_id,
+                                  "description": "", "units": [unit], "slides": [],
+                                  "not_slides": [],
+                                  "parts": [{"path": path, "format": "slides", "deck": deck_id}]})
     if code is not None:
-        manifest["code"] = code
+        manifest.update(code=code, mirror_items=MIRROR_ITEMS, patterns=PATTERNS)
     (root / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
 
 
@@ -230,7 +255,23 @@ def error_text(result: dict) -> str:
 
 
 def search(client, query, **kwargs):
-    return payload(call_tool(client, "search_demos", {"course_id": "alpha", "query": query, **kwargs}))
+    return payload(call_tool(client, "search_materials",
+                             {"course_id": "alpha", "query": query, **kwargs}))
+
+
+def read(client, item, path=None, **kwargs):
+    args = {"course_id": "alpha", "id": item, **kwargs}
+    if path is not None:
+        args["path"] = path
+    return call_tool(client, "read_material", args)
+
+
+def materials(client, **kwargs) -> dict:
+    return payload(call_tool(client, "list_materials", {"course_id": "alpha", **kwargs}))
+
+
+def item_ids(client, **kwargs) -> list[str]:
+    return [i["id"] for i in materials(client, **kwargs)["items"]]
 
 
 # ---------------------------------------------------------------------------
@@ -238,14 +279,64 @@ def search(client, query, **kwargs):
 # ---------------------------------------------------------------------------
 
 
+def test_list_materials_joins_the_package_and_the_mirror(client) -> None:
+    listed = materials(client)
+    assert [k["kind"] for k in listed["kinds"]] == ["slides", "demo"]
+    # The explicit item first, then one per folder; a folder the explicit
+    # item serves (scalar_fun) is not an item of its own, and a demo named
+    # like a deck gets its kind after its name.
+    assert item_ids(client) == ["procif", "fsm", "procif-demo", "fifoif", "fsm-demo", "stream"]
+    by_id = {i["id"]: i for i in listed["items"]}
+    assert by_id["procif-demo"]["title"] == "Bus Basics and Memory-Mapped Interfaces"
+    assert by_id["procif-demo"]["description"].startswith("In this unit we build an IP")
+    assert by_id["procif-demo"]["units"] == ["Unit 4:  Memory and Processor Interfaces"]
+    assert by_id["fsm-demo"]["units"] == ["Unit 2:  Sequential Logic and FSMs"]
+    assert [u["unit"] for u in listed["units"]] == ["Unit 4:  Memory and Processor Interfaces",
+                                                    "Unit 2:  Sequential Logic and FSMs"]
+    assert item_ids(client, unit="unit 4:  memory and processor interfaces") == [
+        "procif", "procif-demo"]
+    assert item_ids(client, kind="slides") == ["procif", "fsm"]
+
+
+def test_get_material_lists_the_parts_and_how_each_was_linked(client) -> None:
+    item = payload(call_tool(client, "get_material", {"course_id": "alpha", "id": "procif-demo"}))
+    assert item["kind"] == "demo"
+    assert item["units"][0]["unit"] == "Unit 4:  Memory and Processor Interfaces"
+    assert "procif:50" in item["units"][0]["via"]
+    paths = [p["path"] for p in item["parts"]]
+    assert paths[:2] == ["docs/demos/procif/index.md", "docs/demos/procif/vitis_ip.md"]
+    assert "demos/scalar_fun/scalar_fun_vitis/src/scalar_fun.cpp" in paths
+    page = item["parts"][0]
+    assert page["format"] == "page" and page["title"] == "Bus Basics and Memory-Mapped Interfaces"
+    assert page["view_url"] == "https://example.github.io/hwdesign/docs/demos/procif/"
+    code = next(p for p in item["parts"] if p["path"].endswith("scalar_fun.cpp"))
+    assert code["format"] == "text" and code["language"] == "hls-cpp"
+    assert item["slides"] == [{"id": "procif", "path": "units/procif.pptx", "page": 50,
+                               "view_url": "http://localhost/c/alpha/slides/procif/50"}]
+    # A slide hyperlink to a docs page links that item; a docs page that
+    # links another item's page makes them related.
+    stream = payload(call_tool(client, "get_material", {"course_id": "alpha", "id": "stream"}))
+    assert stream["units"][0]["unit"] == "Unit 2:  Sequential Logic and FSMs"
+    assert stream["related"] == ["procif-demo"]
+    assert {p["path"] for p in stream["parts"]} >= {"demos/stream/avgfilt/avgfilt.cpp",
+                                                   "demos/stream/poly/poly.cpp"}
+
+
+def test_a_slide_deck_opens_with_its_outline(client) -> None:
+    deck = payload(call_tool(client, "get_material", {"course_id": "alpha", "id": "fsm"}))
+    [part] = deck["parts"]
+    assert part["format"] == "slides" and part["pages"] == 35
+    assert part["outline"][34] == {"page": 35, "title": "fsm 35", "excerpt": "Run the demo"}
+
+
 def test_search_finds_the_axilite_pragmas_as_one_hit(client) -> None:
     result = search(client, "s_axilite")
-    code_hits = [h for h in result["hits"] if h["kind"] == "code"]
+    code_hits = [h for h in result["hits"] if h["format"] == "text"]
     assert len(code_hits) == 1, result
     hit = code_hits[0]
     assert hit["path"] == "demos/scalar_fun/scalar_fun_vitis/src/scalar_fun.cpp"
     assert (hit["start_line"], hit["end_line"]) == (12, 16)
-    assert hit["demos"] == ["procif"]
+    assert (hit["id"], hit["kind"]) == ("procif-demo", "demo")
     assert hit["language"] == "hls-cpp"
     commit = client.application.course_mcp.code.sync_for("alpha").snapshot.commit
     assert hit["source_url"] == (
@@ -256,20 +347,30 @@ def test_search_finds_the_axilite_pragmas_as_one_hit(client) -> None:
 
 def test_docs_hits_come_first_with_the_published_page(client) -> None:
     hits = search(client, "s_axilite")["hits"]
-    assert hits[0]["kind"] == "doc"
+    assert hits[0]["format"] == "page"
     assert hits[0]["path"] == "docs/demos/procif/vitis_ip.md"
     assert hits[0]["heading"] == "Interface pragmas"
     assert hits[0]["view_url"] == ("https://example.github.io/hwdesign/docs/demos/procif/"
                                    "vitis_ip#interface-pragmas")
     assert "?plain=1#L" in hits[0]["source_url"]
+    assert hits[0]["score"] >= hits[-1]["score"]
 
 
-def test_search_is_case_and_space_insensitive_and_can_be_scoped(client) -> None:
+def test_one_search_covers_slides_pages_and_code(client) -> None:
+    kinds = {(h["kind"], h["format"]) for h in search(client, "scalar_fun")["hits"]}
+    assert ("slides", "slides") in kinds and ("demo", "text") in kinds
+    slide = next(h for h in search(client, "scalar_fun")["hits"] if h["format"] == "slides")
+    assert (slide["id"], slide["page"]) == ("procif", 50)
+
+
+def test_search_is_case_insensitive_and_can_be_scoped(client) -> None:
     upper = search(client, "S_AXILITE")
     assert [h["path"] for h in upper["hits"]] == [h["path"] for h in search(client, "s_axilite")["hits"]]
     assert search(client, "pragma HLS   INTERFACE  s_axilite")["hits_shown"] >= 1
-    assert search(client, "s_axilite", demo="fsm")["hits"] == []
-    assert all(h["kind"] == "doc" for h in search(client, "s_axilite", kind="doc")["hits"])
+    assert search(client, "s_axilite", kind="slides")["hits"] == []
+    assert all(h["format"] == "page" for h in search(client, "s_axilite", format="page")["hits"])
+    assert all(h["format"] == "text" for h in search(client, "s_axilite", format="text")["hits"])
+    assert search(client, "s_axilite", unit="Unit 2:  Sequential Logic and FSMs")["hits"] == []
 
 
 @pytest.mark.parametrize("path", [
@@ -280,36 +381,35 @@ def test_search_is_case_and_space_insensitive_and_can_be_scoped(client) -> None:
     "demos/scalar_fun/../../units/unit04/slides.txt",
     "units/unit04/slides.txt",
     "_config.yml",
+    "demos/fsm/counter.sv",          # another item's file
 ])
-def test_paths_outside_the_includes_are_refused(client, path) -> None:
-    result = call_tool(client, "get_demo_file", {"course_id": "alpha", "path": path})
-    assert result.get("isError"), result
+def test_paths_outside_the_item_are_refused(client, path) -> None:
+    assert read(client, "procif-demo", path).get("isError")
 
 
 def test_build_output_binaries_and_generated_tcl_are_not_served(client) -> None:
-    files = [f["path"] for f in tool_items(call_tool(
-        client, "list_demo_files", {"course_id": "alpha", "demo": "procif"}))]
+    item = payload(call_tool(client, "get_material", {"course_id": "alpha", "id": "procif-demo"}))
+    files = [p["path"] for p in item["parts"]]
     assert "demos/scalar_fun/scalar_fun_vitis/src/scalar_fun.cpp" in files
     for hidden in ("demos/scalar_fun/overlay/design.bit", "demos/scalar_fun/overlay/design.tcl",
                    "demos/scalar_fun/scalar_fun_vitis/hls_component/syn/simp_fun.cpp",
                    "docs/demos/procif/images/fig.png"):
         assert hidden not in files
-        text = error_text(call_tool(client, "get_demo_file", {"course_id": "alpha", "path": hidden}))
-        assert "not served" in text or "No file" in text
+        assert "has no part" in error_text(read(client, "procif-demo", hidden))
     assert not any("overlay" in h["path"] or "hls_component" in h["path"]
                    for h in search(client, "s_axilite")["hits"])
 
 
 def test_notebooks_are_served_without_their_outputs(client) -> None:
     assert search(client, "OUTPUT_ONLY_TOKEN")["hits"] == []
-    [hit] = search(client, "Overlay('scalar_fun.bit')")["hits"]
+    [hit] = [h for h in search(client, "Overlay('scalar_fun.bit')")["hits"] if h["format"] == "text"]
     assert hit["language"] == "notebook"
     assert "#L" not in hit["source_url"]     # GitHub renders notebooks: no line anchors
 
 
 def test_a_docs_page_reads_without_front_matter_and_lists_what_it_cites(client) -> None:
-    page = payload(call_tool(client, "get_demo_file",
-                             {"course_id": "alpha", "path": "docs/demos/procif/index.md"}))
+    page = payload(read(client, "procif-demo", "docs/demos/procif/index.md"))
+    assert (page["id"], page["kind"], page["format"]) == ("procif-demo", "demo", "page")
     assert page["title"] == "Bus Basics and Memory-Mapped Interfaces"
     assert page["first_line"] == 7 and page["start_line"] == 7
     assert "nav_order" not in page["text"]
@@ -318,83 +418,88 @@ def test_a_docs_page_reads_without_front_matter_and_lists_what_it_cites(client) 
 
 
 def test_reading_is_windowed(client) -> None:
-    def read(**kw):
-        return payload(call_tool(client, "get_demo_file",
-                                 {"course_id": "alpha", "path": "demos/fsm/long.py", **kw}))
-    first = read()
+    def window(**kw):
+        return payload(read(client, "fsm-demo", "demos/fsm/long.py", **kw))
+    first = window()
     assert (first["start_line"], first["end_line"], first["truncated"]) == (1, 400, True)
-    rest = read(start_line=401)
+    rest = window(start_line=401)
     assert (rest["start_line"], rest["end_line"], rest["truncated"]) == (401, 500, False)
-    assert read(start_line=10, end_line=12)["text"].splitlines()[0].strip() == "10  x10 = 10"
-    assert "has lines" in error_text(call_tool(client, "get_demo_file", {
-        "course_id": "alpha", "path": "demos/fsm/long.py", "start_line": 900}))
+    assert window(start_line=10, end_line=12)["text"].splitlines()[0].strip() == "10  x10 = 10"
+    assert "has lines" in error_text(read(client, "fsm-demo", "demos/fsm/long.py", start_line=900))
     # The docs write paths with the repo's name in front.
-    assert payload(call_tool(client, "get_demo_file", {
-        "course_id": "alpha", "path": "hwdesign/demos/fsm/counter.sv"}))["path"] == "demos/fsm/counter.sv"
+    assert payload(read(client, "fsm-demo", "hwdesign/demos/fsm/counter.sv"))["path"] == \
+        "demos/fsm/counter.sv"
 
 
-def test_list_demos_derives_the_demos_and_their_links(client) -> None:
-    demos = {d["demo"]: d for d in tool_items(call_tool(client, "list_demos", {"course_id": "alpha"}))}
-    assert set(demos) == {"procif", "stream", "fifoif", "fsm"}
-    procif = demos["procif"]
-    assert procif["title"] == "Bus Basics and Memory-Mapped Interfaces"
-    assert procif["description"].startswith("In this unit we build an IP")
-    assert procif["code"] == ["demos/scalar_fun/scalar_fun_vitis"]
-    assert procif["slides"][0]["deck"] == "procif" and procif["slides"][0]["slide"] == 50
-    assert procif["units"][0]["unit"] == "Unit 4:  Memory and Processor Interfaces"
-    assert "procif:50" in procif["units"][0]["via"]
-    assert [p["path"] for p in procif["docs"]] == ["docs/demos/procif/index.md",
-                                                   "docs/demos/procif/vitis_ip.md"]
-    # A folder holding two demos is neither's code; each keeps its own part.
-    assert demos["stream"]["code"] == ["demos/stream/avgfilt"]
-    assert demos["fifoif"]["code"] == ["demos/stream/poly"]
-    assert demos["stream"]["related"] == ["procif"]
-    # A slide hyperlink to a docs page links that demo.
-    assert {(s["deck"], s["slide"]) for s in demos["stream"]["slides"]} == {("fsm", 35)}
-    # Code no docs page cites is a demo of its own, and a deck of its name gives its unit.
-    assert demos["fsm"]["code"] == ["demos/fsm"]
-    assert demos["fsm"]["units"][0]["unit"].startswith("Unit 2")
-    only_unit4 = tool_items(call_tool(client, "list_demos", {"course_id": "alpha", "unit": "unit 4"}))
-    assert [d["demo"] for d in only_unit4] == ["procif"]
-
-
-def test_slides_say_which_demos_they_cite(client) -> None:
-    # A slide tool never waits for the demos, so there must be a copy first.
-    first = json.loads(call_tool(client, "get_slide", {"course_id": "alpha", "deck": "procif",
-                                                        "slide": 50})["content"][0]["text"])
-    tool_items(call_tool(client, "list_demos", {"course_id": "alpha"}))
-    result = call_tool(client, "get_slide", {"course_id": "alpha", "deck": "procif", "slide": 50})
-    slide = json.loads(result["content"][0]["text"])
-    assert slide["demos"] == [{"demo": "procif", "title": "Bus Basics and Memory-Mapped Interfaces"}]
-    plain = json.loads(call_tool(client, "get_slide", {"course_id": "alpha", "deck": "procif",
-                                                        "slide": 1})["content"][0]["text"])
-    assert "demos" not in plain
+def test_a_slide_says_which_items_cite_it(client) -> None:
+    materials(client)                 # a copy of the mirror is in hand
+    slide = payload(read(client, "procif", page=50))
+    assert (slide["page"], slide["of"], slide["format"]) == (50, 50, "slides")
+    assert slide["materials"] == [{"id": "procif-demo",
+                                   "title": "Bus Basics and Memory-Mapped Interfaces"}]
+    assert "materials" not in payload(read(client, "procif", page=1))
 
 
 def test_errors_are_readable(client) -> None:
-    assert "Unknown course" in error_text(call_tool(client, "list_demos", {"course_id": "nope"}))
-    assert "has not published demos" in error_text(call_tool(client, "list_demos", {"course_id": "beta"}))
-    text = error_text(call_tool(client, "list_demo_files", {"course_id": "alpha", "demo": "nope"}))
-    assert "Valid demos" in text and "'procif'" in text
-    assert "kind must be" in error_text(call_tool(client, "search_demos", {
-        "course_id": "alpha", "query": "x", "kind": "binary"}))
-    assert "empty" in error_text(call_tool(client, "search_demos", {"course_id": "alpha", "query": " "}))
+    assert "Unknown course" in error_text(call_tool(client, "list_materials", {"course_id": "nope"}))
+    text = error_text(call_tool(client, "get_material", {"course_id": "alpha", "id": "nope"}))
+    assert "Valid ids" in text and "'procif-demo'" in text
+    assert "pass path" in error_text(read(client, "procif-demo"))
+    assert "is a folder" in error_text(read(client, "procif-demo", "docs/demos/procif"))
+    assert "pages 1 to 35" in error_text(read(client, "fsm", page=99))
+    assert "format must be" in error_text(call_tool(client, "search_materials", {
+        "course_id": "alpha", "query": "x", "format": "binary"}))
+    assert "Unknown kind" in error_text(call_tool(client, "list_materials", {
+        "course_id": "alpha", "kind": "handout"}))
+    assert "empty" in error_text(call_tool(client, "search_materials",
+                                           {"course_id": "alpha", "query": " "}))
+
+
+def test_a_course_without_the_mirror_serves_its_package_items(client) -> None:
+    beta = payload(call_tool(client, "list_materials", {"course_id": "beta"}))
+    assert [i["id"] for i in beta["items"]] == ["procif", "fsm"]
 
 
 def test_list_courses_carries_the_code_version(client) -> None:
-    call_tool(client, "list_demos", {"course_id": "alpha"})
+    materials(client)
     courses = {c["course_id"]: c for c in tool_items(call_tool(client, "list_courses"))}
     commit = client.application.course_mcp.code.sync_for("alpha").snapshot.commit
     assert courses["alpha"]["code_version"] == commit[:12]
     assert "code_version" not in courses["beta"]
 
 
-def test_demo_tools_are_off_without_the_switch(tmp_path, monkeypatch) -> None:
+def test_without_the_switch_only_package_items_are_served(tmp_path, monkeypatch) -> None:
     client = make_app(tmp_path, monkeypatch, code_switch=False).test_client()
     names = {t["name"] for t in rpc(client, "tools/list").get_json()["result"]["tools"]}
-    assert "search_demos" not in names
-    assert "get_slide" in names
+    assert {"list_materials", "read_material"} <= names
+    assert item_ids(client) == ["procif", "fsm"]
     assert not (tmp_path / "storage" / "courses" / "alpha" / "code").exists()
+
+
+# ---------------------------------------------------------------------------
+# The repo's materials.xml
+# ---------------------------------------------------------------------------
+
+
+def test_the_repos_materials_xml_refines_items_on_the_next_sync(app, client, tmp_path) -> None:
+    materials(client)
+    sync = library(app).sync_for("alpha")
+    repo = tmp_path / "hwdesign"
+    (repo / "materials.xml").write_text("""<materials>
+  <item id="fifoif" title="FIFO interfaces, renamed" unit="Unit 4:  Memory and Processor Interfaces">
+    <description>Polynomial kernel over FIFOs.</description>
+  </item>
+  <item id="fsm-demo"><not_slides deck="fsm"/><slides deck="procif" first="2" last="3"/></item>
+</materials>""", encoding="utf-8")
+    commit_all(repo)
+    assert sync.sync_now() is True
+    by_id = {i["id"]: i for i in materials(client)["items"]}
+    assert by_id["fifoif"]["title"] == "FIFO interfaces, renamed"
+    assert by_id["fifoif"]["description"] == "Polynomial kernel over FIFOs."
+    assert by_id["fifoif"]["units"] == ["Unit 4:  Memory and Processor Interfaces"]
+    fsm = payload(call_tool(client, "get_material", {"course_id": "alpha", "id": "fsm-demo"}))
+    assert [u["unit"] for u in fsm["units"]] == ["Unit 4:  Memory and Processor Interfaces"]
+    assert [s["page"] for s in fsm["slides"]] == [2, 3]
 
 
 # ---------------------------------------------------------------------------
@@ -402,22 +507,25 @@ def test_demo_tools_are_off_without_the_switch(tmp_path, monkeypatch) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_every_demo_tool_argument_is_classified(client) -> None:
+def test_every_material_tool_argument_is_classified(client) -> None:
     from llmgrader.coursemcp.usage import IDENTIFIER_ARGUMENTS, REDACTED_ARGUMENTS
 
     tools = rpc(client, "tools/list").get_json()["result"]["tools"]
-    assert {"list_demos", "list_demo_files", "get_demo_file", "search_demos"} <= {t["name"] for t in tools}
+    assert {"list_materials", "get_material", "read_material", "search_materials"} <= {
+        t["name"] for t in tools}
     unlisted = {(t["name"], arg) for t in tools for arg in t["inputSchema"].get("properties", {})
                 if arg not in IDENTIFIER_ARGUMENTS | REDACTED_ARGUMENTS}
     assert unlisted == set()
 
 
-def test_usage_rows_record_demo_and_file_but_not_the_query(app, client) -> None:
+def test_usage_rows_record_material_and_file_but_not_the_query(app, client) -> None:
     import sqlite3
 
     # A row is written as the response closes, so the client must buffer it.
-    for name, args in [("search_demos", {"query": "s_axilite"}),
-                       ("get_demo_file", {"path": "hwdesign/demos/fsm/counter.sv"})]:
+    for name, args in [("search_materials", {"query": "s_axilite"}),
+                       ("read_material", {"id": "fsm-demo",
+                                          "path": "hwdesign/demos/fsm/counter.sv"}),
+                       ("read_material", {"id": "procif", "page": 50})]:
         response = rpc(client, "tools/call", {"name": name,
                                               "arguments": {"course_id": "alpha", **args}},
                        buffered=True)
@@ -425,15 +533,19 @@ def test_usage_rows_record_demo_and_file_but_not_the_query(app, client) -> None:
     db = app.course_mcp.usage.db_path
     with sqlite3.connect(db) as conn:
         conn.row_factory = sqlite3.Row
-        rows = {r["tool"]: dict(r) for r in conn.execute(
-            "SELECT * FROM mcp_calls WHERE tool IN ('search_demos', 'get_demo_file')")}
+        rows = [dict(r) for r in conn.execute(
+            "SELECT * FROM mcp_calls WHERE tool IN ('search_materials', 'read_material') "
+            "ORDER BY id")]
     commit = app.course_mcp.code.sync_for("alpha").snapshot.commit
-    assert json.loads(rows["search_demos"]["args_json"])["query"] == "<redacted>"
-    assert "s_axilite" not in json.dumps(rows["search_demos"])
-    assert rows["search_demos"]["result_items"] >= 2
-    assert rows["get_demo_file"]["path"] == "demos/fsm/counter.sv"
-    assert rows["get_demo_file"]["demo"] == "fsm"
-    assert rows["get_demo_file"]["code_version"] == commit[:12]
+    searched, code_read, slide_read = rows
+    assert json.loads(searched["args_json"])["query"] == "<redacted>"
+    assert "s_axilite" not in json.dumps(searched)
+    assert searched["result_items"] >= 2
+    assert (code_read["material"], code_read["kind"]) == ("fsm-demo", "demo")
+    assert (code_read["path"], code_read["format"]) == ("demos/fsm/counter.sv", "text")
+    assert code_read["code_version"] == commit[:12]
+    assert (slide_read["material"], slide_read["slide"], slide_read["format"]) == (
+        "procif", 50, "slides")
 
 
 # ---------------------------------------------------------------------------
@@ -477,11 +589,14 @@ def test_first_fetch_waits_briefly_then_says_so(tmp_path, monkeypatch) -> None:
     import llmgrader.coursemcp.server as server_module
     monkeypatch.setattr(server_module, "FIRST_FETCH_WAIT_S", 0.5)
     client = app.test_client()
-    result = within(10, lambda: call_tool(client, "list_demos", {"course_id": "alpha"}))
-    assert "being fetched for the first time" in error_text(result)
+    # The package's items are served at once; the mirror's follow it.
+    result = payload(within(10, lambda: call_tool(client, "list_materials",
+                                                  {"course_id": "alpha"})))
+    assert "being fetched for the first time" in result["note"]
+    assert [i["id"] for i in result["items"]] == ["procif", "fsm"]
     release.set()
     library(app).sync_for("alpha")._thread.join(30)
-    assert tool_items(call_tool(client, "list_demos", {"course_id": "alpha"}))
+    assert "procif-demo" in item_ids(client)
 
 
 def test_a_hung_sync_never_holds_a_tool_call(client, monkeypatch) -> None:
@@ -495,10 +610,10 @@ def test_a_hung_sync_never_holds_a_tool_call(client, monkeypatch) -> None:
     state["synced_at"] = state["last_attempt"] = time.time() - 10_000   # stale
     sync._write_state(state)
     try:
-        for name, args in [("search_demos", {"query": "always_ff"}),
-                           ("list_demos", {}),
-                           ("get_demo_file", {"path": "demos/fsm/counter.sv"}),
-                           ("list_demo_files", {"demo": "fsm"})]:
+        for name, args in [("search_materials", {"query": "always_ff"}),
+                           ("list_materials", {}),
+                           ("read_material", {"id": "fsm-demo", "path": "demos/fsm/counter.sv"}),
+                           ("get_material", {"id": "fsm-demo"})]:
             result = within(2, lambda: call_tool(client, name, {"course_id": "alpha", **args}))
             assert not result.get("isError"), result
         # A refresh did start, off the request path, and is stuck on the network.
@@ -554,12 +669,12 @@ def test_a_commit_with_a_broken_overrides_file_is_not_served(app, client, tmp_pa
     sync = library(app).sync_for("alpha")
     good = sync.snapshot.commit
     repo = tmp_path / "hwdesign"
-    (repo / "demos/demos.xml").write_text("<demos><demo id='fsm'><bogus/></demo></demos>",
+    (repo / "materials.xml").write_text("<materials><item id='fsm'><bogus/></item></materials>",
                                           encoding="utf-8")
     commit_all(repo)
     assert sync.sync_now() is False
     assert sync.snapshot.commit == good
-    assert "demos.xml" in sync.state()["last_error"]
+    assert "materials.xml" in sync.state()["last_error"]
 
 
 def test_a_corrupt_mirror_is_cloned_again(app, client) -> None:

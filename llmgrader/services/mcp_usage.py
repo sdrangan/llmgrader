@@ -31,7 +31,10 @@ SCHEMA = {
     "tool": "TEXT",
     "unit": "TEXT",
     "qtag": "TEXT",
+    # No longer written (plans/unified_materials.md, Analytics): old rows
+    # keep the deck a slide tool was asked about, as history.
     "deck": "TEXT",
+    # A slide's number, and now also a PDF page's.
     "slide": "INTEGER",
     "args_json": "TEXT",
     "status": "TEXT NOT NULL",
@@ -41,11 +44,17 @@ SCHEMA = {
     "result_images": "INTEGER",
     "result_bytes": "INTEGER",
     "package_version": "TEXT",
-    # The demo tools (plans/demo_code_mcp.md): the demo and file asked
-    # about, and the demo repo's commit that answered.
+    # The demo tools (plans/demo_code_mcp.md): the demo asked about -- no
+    # longer written, kept as history -- and the file, and the mirrored
+    # repo's commit that answered.
     "demo": "TEXT",
     "path": "TEXT",
     "code_version": "TEXT",
+    # The material tools (plans/unified_materials.md): the item asked about,
+    # its kind, and the format of the part read or searched.
+    "material": "TEXT",
+    "kind": "TEXT",
+    "format": "TEXT",
 }
 
 INDEXES = {

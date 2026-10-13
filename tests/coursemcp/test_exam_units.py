@@ -20,7 +20,7 @@ import pytest
 from llmgrader.coursemcp.materials import (
     MaterialsError,
     build_materials,
-    read_config,
+    read_materials,
     read_unit_types,
     read_units,
 )
@@ -101,7 +101,7 @@ def client(tmp_path, monkeypatch):
     app = build_app(tmp_path, monkeypatch, token=TOKEN)
     config = write_source(tmp_path / "src")
     pkg = tmp_path / "storage" / "courses" / "alpha" / "soln_pkg"
-    build_materials(read_config(config), pkg, log=lambda *_: None,
+    build_materials(read_materials(config), pkg, log=lambda *_: None,
                     units=read_units(config), unit_types=read_unit_types(config))
     return app.test_client()
 

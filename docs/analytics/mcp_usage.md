@@ -47,12 +47,16 @@ is nothing to match a grade on.
 | `method` | `tools/call` for a tool; also `initialize`, `tools/list`, and so on. |
 | `course_id` | The course asked about. |
 | `tool` | The tool called, for `tools/call`. |
-| `unit`, `qtag`, `deck`, `slide` | What was asked about, as the tool resolved it. |
+| `unit`, `qtag` | The unit and question asked about, as the tool resolved them. |
+| `material`, `kind`, `path`, `format` | For a material tool: the item (its id), its kind, the file, and the file's format (`slides`, `pdf`, `page`, `text`). |
+| `slide` | The slide or PDF page read. |
+| `deck`, `demo` | No longer written: kept on rows from the slide and demo tools that `material` replaced. |
+| `code_version` | For a material tool, the commit of the course's public repository that answered. |
 | `args_json` | Every argument as sent, with free text replaced by `<redacted>`. |
 | `status` | `ok`, `tool_error` (the tool answered with an error, such as an unknown unit), `error` (the request failed) or `refused` (missing or wrong course token). |
 | `error` | The error message, first 300 characters. |
 | `duration_ms` | How long the server took. |
-| `result_items` | How many items a list answer held: questions, search hits, slides. `0` for a search that found nothing. |
+| `result_items` | How many items a list answer held: questions, materials, search hits. `0` for a search that found nothing. |
 | `result_images` | How many images the answer carried. |
 | `result_bytes` | The size of the answer. |
 | `package_version` | The [course package version](../admin/mcp/package.md#package-versions) that answered. |
@@ -69,8 +73,10 @@ Where a preset is course-scoped, it is scoped to the course you are viewing.
 | Calls per day, by tool | How much the MCP is used, and for what. |
 | Most-viewed questions | Which problems students open, with their rubric and solution views beside. |
 | Solution views compared with rubric views | Per question: how often the worked solution is pulled, against the rubric. A high ratio is worth a look. |
-| Most-viewed slides | Which slides assistants open. |
-| Searches that found nothing | Per day, slide searches with no hit -- a sign the slides use different words from the students. The words themselves are never recorded. |
+| Calls per material and kind | Which items assistants open and read, grouped by kind. |
+| Most-read slides and pages | Which slides and PDF pages assistants open. |
+| Most-read files | Which docs pages and code files assistants read. |
+| Searches that found nothing | Per day, searches with no hit -- a sign the materials use different words from the students. The words themselves are never recorded. |
 | Errors and refusals | Every request that did not succeed. |
 | Calls by client | Which assistants students use, and which protocol versions. |
 | Sessions per day | Sessions, and the average calls and distinct tools per session. |

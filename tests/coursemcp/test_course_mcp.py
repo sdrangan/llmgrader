@@ -238,8 +238,8 @@ def test_tools_are_listed(client) -> None:
     assert response.status_code == 200
     names = {tool["name"] for tool in response.get_json()["result"]["tools"]}
     assert names == {"list_courses", "list_units", "list_unit_types", "list_questions", "get_question",
-                     "get_rubric", "get_solution", "list_materials", "get_outline",
-                     "search_slides", "get_slide"}
+                     "get_rubric", "get_solution", "list_materials", "get_material",
+                     "read_material", "search_materials"}
 
 
 def test_public_host_header_is_accepted(client) -> None:

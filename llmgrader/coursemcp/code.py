@@ -1,20 +1,22 @@
-"""Demo code and docs for the course MCP: ``plans/demo_code_mcp.md``.
+"""The mirror source of course materials: ``plans/unified_materials.md``.
 
-A course's ``llmgrader_mcp_config.xml`` may name a public GitHub repo and the
-subtrees of it to publish (``<code>``).  The portal keeps a copy of those
-subtrees and serves them to the demo tools.  Nothing is packaged: only the
-pointer travels in the course package, so a demo fix reaches students without
-a rebuild.
+A course's ``llmgrader_mcp_config.xml`` may name a public GitHub repo
+(``<code>``) and, in ``<materials>``, the paths of it that items are made
+from (``source="mirror"``).  The portal keeps a copy of those paths and serves
+them to the material tools.  Nothing is packaged: only the pointer travels in
+the course package, so a fix to a demo or a lab reaches students without a
+rebuild.  (``plans/demo_code_mcp.md`` built this for demos alone.)
 
 Two layers:
 
 * **A mirror on disk**, ``<storage>/courses/<course_id>/code/mirror``: a
-  shallow, sparse, partial git clone of the ``<include>`` paths, in the
-  repo's own layout.  Bitstreams are never fetched.
+  shallow, sparse, partial git clone of those paths, in the repo's own
+  layout.  Bitstreams are never fetched.
 * **A snapshot in memory**, :class:`CodeSnapshot`: every servable file's
-  text, built from the mirror after each sync and never changed afterwards.
-  Tools read only the snapshot, so no reader can see a half-updated tree and
-  readers take no lock; a sync swaps in a new snapshot with one assignment.
+  text, and each PDF's rendered pages, built from the mirror after each sync
+  and never changed afterwards.  Tools read only the snapshot, so no reader
+  can see a half-updated tree and readers take no lock; a sync swaps in a new
+  snapshot with one assignment.
 
 **Nothing a student waits on touches GitHub** (the 2026-10-06 lesson: one
 sync worker, so a request that waits freezes the portal).  A stale copy is
@@ -50,6 +52,8 @@ CODE_EXTENSIONS = {
     ".ipynb": "notebook",
     ".md": "markdown",
     ".txt": "text", ".template": "text",
+    ".tex": "latex", ".sty": "latex", ".bib": "latex",
+    ".m": "matlab",
     ".xdc": "constraints",
     ".mk": "make",
 }
@@ -75,7 +79,8 @@ MAX_CONTEXT_CHARS = 200
 DEFAULT_TTL_S = 600
 GIT_TIMEOUT_S = 60
 FIRST_FETCH_WAIT_S = 5.0
-DEFAULT_LINKS_FILE = "demos/demos.xml"
+DEFAULT_OVERRIDES_FILE = "materials.xml"
+TEXT, PAGE = "text", "page"     # the formats a mirrored file is read in
 
 # The stages a sync reports in progress.json, in order (plans/demo_code_admin.md).
 SYNC_STAGES = ("checking", "fetching", "building", "validating")
@@ -99,37 +104,42 @@ class GitError(Exception):
 
 @dataclass(frozen=True)
 class Include:
+    """A folder or file of the mirror that is fetched and served, and the
+    format its files are read in: ``page`` (a docs tree published as a site;
+    only Markdown is served from it) or ``text``."""
     path: str
-    kind: str = "code"   # "code" or "doc"
+    format: str = TEXT
 
 
 @dataclass(frozen=True)
 class CodeConfig:
-    """``<code>`` from llmgrader_mcp_config.xml, as the package manifest carries it."""
+    """``<code>`` from llmgrader_mcp_config.xml, as the package manifest
+    carries it, with the includes the build derived from ``<materials>``."""
 
     repo: str                     # https://github.com/<owner>/<repo>
     branch: str = "main"
     includes: tuple[Include, ...] = ()
     excludes: tuple[str, ...] = ()
     site: str | None = None       # published docs address; else from _config.yml
-    links: str | None = None      # the overrides file; default DEFAULT_LINKS_FILE
+    overrides: str | None = None  # the repo's corrections; default DEFAULT_OVERRIDES_FILE
 
     @classmethod
     def from_dict(cls, data: dict) -> "CodeConfig":
         return cls(
             repo=str(data["repo"]).rstrip("/").removesuffix(".git"),
             branch=data.get("branch") or "main",
-            includes=tuple(Include(i["path"].strip("/"), i.get("kind") or "code")
+            includes=tuple(Include(i["path"].strip("/"), i.get("format") or TEXT)
                            for i in data.get("includes", [])),
             excludes=tuple(data.get("excludes", [])),
             site=(data.get("site") or "").rstrip("/") or None,
-            links=data.get("links") or None,
+            overrides=data.get("overrides") or None,
         )
 
     def to_dict(self) -> dict:
         return {"repo": self.repo, "branch": self.branch,
-                "includes": [{"path": i.path, "kind": i.kind} for i in self.includes],
-                "excludes": list(self.excludes), "site": self.site, "links": self.links}
+                "includes": [{"path": i.path, "format": i.format} for i in self.includes],
+                "excludes": list(self.excludes), "site": self.site,
+                "overrides": self.overrides}
 
     @property
     def owner_repo(self) -> str:
@@ -140,28 +150,29 @@ class CodeConfig:
         return self.owner_repo.rsplit("/", 1)[-1]
 
     @property
-    def links_path(self) -> str:
-        return self.links or DEFAULT_LINKS_FILE
+    def overrides_path(self) -> str:
+        return self.overrides or DEFAULT_OVERRIDES_FILE
 
-    def roots(self, kind: str | None = None) -> list[str]:
-        return [i.path for i in self.includes if kind is None or i.kind == kind]
+    def roots(self, fmt: str | None = None) -> list[str]:
+        return [i.path for i in self.includes if fmt is None or i.format == fmt]
 
-    def kind_of(self, path: str) -> str | None:
-        """The kind of the include *path* falls under, or None if outside them all."""
+    def format_of(self, path: str) -> str | None:
+        """The format of the include *path* falls under, or None if outside them all."""
         for include in self.includes:
             if path == include.path or path.startswith(include.path + "/"):
-                return include.kind
+                return include.format
         return None
 
     def sparse_patterns(self) -> list[str]:
         """What the mirror checks out: the includes, the overrides file and
-        ``_config.yml``, never a bitstream or a docs image."""
-        patterns = [f"/{i.path}/" for i in self.includes]
-        patterns.append(f"/{self.links_path}")
+        ``_config.yml``, never a bitstream or a docs image.  An include has no
+        trailing slash, so it matches a file as well as a folder."""
+        patterns = [f"/{i.path}" for i in self.includes]
+        patterns.append(f"/{self.overrides_path}")
         if not self.site:
             patterns.append("/_config.yml")
         patterns += ["!*.bit", "!*.hwh", "!*.xsa", "!*.xclbin"]
-        for root in self.roots("doc"):
+        for root in self.roots(PAGE):
             patterns += [f"!/{root}/**/*.{ext}" for ext in ("png", "jpg", "jpeg", "gif", "svg")]
         return patterns
 
@@ -277,7 +288,7 @@ class SourceFile:
     line *first_line* of the file on GitHub (docs drop their front matter)."""
 
     path: str
-    kind: str                 # "code" or "doc"
+    format: str               # TEXT or PAGE
     language: str
     lines: tuple[str, ...]
     first_line: int = 1
@@ -321,7 +332,7 @@ class SourceFile:
         return text[:limit] + ("…" if len(text) > limit else "")
 
 
-def _make_source(path: str, kind: str, text: str) -> SourceFile | None:
+def make_source(path: str, fmt: str, text: str) -> SourceFile | None:
     language = language_of(path, text)
     if language is None:
         return None
@@ -331,17 +342,21 @@ def _make_source(path: str, kind: str, text: str) -> SourceFile | None:
         meta, start = split_front_matter(raw_lines)
     lines = tuple(raw_lines[start:])
     return SourceFile(
-        path=path, kind=kind, language=language, lines=lines, first_line=start + 1,
+        path=path, format=fmt, language=language, lines=lines, first_line=start + 1,
         meta=meta, norm=tuple(_normalize(line) for line in lines),
         headings=_headings(lines) if language == "markdown" else None,
     )
 
 
-def read_servable(full: Path, path: str, kind: str, excludes: tuple[str, ...]) -> SourceFile | None:
-    """*full* as a :class:`SourceFile`, or None if it is not to be served."""
+def read_servable(full: Path, path: str, fmt: str, excludes: tuple[str, ...]) -> SourceFile | None:
+    """*full* as a :class:`SourceFile`, or None if it is not to be served.
+
+    The package build uses it too, for a package item's text files, so the
+    two sources leave out the same build output, binaries and generated Tcl.
+    """
     if is_build_output(path) or _excluded_by_config(path, excludes):
         return None
-    if kind == "doc" and not path.lower().endswith(".md"):
+    if fmt == PAGE and not path.lower().endswith(".md"):
         return None
     if language_of(path) is None:
         return None
@@ -367,7 +382,11 @@ def read_servable(full: Path, path: str, kind: str, excludes: tuple[str, ...]) -
         head = "\n".join(text.splitlines()[:10])
         if any(marker in head for marker in GENERATED_TCL_MARKERS):
             return None
-    return _make_source(path, kind, text)
+    return make_source(path, fmt, text)
+
+
+def is_pdf(path: str) -> bool:
+    return path.lower().endswith(".pdf")
 
 
 # ---------------------------------------------------------------------------
@@ -387,12 +406,38 @@ def site_from_jekyll(text: str) -> str | None:
     return (values["url"].rstrip("/") + "/" + values.get("baseurl", "").strip("/")).rstrip("/")
 
 
+@dataclass
+class PdfDoc:
+    """A mirrored PDF, rendered page by page in the shape of a package deck
+    (``deck.json``), so the material tools read and search it as one.
+
+    *error* says why there are no pages: the portal lacks PyMuPDF, or the
+    file would not open.
+    """
+
+    path: str
+    title: str = ""
+    pages: list = field(default_factory=list)   # {"n", "title", "text", "notes", "image", "description"}
+    image_dir: Path | None = None
+    error: str | None = None
+
+    def image_path(self, name: str | None) -> Path | None:
+        if not name or self.image_dir is None:
+            return None
+        root = self.image_dir.resolve()
+        path = (root / name).resolve()
+        if not str(path).startswith(str(root) + os.sep) or not path.is_file():
+            return None
+        return path
+
+
 class CodeSnapshot:
     """Every servable file of one commit, in memory.  Never changed once built."""
 
     def __init__(self, commit: str, config: CodeConfig, files: dict[str, SourceFile],
                  tree_files: frozenset[str], tree_dirs: frozenset[str],
-                 site: str | None, overrides_text: str | None):
+                 site: str | None, overrides_text: str | None,
+                 pdf_paths: frozenset[str] = frozenset()):
         self.commit = commit
         self.config = config
         self.files = files
@@ -400,8 +445,10 @@ class CodeSnapshot:
         self.tree_dirs = tree_dirs
         self.site = site
         self.overrides_text = overrides_text
+        self.pdf_paths = pdf_paths       # PDFs under the includes, rendered by attach_pdfs
+        self.pdfs: dict[str, PdfDoc] = {}
         dirs = set()
-        for path in files:
+        for path in [*files, *pdf_paths]:
             parent = posixpath.dirname(path)
             while parent:
                 dirs.add(parent)
@@ -411,6 +458,14 @@ class CodeSnapshot:
     @property
     def short_commit(self) -> str:
         return self.commit[:12]
+
+    def served(self, path: str) -> bool:
+        return path in self.files or path in self.pdf_paths
+
+    def under(self, directory: str) -> list[str]:
+        """Every served path at or under *directory* (a file or a folder), sorted."""
+        return sorted(p for p in [*self.files, *self.pdf_paths]
+                      if p == directory or p.startswith(directory + "/"))
 
     # -- links ---------------------------------------------------------------
 
@@ -439,7 +494,8 @@ class CodeSnapshot:
     def links_for(self, path: str, start: int | None = None, end: int | None = None,
                   anchor: str | None = None) -> dict:
         links = {"source_url": self.source_url(path, start, end)}
-        view = self.view_url(path, anchor)
+        source = self.files.get(path)
+        view = self.view_url(path, anchor) if source is not None and source.format == PAGE else None
         if view:
             links = {"view_url": view, **links}
         return links
@@ -452,124 +508,149 @@ class CodeSnapshot:
         Never touches the filesystem: the result is only ever looked up in
         :attr:`files`, so a path that escapes the includes simply is not there.
         """
-        raw = (path or "").strip().replace("\\", "/")
-        if not raw:
-            raise CodeError("path is empty; take one from list_demo_files or search_demos.")
-        if raw.startswith("/") or _DRIVE.match(raw):
-            raise CodeError(f"{path!r} is an absolute path; paths are relative to the "
-                            "repository, e.g. 'demos/fsm/counter.sv'.")
-        parts = [p for p in raw.split("/") if p not in ("", ".")]
-        if ".." in parts:
-            raise CodeError(f"{path!r} contains '..'; use a path exactly as "
-                            "list_demo_files or search_demos gave it.")
-        if len(parts) > 1 and parts[0] == self.config.repo_name and "/".join(parts) not in self.files:
-            parts = parts[1:]     # the docs write paths as hwdesign/demos/...
-        return "/".join(parts)
+        return normalize_request_path(path, self.config.repo_name,
+                                      lambda p: self.served(p))
 
     def get(self, path: str) -> SourceFile:
         normalized = self.normalize_path(path)
         found = self.files.get(normalized)
         if found is not None:
             return found
+        if normalized in self.pdf_paths:
+            raise CodeError(f"{normalized!r} is a PDF; read it a page at a time.")
         if normalized in self.tree_files or (normalized in self.tree_dirs
                                              and normalized not in self.served_dirs):
             raise CodeError(f"{normalized!r} is not served: build output, binaries, "
                             "bitstreams and generated files are left out.")
         if normalized in self.served_dirs:
-            raise CodeError(f"{normalized!r} is a directory; list_demo_files lists the files "
-                            "of a demo.")
-        raise CodeError(f"No file {normalized!r}. Take paths from list_demo_files or "
-                        "search_demos.")
+            raise CodeError(f"{normalized!r} is a directory; get_material lists an item's files.")
+        raise CodeError(f"No file {normalized!r}. Take paths from get_material or "
+                        "search_materials.")
 
-    # -- reading -------------------------------------------------------------
+    # -- reading and searching ----------------------------------------------
 
     def read(self, path: str, start_line: int | None = None, end_line: int | None = None) -> dict:
         source = self.get(path)
-        first, last = source.first_line, source.last_line
-        if not source.lines:
-            raise CodeError(f"{source.path!r} is empty.")
-        start = max(first, start_line or first)
-        if start > last:
-            raise CodeError(f"{source.path!r} has lines {first} to {last}.")
-        end = min(last, end_line if end_line is not None else last)
-        if end < first:
-            raise CodeError(f"Lines 1 to {first - 1} of {source.path!r} are its front matter; "
-                            f"its text is lines {first} to {last}.")
-        if end < start:
-            raise CodeError(f"end_line {end_line} is before start_line {start}.")
-        end = min(end, start + MAX_READ_LINES - 1)
-        width = len(str(end))
-        text = "\n".join(f"{n:>{width}}  {source.lines[n - first]}" for n in range(start, end + 1))
-        result = {"path": source.path, "kind": source.kind, "language": source.language,
-                  "lines": last}
-        if first > 1:
-            result["first_line"] = first   # a docs page's front matter is not served
-        result.update({
-            "start_line": start, "end_line": end,
-            "truncated": end < min(last, end_line if end_line is not None else last),
-            "text": text,
-        })
-        if source.kind == "doc":
-            result["title"] = source.title
-        result.update(self.links_for(source.path, start, end))
-        return result
+        return read_source(source, start_line, end_line, links=self.links_for)
 
-    # -- searching -----------------------------------------------------------
+    def search(self, query: str, *, paths=None, fmt: str | None = None) -> dict:
+        """A literal search of the served files: ``plans/demo_code_mcp.md``'s
+        search, kept for the build's report and its tests.  The material tools
+        search through :func:`find_lines` instead."""
+        sources = [s for s in self.files.values()
+                   if (paths is None or s.path in paths) and (not fmt or s.format == fmt)]
+        blocks = find_lines(sources, query)
+        hits = [line_hit(source, block, self.links_for) for source, block in blocks[:MAX_HITS]]
+        return {"matched_lines": sum(len(b) for _, b in blocks), "hits_shown": len(hits),
+                "more": len(blocks) - len(hits), "hits": hits}
 
-    def search(self, query: str, *, paths=None, kind: str | None = None,
-               demos_for=lambda path: []) -> dict:
-        """Case-insensitive literal search; adjacent matches merge into one hit."""
-        needle = _normalize(query or "")
-        if not needle:
-            raise CodeError("query is empty.")
-        blocks = []
-        for source in self.files.values():
-            if paths is not None and source.path not in paths:
-                continue
-            if kind and source.kind != kind:
-                continue
-            matches = [i for i, line in enumerate(source.norm) if needle in line]
-            if matches:
-                blocks.extend((source, block) for block in _merge(matches))
-        blocks.sort(key=lambda b: (_rank(b[0]), b[0].path, b[1][0]))
-        hits, per_file = [], {}
-        for source, block in blocks:
-            if len(hits) >= MAX_HITS or per_file.get(source.path, 0) >= MAX_HITS_PER_FILE:
-                continue
-            per_file[source.path] = per_file.get(source.path, 0) + 1
-            hits.append(self._hit(source, block, demos_for))
-        return {
-            "matched_lines": sum(len(b[1]) for b in blocks),
-            "hits_shown": len(hits),
-            "more": len(blocks) - len(hits),
-            "hits": hits,
-        }
 
-    def _hit(self, source: SourceFile, block: list[int], demos_for) -> dict:
-        first_i, last_i = block[0], block[-1]
-        lo = max(0, first_i - CONTEXT_LINES)
-        hi = min(len(source.lines) - 1, last_i + CONTEXT_LINES)
-        width = len(str(source.first_line + hi))
-        matched = set(block)
-        context = "\n".join(
-            f"{'>' if i in matched else ' '} {source.first_line + i:>{width}}  "
-            f"{_clip(source.lines[i])}"
-            for i in range(lo, hi + 1)
-        )
-        start, end = source.first_line + first_i, source.first_line + last_i
-        hit = {"path": source.path, "kind": source.kind, "demos": demos_for(source.path)}
-        anchor = None
-        if source.kind == "doc":
-            hit["title"] = source.title
-            heading = source.headings[first_i] if source.headings else None
-            if heading:
-                hit["heading"] = heading[0]
-                anchor = heading[1] or None
-        else:
-            hit["language"] = source.language
-        hit.update({"start_line": start, "end_line": end, "context": context})
-        hit.update(self.links_for(source.path, start, end, anchor))
-        return hit
+def normalize_request_path(path: str, repo_name: str | None = None,
+                           exists=lambda p: False) -> str:
+    """A path a tool was given, as a relative path, or a CodeError.
+
+    Never touches the filesystem.  A leading ``<repo name>/`` -- the docs
+    write paths as ``hwdesign/demos/...`` -- is dropped when the path is not
+    served as written.
+    """
+    raw = (path or "").strip().replace("\\", "/")
+    if not raw:
+        raise CodeError("path is empty; take one from get_material or search_materials.")
+    if raw.startswith("/") or _DRIVE.match(raw):
+        raise CodeError(f"{path!r} is an absolute path; paths are relative, exactly as "
+                        "get_material gives them, e.g. 'demos/fsm/counter.sv'.")
+    parts = [p for p in raw.split("/") if p not in ("", ".")]
+    if ".." in parts:
+        raise CodeError(f"{path!r} contains '..'; use a path exactly as get_material or "
+                        "search_materials gave it.")
+    if repo_name and len(parts) > 1 and parts[0] == repo_name and not exists("/".join(parts)):
+        parts = parts[1:]
+    return "/".join(parts)
+
+
+def read_source(source: SourceFile, start_line: int | None = None, end_line: int | None = None,
+                *, links=None) -> dict:
+    """One window of *source*'s lines, numbered.  *links*, when given, is
+    ``links_for(path, start, end)`` and adds the file's URLs."""
+    first, last = source.first_line, source.last_line
+    if not source.lines:
+        raise CodeError(f"{source.path!r} is empty.")
+    start = max(first, start_line or first)
+    if start > last:
+        raise CodeError(f"{source.path!r} has lines {first} to {last}.")
+    end = min(last, end_line if end_line is not None else last)
+    if end < first:
+        raise CodeError(f"Lines 1 to {first - 1} of {source.path!r} are its front matter; "
+                        f"its text is lines {first} to {last}.")
+    if end < start:
+        raise CodeError(f"end_line {end_line} is before start_line {start}.")
+    end = min(end, start + MAX_READ_LINES - 1)
+    width = len(str(end))
+    text = "\n".join(f"{n:>{width}}  {source.lines[n - first]}" for n in range(start, end + 1))
+    result = {"path": source.path, "format": source.format, "language": source.language,
+              "lines": last}
+    if first > 1:
+        result["first_line"] = first   # a docs page's front matter is not served
+    result.update({
+        "start_line": start, "end_line": end,
+        "truncated": end < min(last, end_line if end_line is not None else last),
+        "text": text,
+    })
+    if source.format == PAGE:
+        result["title"] = source.title
+    if links is not None:
+        result.update(links(source.path, start, end))
+    return result
+
+
+def find_lines(sources, query: str) -> list[tuple[SourceFile, list[int]]]:
+    """Case-insensitive literal matches of *query* in *sources*: ``(source,
+    block)`` per run of nearby matching lines, best-ranked file first."""
+    needle = _normalize(query or "")
+    if not needle:
+        raise CodeError("query is empty.")
+    blocks = []
+    for source in sources:
+        matches = [i for i, line in enumerate(source.norm) if needle in line]
+        if matches:
+            blocks.extend((source, block) for block in _merge(matches))
+    blocks.sort(key=lambda b: (_rank(b[0]), b[0].path, b[1][0]))
+    kept, per_file = [], {}
+    for source, block in blocks:
+        if per_file.get(source.path, 0) >= MAX_HITS_PER_FILE:
+            continue
+        per_file[source.path] = per_file.get(source.path, 0) + 1
+        kept.append((source, block))
+    return kept
+
+
+def line_hit(source: SourceFile, block: list[int], links=None) -> dict:
+    """One search hit: the matched lines with context, and the file's URLs."""
+    first_i, last_i = block[0], block[-1]
+    lo = max(0, first_i - CONTEXT_LINES)
+    hi = min(len(source.lines) - 1, last_i + CONTEXT_LINES)
+    width = len(str(source.first_line + hi))
+    matched = set(block)
+    context = "\n".join(
+        f"{'>' if i in matched else ' '} {source.first_line + i:>{width}}  "
+        f"{_clip(source.lines[i])}"
+        for i in range(lo, hi + 1)
+    )
+    start, end = source.first_line + first_i, source.first_line + last_i
+    hit = {"path": source.path, "format": source.format}
+    anchor = None
+    if source.format == PAGE:
+        hit["title"] = source.title
+        heading = source.headings[first_i] if source.headings else None
+        if heading:
+            hit["heading"] = heading[0]
+            anchor = heading[1] or None
+    else:
+        hit["language"] = source.language
+    hit.update({"start_line": start, "end_line": end, "context": context})
+    if links is not None:
+        hit.update(links(source.path, start, end, anchor))
+    return hit
 
 
 def _clip(line: str) -> str:
@@ -587,14 +668,20 @@ def _merge(matches: list[int]) -> list[list[int]]:
 
 
 _LANGUAGE_RANK = {"systemverilog": 1, "verilog": 1, "vhdl": 1, "hls-cpp": 1, "cpp": 1,
-                  "tcl": 1, "constraints": 1, "python": 2, "make": 2, "notebook": 3}
+                  "tcl": 1, "constraints": 1, "matlab": 1, "latex": 1,
+                  "python": 2, "make": 2, "notebook": 3}
 
 
 def _rank(source: SourceFile) -> int:
     """Docs explain, so they come first; then hand-written source, scripts, notebooks."""
-    if source.kind == "doc":
+    if source.format == PAGE:
         return 0
     return _LANGUAGE_RANK.get(source.language, 4)
+
+
+def text_rank(source: SourceFile) -> int:
+    """A text file's place in search results: 1 for source, up to 4."""
+    return _rank(source)
 
 
 def build_snapshot(tree_root: str | Path, config: CodeConfig, commit: str,
@@ -603,14 +690,34 @@ def build_snapshot(tree_root: str | Path, config: CodeConfig, commit: str,
 
     *only*, when given, limits the walk to those repo paths -- the build uses
     it with ``git ls-files`` so an instructor's untracked build output never
-    shows up in the report.  Symlinks are never followed.
+    shows up in the report.  Symlinks are never followed.  An include may be
+    a single file.  PDFs are noted, not read: :func:`attach_pdfs` renders them.
     """
     tree_root = Path(tree_root)
     files: dict[str, SourceFile] = {}
+    pdfs: set[str] = set()
     tree_files: set[str] = set()
     tree_dirs: set[str] = set()
+
+    def consider(full: Path, path: str, fmt: str) -> None:
+        if only is not None and path not in only:
+            return
+        tree_files.add(path)
+        if is_pdf(path):
+            if (fmt == TEXT and not is_build_output(path)
+                    and not _excluded_by_config(path, config.excludes)
+                    and not full.is_symlink() and full.is_file()):
+                pdfs.add(path)
+            return
+        source = read_servable(full, path, fmt, config.excludes)
+        if source is not None:
+            files[path] = source
+
     for include in config.includes:
         base = tree_root / include.path
+        if base.is_file():
+            consider(base, include.path, include.format)
+            continue
         if not base.is_dir():
             continue
         for dirpath, dirnames, filenames in os.walk(base, followlinks=False):
@@ -618,13 +725,7 @@ def build_snapshot(tree_root: str | Path, config: CodeConfig, commit: str,
             dirnames[:] = [d for d in dirnames if d != ".git"]
             tree_dirs.add(rel_dir)
             for name in filenames:
-                path = f"{rel_dir}/{name}"
-                if only is not None and path not in only:
-                    continue
-                tree_files.add(path)
-                source = read_servable(Path(dirpath) / name, path, include.kind, config.excludes)
-                if source is not None:
-                    files[path] = source
+                consider(Path(dirpath) / name, f"{rel_dir}/{name}", include.format)
     site = config.site
     if not site:
         try:
@@ -632,11 +733,39 @@ def build_snapshot(tree_root: str | Path, config: CodeConfig, commit: str,
         except OSError:
             site = None
     try:
-        overrides = (tree_root / config.links_path).read_text(encoding="utf-8")
+        overrides = (tree_root / config.overrides_path).read_text(encoding="utf-8")
     except OSError:
         overrides = None
     return CodeSnapshot(commit, config, dict(sorted(files.items())), frozenset(tree_files),
-                        frozenset(tree_dirs), site, overrides)
+                        frozenset(tree_dirs), site, overrides, frozenset(pdfs))
+
+
+def attach_pdfs(snapshot: CodeSnapshot, tree_root: str | Path, cache_root: str | Path) -> None:
+    """Render each of *snapshot*'s PDFs into *cache_root*, keyed by content.
+
+    A PDF a sync did not change is found by its hash and not rendered again
+    (``plans/unified_materials.md``, Sources).  Rendering needs PyMuPDF; a
+    portal without it serves the PDF's pages as unavailable rather than
+    failing the sync.
+    """
+    import hashlib
+
+    from llmgrader.coursemcp.materials import render_pdf_cached
+
+    for path in sorted(snapshot.pdf_paths):
+        try:
+            data = (Path(tree_root) / path).read_bytes()
+            key = hashlib.sha256(data).hexdigest()
+            out_dir, rendered = render_pdf_cached(data, Path(cache_root) / key)
+            snapshot.pdfs[path] = PdfDoc(path, rendered["title"] or posixpath.basename(path),
+                                         rendered["pages"], out_dir)
+        except ImportError:
+            snapshot.pdfs[path] = PdfDoc(path, posixpath.basename(path),
+                                         error="this portal cannot render PDFs (PyMuPDF "
+                                               "is not installed); open source_url instead")
+        except Exception as exc:  # one bad PDF must not cost the rest
+            snapshot.pdfs[path] = PdfDoc(path, posixpath.basename(path),
+                                         error=f"the PDF could not be read: {exc}")
 
 
 # ---------------------------------------------------------------------------
@@ -737,18 +866,18 @@ class SnapshotRejected(Exception):
 
 def validate_snapshot(snapshot: CodeSnapshot) -> None:
     """Refuse a commit that would empty the tools or has a broken overrides file."""
-    if not snapshot.files:
-        raise SnapshotRejected("no servable files under the <include> paths")
-    from llmgrader.coursemcp.demo_links import OverridesError, parse_overrides
+    if not snapshot.files and not snapshot.pdf_paths:
+        raise SnapshotRejected("no servable files under the mirrored paths")
+    from llmgrader.coursemcp.links import OverridesError, parse_overrides
 
     try:
         parse_overrides(snapshot.overrides_text)
     except OverridesError as exc:
-        raise SnapshotRejected(f"{snapshot.config.links_path}: {exc}") from exc
+        raise SnapshotRejected(f"{snapshot.config.overrides_path}: {exc}") from exc
 
 
 class CodeSync:
-    """One course's copy of its demo repo: the mirror, the snapshot, the syncing."""
+    """One course's copy of its mirrored repo: the mirror, the snapshot, the syncing."""
 
     def __init__(self, course_id: str, config: CodeConfig, directory: str | Path,
                  *, ttl: float | None = None):
@@ -769,9 +898,7 @@ class CodeSync:
         self._thread: threading.Thread | None = None
         self._check_thread: threading.Thread | None = None
         self._sync_started_at: float | None = None
-        self._index_key = None
-        self._index = None
-        self._index_refs = None     # keeps the keyed objects alive, so ids are not reused
+        self.pdf_cache = self.dir / "pdf"     # rendered PDFs, by content hash
 
     @property
     def snapshot(self) -> CodeSnapshot | None:
@@ -921,17 +1048,6 @@ class CodeSync:
     def last_error(self) -> str | None:
         return self.state().get("last_error")
 
-    def index(self, snapshot: CodeSnapshot, materials):
-        """The demo link graph for *snapshot* and the course's slides, cached."""
-        from llmgrader.coursemcp.demo_links import build_index, slides_from_materials
-
-        key = (id(snapshot), id(materials))
-        if self._index_key != key or self._index is None:
-            index = build_index(snapshot, slides_from_materials(materials))
-            self._index, self._index_key = index, key
-            self._index_refs = (snapshot, materials)
-        return self._index
-
     def _load_from_disk(self) -> None:
         with self._load_lock:
             if not (self.mirror / ".git").is_dir():
@@ -945,6 +1061,7 @@ class CodeSync:
                         return
                     snapshot = build_snapshot(self.mirror, self.config, commit)
                     validate_snapshot(snapshot)
+                    attach_pdfs(snapshot, self.mirror, self.pdf_cache)
                 except (GitError, SnapshotRejected, OSError) as exc:
                     print(f"[CourseCode] {self.course_id}: copy on disk not loaded: {exc}")
                     return
@@ -995,6 +1112,7 @@ class CodeSync:
                     snapshot = build_snapshot(self.mirror, self.config, commit)
                     self._set_stage("validating")
                     validate_snapshot(snapshot)
+                    attach_pdfs(snapshot, self.mirror, self.pdf_cache)
                     self._snapshot = snapshot
                     print(f"[CourseCode] {self.course_id}: serving {commit[:12]} "
                           f"({len(snapshot.files)} files)")
@@ -1128,7 +1246,7 @@ def _ttl_from_env() -> float:
 
 
 class CodeLibrary:
-    """One :class:`CodeSync` per course that publishes demos, per process.
+    """One :class:`CodeSync` per course with a mirror source, per process.
 
     Rebuilt after a fork, like ``CourseMCPRunner``: a lock copied from the
     parent mid-sync would stay held forever in the child.

@@ -1,9 +1,10 @@
-"""The demo link graph and the build side: ``plans/demo_code_mcp.md``, decision 3.
+"""What goes with what: ``links.py`` and the build side of the mirror.
 
-Pure functions over a directory and slide data -- no git, no app -- plus the
-``<code>`` element through the build, slide hyperlinks, a check against the
-real hwdesign checkout when one sits beside this repo, and an opt-in clone
-from GitHub.
+Pure functions over a directory and slide data -- no git, no app -- plus
+``<code>`` and the mirror's paths through the build, slide hyperlinks, a
+check against the real hwdesign checkout when one sits beside this repo, and
+an opt-in clone from GitHub.  (``plans/unified_materials.md``; the link
+graph was first built for demos, ``plans/demo_code_mcp.md``.)
 """
 
 from __future__ import annotations
@@ -15,28 +16,35 @@ from pathlib import Path
 import pytest
 
 from llmgrader.coursemcp.code import CodeConfig, CodeSync, build_snapshot
-from llmgrader.coursemcp.demo_links import (
+from llmgrader.coursemcp.links import (
     OverridesError,
     SlideRef,
-    build_index,
     find_references,
-    local_report,
+    link_items,
+    parse_overrides,
     resolve,
-    slides_from_materials,
 )
 from test_course_code import CODE_CONFIG, REPO_BINARIES, REPO_FILES
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 HWDESIGN = REPO_ROOT.parent / "hwdesign"
-HWDESIGN_PACKAGE = REPO_ROOT.parent / "hwdesign-soln" / "soln_package"
 
 SLIDES = [
-    SlideRef("procif", "Unit 4:  Memory and Processor Interfaces", 50,
+    SlideRef("procif", ("Unit 4:  Memory and Processor Interfaces",), 50,
              "See demos/scalar_fun/scalar_fun_vitis"),
-    SlideRef("fsm", "Unit 2:  Sequential Logic and FSMs", 35, "Run it",
+    SlideRef("fsm", ("Unit 2:  Sequential Logic and FSMs",), 35, "Run it",
              ("https://example.github.io/hwdesign/docs/demos/stream/",)),
-    SlideRef("intro", "Unit 0:  Introduction", 6, "Course site: https://example.github.io/hwdesign/docs"),
+    SlideRef("intro", ("Unit 0:  Introduction",), 6,
+             "Course site: https://example.github.io/hwdesign/docs"),
 ]
+
+# The items the catalog makes from the fixture repo, as their mirror roots.
+ROOTS = {
+    "procif-demo": ["docs/demos/procif", "demos/scalar_fun"],
+    "stream": ["demos/stream", "docs/demos/stream"],
+    "fifoif": ["docs/demos/fifoif"],
+    "fsm-demo": ["demos/fsm"],
+}
 
 
 def make_tree(root: Path, extra: dict | None = None) -> Path:
@@ -54,8 +62,8 @@ def snapshot_of(tmp_path, extra=None):
     return build_snapshot(make_tree(tmp_path, extra), CodeConfig.from_dict(CODE_CONFIG), "abc123")
 
 
-def index_of(tmp_path, extra=None, slides=SLIDES):
-    return build_index(snapshot_of(tmp_path, extra), slides)
+def links_of(tmp_path, extra=None, slides=SLIDES):
+    return link_items(snapshot_of(tmp_path, extra), slides, ROOTS)
 
 
 # ---------------------------------------------------------------------------
@@ -96,85 +104,65 @@ def test_relative_links_between_docs_pages(tmp_path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Demos
+# Linking items
 # ---------------------------------------------------------------------------
 
 
-def test_demos_and_their_links_are_derived(tmp_path) -> None:
-    index = index_of(tmp_path)
-    demos = index.demos
-    assert sorted(demos) == ["fifoif", "fsm", "procif", "stream"]
-    assert demos["procif"].documented and demos["procif"].code == ["demos/scalar_fun/scalar_fun_vitis"]
-    assert demos["stream"].code == ["demos/stream/avgfilt"]
-    assert demos["fifoif"].code == ["demos/stream/poly"]
-    assert not demos["fsm"].documented and demos["fsm"].code == ["demos/fsm"]
-    assert demos["procif"].slides == [{"deck": "procif", "slide": 50,
-                                       "via": "slide procif:50 cites demos/scalar_fun/scalar_fun_vitis"}]
-    assert [u["unit"] for u in demos["stream"].units] == ["Unit 2:  Sequential Logic and FSMs"]
-    assert demos["fsm"].units[0]["via"] == "deck fsm has the demo's name"
-    # A site root (the intro slide) names no demo.
-    assert not any(s["deck"] == "intro" for d in demos.values() for s in d.slides)
-    assert index.demos_for_path("demos/scalar_fun/scalar_fun_vitis/src/scalar_fun.cpp") == ["procif"]
-    assert [d.id for d in index.demos_for_slide("procif", 50)] == ["procif"]
-    assert index.doc_cites["docs/demos/procif/index.md"] == ["demos/scalar_fun/scalar_fun_vitis"]
+def test_slides_link_items_and_give_them_units(tmp_path) -> None:
+    links = links_of(tmp_path).items
+    assert links["procif-demo"].slides == [{
+        "deck": "procif", "slide": 50,
+        "via": "slide procif:50 cites demos/scalar_fun/scalar_fun_vitis"}]
+    assert links["procif-demo"].units[0]["unit"] == "Unit 4:  Memory and Processor Interfaces"
+    # A slide's hyperlink to a docs page links the item that page is in.
+    assert [u["unit"] for u in links["stream"].units] == ["Unit 2:  Sequential Logic and FSMs"]
+    # A deck named like an item's folder gives the deck's units.
+    assert links["fsm-demo"].units[0]["via"] == "deck fsm has the item's name"
+    # A site root (the intro slide) names no item.
+    assert not any(s["deck"] == "intro" for found in links.values() for s in found.slides)
 
 
-def test_the_same_name_directory_belongs_to_its_docs_topic(tmp_path) -> None:
-    index = index_of(tmp_path, {"docs/demos/fsm/index.md": "---\ntitle: FSM demo\n---\n\nCounters.\n"})
-    fsm = index.demos["fsm"]
-    assert fsm.documented and fsm.code == ["demos/fsm"] and fsm.title == "FSM demo"
-    assert "fsm-code" not in index.demos
+def test_docs_pages_cite_code_and_relate_items(tmp_path) -> None:
+    links = links_of(tmp_path)
+    assert links.doc_cites["docs/demos/procif/index.md"] == ["demos/scalar_fun/scalar_fun_vitis"]
+    assert links.items["stream"].related == ["procif-demo"]       # ../procif/
+    assert links.items["fifoif"].related == ["stream"]            # demos/stream/poly
+    assert links.items["procif-demo"].related == []               # its own code
 
 
 def test_broken_and_build_output_references_are_reported(tmp_path) -> None:
-    report = index_of(tmp_path).report
+    report = links_of(tmp_path).report
     assert report.broken == [("docs/demos/procif/vitis_ip.md:17", "demos/basic_logic/old_fun.sv")]
-    lines = "\n".join(report.lines(index_of(tmp_path)))
-    assert "Broken reference" in lines and "demos/basic_logic/old_fun.sv" in lines
+    assert "Broken reference" in "\n".join(report.lines())
 
 
-def test_a_code_only_demo_takes_its_readme(tmp_path) -> None:
-    index = index_of(tmp_path, {"demos/fsm/README.md": "# The counter demo\n\nA counting FSM.\n"})
-    assert index.demos["fsm"].title == "The counter demo"
-    assert index.demos["fsm"].description == "A counting FSM."
+def test_an_item_from_the_package_is_linked_by_nothing(tmp_path) -> None:
+    links = link_items(snapshot_of(tmp_path), SLIDES, {"procif": []})
+    assert links.items["procif"].units == [] and links.items["procif"].slides == []
 
 
 # ---------------------------------------------------------------------------
-# Overrides
+# The repo's materials.xml
 # ---------------------------------------------------------------------------
 
 
-OVERRIDES = """<demos>
-  <demo id="fsm" title="Counter FSM">
-    <description>A counter, written as an FSM.</description>
-    <unit>Unit 9:  Extra</unit>
-    <slides deck="procif" first="3" last="4"/>
-  </demo>
-  <demo id="procif"><not_slides deck="procif"/></demo>
-  <hide id="fifoif"/>
-  <demo id="nosuch"><unit>Unit 1</unit></demo>
-  <demo id="stream"><slides deck="nodeck"/></demo>
-</demos>
-"""
+def test_materials_xml_is_validated() -> None:
+    root = parse_overrides("<materials><item id='fsm-demo' unit='Unit 2'>"
+                           "<description>x</description><slides deck='fsm'/></item></materials>")
+    assert root.find("item").get("id") == "fsm-demo"
+    assert parse_overrides("") is None
 
 
-def test_overrides_fill_in_correct_and_hide(tmp_path) -> None:
-    index = index_of(tmp_path, {"demos/demos.xml": OVERRIDES})
-    fsm = index.demos["fsm"]
-    assert fsm.title == "Counter FSM" and fsm.description == "A counter, written as an FSM."
-    assert {u["unit"] for u in fsm.units} >= {"Unit 9:  Extra", "Unit 4:  Memory and Processor Interfaces"}
-    assert [(s["deck"], s["slide"]) for s in fsm.slides] == [("procif", 3), ("procif", 4)]
-    assert index.demos["procif"].slides == [] and index.demos["procif"].units == []
-    assert "fifoif" not in [d.id for d in index.visible()]
-    problems = " ".join(index.report.unknown_overrides)
-    assert "'nosuch'" in problems and "'nodeck'" in problems
-
-
-@pytest.mark.parametrize("text", ["<demos><demo id='fsm'>", "<demos><demo id='fsm'><bogus/></demo></demos>",
-                                  "<demos><demo/></demos>"])
-def test_a_broken_overrides_file_is_an_error(tmp_path, text) -> None:
+@pytest.mark.parametrize("text", [
+    "<materials><item id='fsm'>",
+    "<materials><item id='fsm'><bogus/></item></materials>",
+    "<materials><item/></materials>",
+    "<materials><item id='fsm' path='demos/fsm'/></materials>",     # it refines, never makes
+    "<demos><demo id='fsm'/></demos>",                               # the old file
+])
+def test_a_broken_materials_xml_is_an_error(text) -> None:
     with pytest.raises(OverridesError):
-        index_of(tmp_path, {"demos/demos.xml": text})
+        parse_overrides(text)
 
 
 def test_symlinks_are_never_served(tmp_path) -> None:
@@ -191,40 +179,65 @@ def test_symlinks_are_never_served(tmp_path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# The build: <code>, slide hyperlinks, the report
+# The build: <code> and the paths the mirror fetches
 # ---------------------------------------------------------------------------
 
 
 MCP_CONFIG = """<llmgrader_mcp>
   <roots><root id="pub" path="{tree}"/></roots>
   <code repo="{repo}" root="pub">
-    <include path="demos"/>
-    <include path="docs/demos" kind="doc"/>
     <exclude>*.wcfg</exclude>
   </code>
+  <materials>
+    <kind id="demo" description="Demos"/>
+    <kind id="lab" description="Labs"/>
+    <item id="procif-demo" kind="demo" source="mirror" docs="docs/demos/procif"
+          path="demos/scalar_fun" unit="U"/>
+    <items kind="demo" source="mirror" path="demos/*" docs="docs/demos/*"/>
+    <items kind="lab" source="mirror" path="labs/*" docs="docs/labs/*"/>
+  </materials>
 </llmgrader_mcp>
 """
 
 
 def write_mcp_config(tmp_path, repo="https://github.com/test/hwdesign") -> Path:
     tree = make_tree(tmp_path)
+    (tmp_path / "llmgrader_config.xml").write_text(
+        "<llmgrader><units><unit><name>U</name><source>u.xml</source></unit></units></llmgrader>",
+        encoding="utf-8")
     path = tmp_path / "llmgrader_mcp_config.xml"
     path.write_text(MCP_CONFIG.format(tree=tree.as_posix(), repo=repo), encoding="utf-8")
     return path
 
 
-def test_code_is_read_from_the_config_and_carried_in_the_manifest(tmp_path) -> None:
-    from llmgrader.coursemcp.materials import build_materials, load_materials, read_code
+def test_the_mirror_fetches_the_paths_the_items_name(tmp_path) -> None:
+    from llmgrader.coursemcp.materials import build_materials, load_materials, read_code, read_materials
 
-    spec = read_code(write_mcp_config(tmp_path))
+    config = write_mcp_config(tmp_path)
+    spec = read_code(config)
     assert spec.config["repo"] == "https://github.com/test/hwdesign"
-    assert spec.config["includes"] == [{"path": "demos", "kind": "code"},
-                                       {"path": "docs/demos", "kind": "doc"}]
+    # The explicit item's folders sit inside the patterns' and are dropped.
+    assert spec.config["includes"] == [
+        {"path": "demos", "format": "text"}, {"path": "docs/demos", "format": "page"},
+        {"path": "labs", "format": "text"}, {"path": "docs/labs", "format": "page"}]
     assert spec.config["excludes"] == ["*.wcfg"]
     assert spec.local_root == (tmp_path / "tree").resolve()
     package = tmp_path / "pkg"
-    build_materials([], package, code=spec.config, log=lambda *_: None)
-    assert load_materials(str(package)).code == spec.config
+    build_materials(read_materials(config), package, code=spec.config, log=lambda *_: None)
+    loaded = load_materials(str(package))
+    assert loaded.code == spec.config
+    assert [i["id"] for i in loaded.mirror_items] == ["procif-demo"]
+    assert [p["path"] for p in loaded.patterns] == ["demos/*", "labs/*"]
+
+
+def test_sparse_patterns_match_a_file_or_a_folder() -> None:
+    config = CodeConfig.from_dict({**CODE_CONFIG, "includes": [
+        {"path": "labs/cmdresp/partial/prompt.md", "format": "text"},
+        {"path": "docs/labs", "format": "page"}]})
+    patterns = config.sparse_patterns()
+    assert "/labs/cmdresp/partial/prompt.md" in patterns and "/docs/labs" in patterns
+    assert "/materials.xml" in patterns
+    assert "!/docs/labs/**/*.png" in patterns
 
 
 @pytest.mark.parametrize("repo", ["https://gitlab.com/test/hwdesign", "http://github.com/test/hwdesign",
@@ -234,15 +247,6 @@ def test_only_a_github_repo_is_accepted(tmp_path, repo) -> None:
 
     with pytest.raises(MaterialsError):
         read_code(write_mcp_config(tmp_path, repo=repo))
-
-
-def test_the_link_report_reads_a_local_checkout(tmp_path) -> None:
-    from llmgrader.coursemcp.materials import read_code
-
-    spec = read_code(write_mcp_config(tmp_path))
-    lines = "\n".join(local_report(spec.config, spec.local_root, None))
-    assert "no slides" in lines and "procif" in lines
-    assert "Broken reference: docs/demos/procif/vitis_ip.md:17" in lines
 
 
 def test_slide_hyperlinks_are_extracted(tmp_path) -> None:
@@ -272,35 +276,35 @@ def test_slide_hyperlinks_are_extracted(tmp_path) -> None:
 # The real repo
 # ---------------------------------------------------------------------------
 
+HWDESIGN_CONFIG = {"repo": "https://github.com/sdrangan/hwdesign", "includes": [
+    {"path": "demos"}, {"path": "docs/demos", "format": "page"},
+    {"path": "labs"}, {"path": "docs/labs", "format": "page"}]}
+
 
 @pytest.mark.skipif(not (HWDESIGN / ".git").is_dir(), reason="no hwdesign checkout beside this repo")
-def test_the_real_hwdesign_demos() -> None:
-    from llmgrader.coursemcp.materials import load_materials
+def test_the_real_hwdesign_repo() -> None:
+    from llmgrader.coursemcp.catalog import pattern_matches
+    from llmgrader.coursemcp.code import find_lines
 
-    config = CodeConfig.from_dict({"repo": "https://github.com/sdrangan/hwdesign",
-                                   "includes": [{"path": "demos"}, {"path": "docs/demos", "kind": "doc"}]})
     tracked = set(subprocess.run(["git", "ls-files"], cwd=HWDESIGN, capture_output=True,
                                  text=True, check=True).stdout.splitlines())
-    snapshot = build_snapshot(HWDESIGN, config, "HEAD", only=tracked)
+    snapshot = build_snapshot(HWDESIGN, CodeConfig.from_dict(HWDESIGN_CONFIG), "HEAD", only=tracked)
     assert not [p for p in snapshot.files if p.endswith((".bit", ".hwh", ".png"))]
     assert "demos/scalar_fun/scalar_fun_rfsoc42/scripts/project_recreate.tcl" not in snapshot.files
-    materials = load_materials(str(HWDESIGN_PACKAGE)) if HWDESIGN_PACKAGE.is_dir() else None
-    index = build_index(snapshot, slides_from_materials(materials))
-    hits = [h for h in snapshot.search("s_axilite", demos_for=index.demos_for_path)["hits"]
-            if h["path"] == "demos/scalar_fun/scalar_fun_vitis/src/scalar_fun.cpp"]
-    assert [(h["start_line"], h["end_line"], h["demos"]) for h in hits] == [(12, 16, ["procif"])]
-    if materials is not None:
-        assert [d.id for d in index.demos_for_slide("procif", 50)] == ["procif"]
-        assert [d.id for d in index.demos_for_slide("fifo", 28)] == ["stream"]
-        assert [d.id for d in index.demos_for_slide("fifo", 55)] == ["fifoif"]
-        assert [d.id for d in index.demos_for_slide("fsm", 35)] == ["fsm"]
+    hits = [(s.path, b) for s, b in find_lines(snapshot.files.values(), "s_axilite")
+            if s.path == "demos/scalar_fun/scalar_fun_vitis/src/scalar_fun.cpp"]
+    assert [(b[0] + 1, b[-1] + 1) for _, b in hits] == [(12, 16)]
+    # The labs pair with their docs; the take-home prompt is a text file.
+    labs = pattern_matches(snapshot, "labs/*")
+    assert {"cmdresp", "cubic", "prng", "rootsolve", "subc"} <= set(labs)
+    assert snapshot.files["labs/cmdresp/partial/prompt.md"].format == "text"
+    assert {"cmdresp", "cubic"} <= set(pattern_matches(snapshot, "docs/labs/*"))
 
 
 @pytest.mark.skipif(os.environ.get("LLMGRADER_RUN_NETWORK_TESTS") != "1",
                     reason="clones from GitHub; set LLMGRADER_RUN_NETWORK_TESTS=1")
 def test_cloning_the_real_repo_skips_the_bitstreams(tmp_path) -> None:
-    config = CodeConfig.from_dict({"repo": "https://github.com/sdrangan/hwdesign",
-                                   "includes": [{"path": "demos"}, {"path": "docs/demos", "kind": "doc"}]})
+    config = CodeConfig.from_dict(HWDESIGN_CONFIG)
     sync = CodeSync("hwdesign", config, tmp_path / "code", ttl=10_000)
     assert sync.sync_now()
     assert sync.snapshot.files
@@ -316,8 +320,7 @@ def test_the_real_repo_reports_its_commit_and_head(tmp_path) -> None:
     """What Manage Courses shows (plans/demo_code_admin.md), against GitHub:
     a shallow partial clone still has the commit's date and subject, and the
     remote check reads the same head the sync fetched."""
-    config = CodeConfig.from_dict({"repo": "https://github.com/sdrangan/hwdesign",
-                                   "includes": [{"path": "demos"}, {"path": "docs/demos", "kind": "doc"}]})
+    config = CodeConfig.from_dict(HWDESIGN_CONFIG)
     sync = CodeSync("hwdesign", config, tmp_path / "code", ttl=10_000)
     assert sync.sync_now()
     state = sync.state()

@@ -12,36 +12,61 @@ The course MCP serves two kinds of material:
 - **Questions, rubrics and worked solutions.** These come from the course
   package you already build and upload for grading. Nothing extra is needed:
   a course that grades on the portal is served by the MCP.
-- **Lecture slides.** These are not part of the grading package, so they are
-  listed in a second file, `llmgrader_mcp_config.xml`, and built into the same
+- **Course materials**: lecture slides, demos, labs, handouts -- whatever your
+  course has. These are not part of the grading package, so they are declared
+  in a second file, `llmgrader_mcp_config.xml`, and built into the same
   package. You still upload one archive per course.
 
 The same file can also publish units the portal does not serve, such as past
 exams, and describe each kind of unit; see
-[Past Exams and Unit Types](./units.md).
+[Past Exams and Unit Types](./units.md). Material kept in a public GitHub
+repository -- demo code, lab starting files, a docs site -- can be served
+straight from it, without rebuilding the package for every fix; see
+[Material from a Public Repository](./sources.md).
 
-This page covers the slides. If you only want to publish questions, skip to
-[Deploying](./deploy.md).
+If you only want to publish questions, skip to [Deploying](./deploy.md).
 
 ---
 
-## What students get from the slides
+## The model
 
-For each slide: its title, its text, your speaker notes, an image of the slide,
-and optionally a short description of its figures. Their assistant can list a
-unit's decks, read a deck's outline, search all slides for a topic, and open
-one slide -- so "where is this described in the class slides?" is answered with
-a deck and slide number, and the slide itself.
+Courses' material is shaped differently -- one has slides and Jupyter
+notebooks, another LaTeX handouts and MATLAB scripts, another a lab manual in
+PDF -- so you describe yours with four ideas, and the tools stay the same.
 
-The image matters: most of a lecture slide's content is its diagram, waveform
-or equation, not its text.
+| Idea | What it is |
+| --- | --- |
+| **Kind** | A label you choose -- `slides`, `demo`, `lab`, `handout` -- with a sentence the assistant reads, and a policy. |
+| **Unit** | A unit `<name>` from `llmgrader_config.xml`, or a **material unit** you declare here for material that has no questions: course setup, a lecture with no problem set. |
+| **Item** | What a student is pointed to: an id, a title, a kind, one or more units, and its **parts** (files or folders). A demo used in Units 4 and 5 is one item with two units. |
+| **Format** | How a file is read. It follows from the file, never from the kind, so you never explain how to read your own kinds. |
+
+**Formats:**
+
+| Format | Files | A student's assistant gets |
+| --- | --- | --- |
+| `slides` | a `.pptx`, with its PDF export | each slide's image, title, text, speaker notes and figure description |
+| `pdf` | a `.pdf`: a handout, problem sheet, paper, lab manual | each page's image, text and figure description |
+| `page` | Markdown in a docs tree published as a site ([Sources](./sources.md)) | the text, with a link to the published page |
+| `text` | code, LaTeX, Markdown, notebooks (outputs removed), anything else that is text | numbered lines |
+
+LaTeX is read as text. Publish its compiled PDF as a second part of the same
+item and the assistant can use either.
+
+**Policies**, one per kind:
+
+| Policy | Served | For |
+| --- | --- | --- |
+| `open` (default) | as it is | slides, demos, labs, handouts |
+| `tutor` | with the instruction `get_solution` carries: help the student reason toward the answer, and show it only if they ask | worked solutions you want available as a tutor |
+| `private` | listed by title and kind, so the assistant can say it exists; never read or searched, and **never built into the package** | answer keys, material under embargo |
 
 ---
 
 ## Step 1: Install the build tools
 
-Building slides needs two extra Python packages, used only on your machine --
-the portal does not need them. In the environment where you run
+Building slides and PDFs needs two extra Python packages, used only on your
+machine -- the portal does not need them. In the environment where you run
 `create_soln_pkg`:
 
 ```bash
@@ -50,7 +75,7 @@ pip install -e "path/to/llmgrader[mcp-build]"
 
 (or `pip install "llmgrader[mcp-build]"` for an installed copy). This adds
 `python-pptx`, which reads the slide text and notes, and `pymupdf`, which
-renders each slide's image from the PDF.
+renders slide and PDF pages and reads a PDF's text.
 
 ---
 
@@ -77,46 +102,99 @@ assistants cannot see its figures.
 ## Step 3: Write `llmgrader_mcp_config.xml`
 
 Create `llmgrader_mcp_config.xml` **in the same folder as
-`llmgrader_config.xml`**. It lists each slide deck to publish:
+`llmgrader_config.xml`**, with a `<materials>` element:
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
 <llmgrader_mcp>
-  <!-- Where the slides live.  Paths are relative to this file. -->
+  <!-- Where the files live.  Paths are relative to this file. -->
   <roots>
     <root id="pub" path="../hwdesign"/>
+    <root id="soln" path="."/>
   </roots>
 
-  <slides>
-    <deck id="fsm" root="pub"
-          unit="Unit 2:  Sequential Logic and FSMs"
-          pdf="units/unit02_fsm/fsm.pdf">units/unit02_fsm/fsm.pptx</deck>
+  <materials>
+    <kind id="slides" description="Lecture slides, one or two decks per unit"/>
+    <kind id="handout" description="Handouts and problem sheets"/>
+    <kind id="lab-solution" policy="tutor" description="Worked solutions to the labs"/>
+    <kind id="answer-key" policy="private" description="Exam answer keys"/>
 
-    <deck id="fixp" root="pub"
-          unit="Unit 3:  Floating and Fixed-Point"
-          pdf="units/unit03_fixp/fixp.pdf">units/unit03_fixp/fixp.pptx</deck>
+    <unit id="setup" name="Course setup" description="Installing Vitis and the Python environment"/>
 
-    <!-- A deck with no PDF is published as text only. -->
-    <deck id="review-numbers" root="pub"
-          unit="Unit 1:  Data Types and Combinational Logic"
-          title="Review: number representations">units/unit01_basic_logic/review_numbers.pptx</deck>
-  </slides>
+    <item id="fsm" kind="slides" root="pub" unit="Unit 2:  Sequential Logic and FSMs"
+          path="units/unit02_fsm/fsm.pptx" pdf="units/unit02_fsm/fsm.pdf"/>
+
+    <!-- A PDF is read page by page. -->
+    <item id="kmaps" kind="handout" root="pub" unit="Unit 1:  Data Types and Combinational Logic"
+          path="handouts/kmaps.pdf"/>
+
+    <!-- A folder is read file by file; build output and binaries are left out. -->
+    <item id="cubic-soln" kind="lab-solution" root="soln"
+          unit="Unit 3:  Floating and Fixed-Point" path="labs/cubic/soln"/>
+
+    <!-- Private: listed, never built into the package. -->
+    <item id="midterm-key" kind="answer-key" root="soln"
+          unit="Unit 5:  FIFOs and Streaming Interfaces" path="exams/midterm_key.pdf"/>
+
+    <!-- An item can have several parts, and several units. -->
+    <item id="install" kind="handout" root="pub" unit="setup" also="Unit 0:  Introduction to Hardware Design"
+          title="Installing the tools">
+      <description>Step-by-step installation, with the LaTeX source.</description>
+      <part path="handouts/install.pdf"/>
+      <part path="handouts/install.tex"/>
+    </item>
+  </materials>
 </llmgrader_mcp>
 ```
 
+**`<kind>`**, one per kind, first:
+
+| Attribute | Meaning |
+| --- | --- |
+| `id` | Short name: lowercase letters, digits, `-` and `_`. |
+| `description` | What a student's assistant reads about this kind. One sentence. |
+| `policy` | `open` (default), `tutor` or `private`. |
+
+**`<unit>`**, a material unit, after the kinds:
+
+| Attribute | Meaning |
+| --- | --- |
+| `id` | Short name, so items can say `unit="setup"`. |
+| `name` | What `list_units` and `list_materials` call it. |
+| `description` | Optional. |
+
+**`<item>`**:
+
 | Part | Meaning |
 | --- | --- |
-| `<root id path>` | A folder the slides are read from, usually another repository. `path` is relative to this file. Give each a short `id`. |
-| `<deck>` text | The `.pptx`, relative to its root. |
-| `id` | Short name the assistant uses for the deck: lowercase letters, digits, `-` and `_`. Must be unique. |
-| `unit` | The unit the deck belongs to. Copy the unit's `<name>` from `llmgrader_config.xml` **exactly**, including double spaces, so a student asking about "unit 2" gets both its problems and its slides. A deck for something that is not a graded unit can use any text. |
-| `pdf` | The PDF export of the same deck, relative to the same root. Optional. |
-| `title` | Optional. Without it, the deck is named by its first slide's title. |
+| `id` | Short name the assistant uses: lowercase letters, digits, `-` and `_`. Unique in the course. A deck's id is also in its slide links. |
+| `kind` | One of your kinds. |
+| `unit`, `also`, `<unit>` | The units it goes with. Each is a unit's `<name>` from `llmgrader_config.xml` -- spacing and case do not matter -- or a material unit's id or name. **Every item needs at least one**, or the build stops and names it. |
+| `path` | A file or folder, relative to its root. Read by its extension: a `.pptx` as slides, a `.pdf` page by page, a folder file by file, anything else as text. |
+| `pdf` | With a `.pptx` path: its PDF export, for the slide images. |
+| `<part path>` | More files or folders, in the same way (a `<part>` may carry its own `pdf`). |
+| `title` | Optional. Without it, a deck or PDF is named by its first page's title. |
+| `<description>` | Optional. One or two sentences, shown in `list_materials`. |
 | `root` | Which `<root>` the paths are relative to. Without it, they are relative to this file. |
+| `source` | `package` (default) for files built into the package; `mirror` for files in a public repository ([Sources](./sources.md)). |
 
-**Only what is listed is published.** There are no wildcards: a course
-repository also holds exams, autograder keys and lab solutions, and a new file
-must never be published because nobody remembered to exclude it.
+**Only what is listed is published.** Package paths are explicit: no
+wildcards. A course repository also holds exams, autograder keys and lab
+solutions, and a new file must never be published because nobody remembered
+to exclude it. A folder you list is published whole, minus build output and
+binaries, so list the folder you mean -- `labs/cubic/soln`, not `labs/`.
+
+**An `<item>` with only an id** changes an item made elsewhere rather than
+making one: its `title`, `<description>` or `kind`, and more units.
+
+```xml
+<item id="fsm" title="Sequential logic and FSMs" also="Unit 3:  Floating and Fixed-Point"/>
+```
+
+An id that matches no item stops the build.
+
+**Units by name.** Copy unit names from `llmgrader_config.xml`. A student
+asking about "unit 2" then gets its problems and its materials together.
 
 ---
 
@@ -128,23 +206,47 @@ From the folder with the two config files:
 llmgrader_mcp_build --dry-run
 ```
 
-It lists every deck and every file it would read, and builds nothing.
-**Read this list before every upload.** If your slides repository is somewhere
-other than the `path` in the config, point to it without editing the file:
+It lists every item and every file it would read, and builds nothing.
+**Read this list before every upload.** If your repository is somewhere other
+than the `path` in the config, point to it without editing the file:
 
 ```bash
 llmgrader_mcp_build --dry-run --root pub=C:/path/to/hwdesign
 ```
 
+To see the index exactly as students' assistants will -- every item, its
+kind, its units **and where each unit came from**, its parts and their
+formats -- run:
+
+```bash
+llmgrader_mcp_build --materials
+```
+
+```text
+  slides (12): Lecture slides, one or two decks per unit
+    [fsm] Unit 2 Sequential Logic and FSMs  (package)
+        unit  Unit 2:  Sequential Logic and FSMs    <- config
+        parts 1 slides
+  lab (6): Lab instructions and the files students start from
+    [cmdresp] Command-Response Mini-Project  (mirror)
+        unit  Command-Response Mini-Project    <- materials.xml
+        parts 5 page, 1 text
+```
+
+It is free and builds nothing into the package. It uses `soln_package/` when
+that has been built, and otherwise builds the package items into a temporary
+folder first, which takes a minute for a few hundred slides.
+
 ---
 
-## Step 5 (optional): Describe the slides' figures
+## Step 5 (optional): Describe the figures
 
 Search works on words, and much of a slide is a picture: a state diagram's
 "Moore machine" may appear in no slide's text at all. This optional step asks
-an OpenAI vision model to write a few sentences about each slide's figures, so
-search can find them, and an assistant knows what a figure shows before it
-opens it.
+an OpenAI vision model to write a few sentences about each slide's figures --
+and each page of a packaged PDF -- so search can find them, and an assistant
+knows what a figure shows before it opens it. (PDFs in a public repository
+are rendered by the portal and are not described.)
 
 It is the one step that **costs money**, so it is separate and never runs on its
 own. It costs very little -- about **$0.27 for 500 slides** with the default
@@ -153,7 +255,8 @@ model -- and you pay **once per slide**: results are saved in a
 reused by every later build.
 
 1. **Make sure the PDFs are up to date** (step 2). Only slides with an image
-   can be described; text-only decks are skipped.
+   can be described; text-only decks are skipped. The file for a deck is
+   named by its item id.
 2. **Set your OpenAI key** in the shell, the same key the grader tools use:
 
    ```bash
@@ -229,28 +332,40 @@ create_soln_pkg --config llmgrader_config.xml
 ```
 
 Because `llmgrader_mcp_config.xml` is beside it, `create_soln_pkg` now also
-builds the slides into the package (under `mcp_materials/`), including any
-descriptions from step 5. It prints one line per deck:
+builds the package items (under `mcp_materials/`), including any descriptions
+from step 5. It prints one line per deck or PDF, and one per item:
 
 ```text
 Building course MCP material from llmgrader_mcp_config.xml:
   [fsm] 41 slides, with images, 41 described
-  [review-numbers] 15 slides, text only  WARNING: no PDF given; slides are served as text only
+  [kmaps] 6 pages, with images, 0 described
+  [fsm] slides: 1 paged, 0 text file(s)
+  [cubic-soln] lab-solution: 0 paged, 7 text file(s), 2 not servable and left out
+  [midterm-key] answer-key, private: listed only, nothing built
 ```
 
-| Warning | What to do |
+| Message | What to do |
 | --- | --- |
 | `... has 42 pages but ... has 41 slides -- re-export the PDF` | The PDF is out of date. Re-export it (step 2) and rebuild. |
-| `no PDF given` | Add a `pdf=` to the deck, or accept text only. |
+| `no PDF given` | Add a `pdf=` to the item, or accept text only. |
+| `not servable and left out` | Binaries, build output, files over 256 KB or of an unknown type in a folder. Expected; list a file by itself to be told why it cannot be served. |
+
+**The build stops**, naming what to fix, on an unknown kind or unit, a file
+that is not there, two items with one id, an `<item id>` that changes no item,
+or an item with no unit.
 
 The slide images make the archive larger -- about 20 MB for 275 slides. Then
 [upload `soln_package.zip`](../buildcourse/upload.md) as usual. The MCP serves
-the new slides as soon as the upload finishes.
+the new material as soon as the upload finishes.
 
 {: .note }
 If `create_soln_pkg` stops with an error about `pptx` or `pymupdf`, the build
-tools are not installed (step 1). If you do not want to publish slides at all,
-remove or rename `llmgrader_mcp_config.xml`.
+tools are not installed (step 1). If you do not want to publish materials at
+all, remove or rename `llmgrader_mcp_config.xml`.
+
+{: .warning }
+A package built before `<materials>` existed serves no slides on a portal
+that has it: rebuild and upload the package when the portal is updated.
 
 ---
 
@@ -274,7 +389,7 @@ can be traced back to the exact rubric, solution or slide.
 Below it is each repository the package was built from, at its commit, with
 a count of what that commit alone would not reproduce. Only the files the
 package is built from are counted: unit files and their images, assets, the
-slide decks and PDFs, and the configuration files. A stray file elsewhere in
+package items' files (never a private item's), and the configuration files. A stray file elsewhere in
 the repository is not. `uncommitted changes` are edited files; `files not in
 git` are new or ignored ones. Commit them before building if you want the
 package to be reproducible from the repositories.
@@ -286,5 +401,7 @@ portal loads it: `computed.` and the start of the same hash.
 
 ## Planned
 
-- **Lab instructions and other documents**, listed in the same file.
-- **Per-unit control of solutions.** Today every unit's solutions are served.
+- **Per-unit control of solutions.** Today every unit's question solutions are
+  served; a kind's policy covers only materials.
+- **A notebook format** reading a notebook's cells as Markdown and code, if a
+  course needs more than today's text with outputs removed.

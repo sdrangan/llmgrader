@@ -210,35 +210,35 @@ def main():
             print(f"  Destination: {destination_rel.as_posix()}")
             print()
 
-    # Course MCP material (lecture slides, MCP-only units such as past
-    # exams), when the course publishes any.
+    # Course MCP material (the course's materials, MCP-only units such as
+    # past exams), when the course publishes any.
     # Built into the package so one upload carries it.
     mcp_config = config_dir / 'llmgrader_mcp_config.xml'
     if mcp_config.exists():
         from llmgrader.coursemcp.materials import (
-            MaterialsError, build_materials, descriptions_dir, load_descriptions, read_code,
-            read_config, read_unit_types, read_units)
-        from llmgrader.scripts.llmgrader_mcp_build import print_link_report
+            MaterialsError, build_inputs, build_materials, descriptions_dir, load_descriptions,
+            read_code, read_materials, read_unit_types, read_units)
+        from llmgrader.scripts.llmgrader_mcp_build import check_materials
         print(f"Building course MCP material from {mcp_config.name}:")
         try:
             # Slide descriptions are read from the cache llmgrader_mcp_build
             # --describe writes; this build itself never calls a model.
-            decks = read_config(mcp_config)
+            spec = read_materials(mcp_config)
             mcp_units = read_units(mcp_config)
-            # Demo code is only pointed at: the portal syncs it from GitHub.
-            code = read_code(mcp_config)
-            build_materials(decks, output_dir,
+            # The mirror is only pointed at: the portal syncs it from GitHub.
+            code = read_code(mcp_config, spec=spec)
+            build_materials(spec, output_dir,
                             descriptions=load_descriptions(descriptions_dir(mcp_config)),
                             units=mcp_units, unit_types=read_unit_types(mcp_config),
                             code=code.config if code else None)
-            print_link_report(code, output_dir)
+            check_materials(mcp_config, {}, spec, code, output_dir)
         except (MaterialsError, ImportError) as exc:
             print(f"Error: {exc}")
             if isinstance(exc, ImportError):
                 print('Install the build dependencies: pip install "llmgrader[mcp-build]"')
             return 1
         inputs += [mcp_config, descriptions_dir(mcp_config)]
-        inputs += [path for deck in decks for path in (deck.pptx, deck.pdf) if path]
+        inputs += build_inputs(spec)
         inputs += [path for unit in mcp_units for path in (unit.path, unit.images) if path]
         print()
 

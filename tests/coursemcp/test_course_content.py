@@ -154,7 +154,7 @@ def tool_names(client, **kwargs) -> set[str]:
 
 
 CONTENT_TOOLS = {"list_questions", "get_question", "get_rubric", "get_solution",
-                 "list_materials", "get_outline", "search_slides", "get_slide"}
+                 "list_materials", "get_material", "read_material", "search_materials"}
 
 
 # ---------------------------------------------------------------------------

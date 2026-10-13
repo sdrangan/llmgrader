@@ -55,11 +55,13 @@ NOT_POST_MESSAGE = (
 
 TOKEN_ENV = "LLMGRADER_MCP_TOKEN"
 
-# The demo tools (plans/demo_code_mcp.md) are served only with this set: a
-# new thing served from the portal process ships behind a switch, so that
-# unsetting it is the rollback.
+# The mirror source of materials (plans/demo_code_mcp.md, then
+# plans/unified_materials.md) is served only with this set: a new thing
+# served from the portal process ships behind a switch, so that unsetting it
+# is the rollback.  Without it, a course's package items are served alone.
 CODE_ENV = "LLMGRADER_MCP_CODE"
-DEMO_TOOLS = frozenset({"list_demos", "list_demo_files", "get_demo_file", "search_demos"})
+MATERIAL_TOOLS = frozenset({"list_materials", "get_material", "read_material",
+                            "search_materials"})
 
 
 def code_enabled() -> bool:
@@ -126,7 +128,7 @@ class CourseMCPRunner:
         self._pid: int | None = None
         self._wsgi = None
         self._loop: asyncio.AbstractEventLoop | None = None
-        # Each course's copy of its demo repo.  Creating it starts nothing:
+        # Each course's copy of its mirrored repo.  Creating it starts nothing:
         # the copy is loaded, and synced on a thread, on the first request.
         self.code = None
         if code_enabled():
@@ -308,24 +310,24 @@ class CourseMCPRunner:
             for row in build_rows(body, environ, status_code, response_body, duration_ms,
                                   refused=refused):
                 row["package_version"] = self._package_version(row.get("course_id"))
-                if self.code is not None and row.get("tool") in DEMO_TOOLS:
+                if self.code is not None and row.get("tool") in MATERIAL_TOOLS:
                     row["code_version"] = self.code.code_version(row.get("course_id"))
                 self.usage.record(row)
         except Exception as exc:
             print(f"[McpUsage] Could not record a call: {exc!r}")
 
     def _warm_code(self) -> None:
-        """Load each course's demo copy, and refresh a stale one on a thread.
+        """Load each course's mirror copy, and refresh a stale one on a thread.
 
         Any request does it, so a session's first calls warm the copy before
-        a demo question.  Never waits on GitHub, and never fails a request.
+        a materials question.  Never waits on GitHub, and never fails a request.
         """
         if self.code is None:
             return
         try:
             self.code.warm()
         except Exception as exc:
-            print(f"[CourseCode] Could not check the demo copies: {exc!r}")
+            print(f"[CourseCode] Could not check the mirror copies: {exc!r}")
 
     def _package_version(self, course_id):
         if not isinstance(course_id, str) or self.registry.get(course_id) is None:
