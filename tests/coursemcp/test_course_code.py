@@ -852,3 +852,34 @@ def test_an_abandoned_progress_file_is_reported_stale(app, client) -> None:
     assert sync.progress()["stale"] is True
     assert sync.overview()["status"] != "syncing"
     assert sync.progress_path.exists()      # reported, never deleted by a reader
+
+
+def test_new_paths_on_the_same_commit_are_served_at_once(app, client, tmp_path) -> None:
+    """What the 2026-10-12 deploy hit: the old portal synced the new commit
+    with its old paths, which did not name materials.xml.  The new code must
+    re-check out and rebuild at once -- same commit or not -- rather than
+    serve a copy without the file until the next commit."""
+    repo = tmp_path / "hwdesign"
+    (repo / "materials.xml").write_text(
+        "<materials><item id='fifoif' title='Renamed by the repo'/></materials>",
+        encoding="utf-8")
+    commit = commit_all(repo)
+    sync = library(app).sync_for("alpha")
+    old = code_module.CodeSync("alpha", code_module.CodeConfig.from_dict(
+        {**CODE_CONFIG, "overrides": "demos/demos.xml"}), sync.dir, ttl=10_000)
+    assert old.sync_now() is True
+    assert not (sync.mirror / "materials.xml").exists()     # not in the old paths
+    state = old.state()
+    state["last_attempt"] = time.time() - code_module.RESYNC_COOLDOWN_S - 1
+    old._write_state(state)                 # a while ago, as on the live portal
+
+    fresh = code_module.CodeSync("alpha", sync.config, sync.dir, ttl=10_000)
+    first = fresh.ensure()                  # the copy on disk, and a refresh started
+    assert first.commit == commit and first.overrides_text is None
+    fresh._thread.join(30)
+    assert fresh.snapshot.commit == commit
+    assert "Renamed by the repo" in fresh.snapshot.overrides_text
+    assert fresh.state()["patterns"] == fresh.config.sparse_patterns()
+    calls_before = fresh._thread
+    fresh.ensure()                          # paths match now: no further refresh
+    assert fresh._thread is calls_before

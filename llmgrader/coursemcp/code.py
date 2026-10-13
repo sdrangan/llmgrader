@@ -79,6 +79,10 @@ MAX_CONTEXT_CHARS = 200
 DEFAULT_TTL_S = 600
 GIT_TIMEOUT_S = 60
 FIRST_FETCH_WAIT_S = 5.0
+# A copy checked out for another set of paths -- a package that changed what
+# the mirror serves -- is refreshed at once rather than after the TTL, but a
+# failing refresh is not retried more often than this.
+RESYNC_COOLDOWN_S = 60
 DEFAULT_OVERRIDES_FILE = "materials.xml"
 TEXT, PAGE = "text", "page"     # the formats a mirrored file is read in
 
@@ -1037,7 +1041,7 @@ class CodeSync:
         if (self._snapshot is not None and state.get("commit")
                 and state["commit"] != self._snapshot.commit):
             self._load_from_disk()    # another worker synced
-        if self._snapshot is None or self._stale(state):
+        if self._snapshot is None or self._stale(state) or self._paths_changed(state):
             self.refresh_in_background()
         if self._snapshot is None and wait > 0:
             thread = self._thread
@@ -1048,6 +1052,20 @@ class CodeSync:
     def last_error(self) -> str | None:
         return self.state().get("last_error")
 
+    def _paths_changed(self, state: dict) -> bool:
+        """The copy on disk was checked out for other paths than the package
+        now names, and no refresh has been tried in the last minute."""
+        if not state.get("commit") or state.get("patterns") == self.config.sparse_patterns():
+            return False
+        return time.time() - (state.get("last_attempt") or 0) >= RESYNC_COOLDOWN_S
+
+    def _current(self, commit: str) -> bool:
+        """Whether the snapshot in hand is *commit* read for this config.
+        The commit alone is not enough: new paths on the same commit change
+        what is served (the repo's materials.xml, say)."""
+        return (self._snapshot is not None and self._snapshot.commit == commit
+                and self._snapshot.config == self.config)
+
     def _load_from_disk(self) -> None:
         with self._load_lock:
             if not (self.mirror / ".git").is_dir():
@@ -1057,7 +1075,7 @@ class CodeSync:
                     return      # a sync is mid-way in another worker; try later
                 try:
                     commit = run_git(["rev-parse", "HEAD"], cwd=self.mirror, timeout=15).strip()
-                    if self._snapshot is not None and self._snapshot.commit == commit:
+                    if self._current(commit):
                         return
                     snapshot = build_snapshot(self.mirror, self.config, commit)
                     validate_snapshot(snapshot)
@@ -1106,8 +1124,9 @@ class CodeSync:
             ok = False
             _mark_syncing(self.dir, True)
             try:
+                checked_out = state.get("patterns")
                 commit = self._fetch(state)
-                if self._snapshot is None or self._snapshot.commit != commit:
+                if not self._current(commit) or checked_out != state.get("patterns"):
                     self._set_stage("building")
                     snapshot = build_snapshot(self.mirror, self.config, commit)
                     self._set_stage("validating")
