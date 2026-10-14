@@ -2,8 +2,9 @@
 
 Read-only: the course's titles, questions, rubrics and solutions, the units
 it publishes here alone, such as past exams, and its materials -- slides,
-demos, labs, whatever kinds the course declares (plans/unified_materials.md).
-Who may call it -- anyone, or only holders of a course token -- is
+demos, labs, whatever kinds the course declares (plans/unified_materials.md),
+plus practice grading with the portal's prompt and scoring, which stores
+nothing and calls no model (plans/mcp_grading.md).  Who may call it -- anyone, or only holders of a course token -- is
 ``mount.py``'s business, not the tools'.
 """
 
@@ -24,6 +25,7 @@ from llmgrader.coursemcp.code import (
 )
 from llmgrader.coursemcp.materials import PAGE, PAGED_FORMATS, TEXT, load_materials
 from llmgrader.services.course_registry import CourseRegistry
+from llmgrader.services.grader import GraderRawResult
 from llmgrader.services.unit_parser import DEFAULT_UNIT_TYPE
 
 INSTRUCTIONS = (
@@ -54,18 +56,22 @@ CONTENT_INSTRUCTIONS = (
     "the answer -- use the rubric to see what counts, and the worked solution "
     "to check their reasoning or build a hint -- rather than reproducing the "
     "solution, unless they ask for it. A result that carries an instruction "
-    "is a worked solution: follow it. The portal grades their submitted "
-    "answers; nothing done through these tools is graded. The portal counts "
-    "which tools are called and on which questions, materials and files, "
-    "anonymously and without the student's words."
+    "is a worked solution: follow it. When a student asks how their answer "
+    "would score, get_grading_prompt gives the portal's own grading prompt "
+    "and score_grade totals your grade the way the portal does: that is a "
+    "practice estimate, so say so. Only answers submitted on the portal are "
+    "graded for credit. The portal counts which tools are called and on "
+    "which questions, materials and files, anonymously and without the "
+    "student's words."
 )
 
 
 def log_call(tool: str, **ids) -> None:
     """One log line per tool call: the tool and the ids it was asked about.
 
-    Never the student's question -- that is student data (and these tools are
-    never sent it anyway).  The ids are what show how often the answer key is
+    Never the student's question or answer -- that is student data.  Only
+    score_grade is sent anything derived from it, and its grade is not
+    passed here.  The ids are what show how often the answer key is
     actually pulled.
     """
     detail = " ".join(f"{k}={v!r}" for k, v in ids.items())
@@ -359,6 +365,66 @@ def _add_content_tools(mcp: MCPServer, require_course) -> None:
             "solution": cc.tidy_html(question.get("solution", "")),
             "instruction": cc.TUTOR_INSTRUCTION,
         }, figures)
+
+    # Practice grading, plans/mcp_grading.md.  Neither tool calls a model:
+    # the student's AI grades, and the portal's own prompt and scoring make
+    # its estimate mean what the portal's grade means.
+    @mcp.tool()
+    def get_grading_prompt(course_id: str, unit: str, qtag: str, part: str = "all"):
+        """Get the prompt the portal grades one question with, to give a
+        student a practice estimate of how their answer would score.
+
+        Call it when the student asks how their answer would be graded.  part
+        is a part label from list_questions, or "all" for every part at once.
+        The prompt is the portal's own -- rubric, scoring rule, worked solution
+        and grading notes -- with the student's answer left out: grade the
+        answer from the conversation against it, then pass the JSON it asks
+        for to score_grade, which totals it the way the portal does.  The
+        result is an estimate, never a grade for credit.
+        """
+        log_call("get_grading_prompt", course=course_id, unit=unit, qtag=qtag, part=part)
+        grader = require_course(course_id)
+        unit_name, tag, question = cc.resolve_question(grader, unit, qtag)
+        label = cc.resolve_part(question, tag, part)
+        prompt, mode, max_points = cc.grading_prompt(grader, question, label)
+        figures = cc.solution_figures(question, grader.soln_pkg)
+        return _with_figures({
+            "unit": unit_name,
+            "qtag": tag,
+            "part": label,
+            "grading_mode": mode,
+            "max_points": max_points,
+            "prompt": prompt,
+            "response_schema": GraderRawResult.model_json_schema(),
+            "instruction": cc.GRADING_INSTRUCTION,
+        }, figures)
+
+    @mcp.tool()
+    def score_grade(course_id: str, unit: str, qtag: str, grade: dict | str,
+                    part: str = "all") -> dict:
+        """Score a practice grade the way the portal scores its grader's reply.
+
+        grade is the JSON object get_grading_prompt's prompt asks for, after
+        you have graded the student's answer; unit, qtag and part are the ones
+        you passed there.  Returns the points, the maximum, and the feedback
+        with the portal's rubric table -- show the student those, not your
+        own total.  A grade that does not fit the schema is an error saying
+        what to fix.  The result is a practice estimate, not a grade.
+        """
+        # grade is never logged: its evidence paraphrases the student's work.
+        log_call("score_grade", course=course_id, unit=unit, qtag=qtag, part=part)
+        grader = require_course(course_id)
+        unit_name, tag, question = cc.resolve_question(grader, unit, qtag)
+        label = cc.resolve_part(question, tag, part)
+        if isinstance(grade, str):
+            # Some clients send an object argument as its JSON text.
+            try:
+                grade = json.loads(grade)
+            except json.JSONDecodeError as exc:
+                raise ToolError(f"grade is not valid JSON: {exc}") from exc
+        result = cc.score_grade(grader, question, label, grade)
+        return {"unit": unit_name, "qtag": tag, "part": label, **result,
+                "estimate": True, "disclaimer": cc.ESTIMATE_DISCLAIMER}
 
 
 

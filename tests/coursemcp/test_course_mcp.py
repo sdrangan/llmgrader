@@ -240,7 +240,8 @@ def test_tools_are_listed(client) -> None:
     assert response.status_code == 200
     names = {tool["name"] for tool in response.get_json()["result"]["tools"]}
     assert names == {"list_courses", "list_units", "list_unit_types", "list_questions", "get_question",
-                     "get_rubric", "get_solution", "list_materials", "get_material",
+                     "get_rubric", "get_solution", "get_grading_prompt", "score_grade",
+                     "list_materials", "get_material",
                      "read_material", "search_materials"}
 
 

@@ -37,11 +37,13 @@ from datetime import datetime, timezone
 # unit/qtag/id/path/page/kind/format go in their own columns (id as material,
 # page as slide).  kind, format and the line numbers are a material tool's
 # choice of view, not student text.
-IDENTIFIER_ARGUMENTS = frozenset({"course_id", "unit", "unit_type", "qtag", "id", "path",
-                                  "page", "kind", "format", "start_line", "end_line"})
+IDENTIFIER_ARGUMENTS = frozenset({"course_id", "unit", "unit_type", "qtag", "part", "id",
+                                  "path", "page", "kind", "format", "start_line",
+                                  "end_line"})
 
-# Arguments that carry the student's own words.  Never recorded.
-REDACTED_ARGUMENTS = frozenset({"query"})
+# Arguments that carry the student's own words, or a grade of their work,
+# whose evidence paraphrases it.  Never recorded.
+REDACTED_ARGUMENTS = frozenset({"query", "grade"})
 
 REDACTED = "<redacted>"
 

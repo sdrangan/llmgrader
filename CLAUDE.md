@@ -334,6 +334,19 @@ its exam units and no materials.
 first, 30% relative cutoff) and merges literal line hits from text files
 (`code.find_lines`) at a fixed score by language, below the best ranked hit.
 
+### Practice grading in the MCP
+
+`get_grading_prompt` and `score_grade` (`plans/mcp_grading.md`) let a
+student's own AI grade an answer the portal's way. The prompt is
+`Grader.build_task_prompt` plus `_build_message_content`'s image line, byte
+for byte, with `content.STUDENT_ANSWER_PLACEHOLDER` where the answer goes;
+the tool takes no answer, so the student's words never reach the server for
+it. `score_grade` runs the AI's JSON through `GraderRawResult` and
+`grade_post_process`, and turns a reply the portal would mark `error` into a
+`ToolError`. Its `grade` is in `REDACTED_ARGUMENTS`. Neither tool calls a
+model or writes a submission row -- the one Render worker must never wait on
+OpenAI for an MCP call -- and every result is labelled a practice estimate.
+
 ### The mirror and its sync
 
 The portal keeps a shallow, sparse, partial clone under

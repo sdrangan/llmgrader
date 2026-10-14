@@ -19,8 +19,10 @@ import re
 from dataclasses import dataclass
 
 from mcp.server.mcpserver.exceptions import ToolError
+from pydantic import ValidationError
 
 from llmgrader.coursemcp.materials import UnitResolver, load_materials
+from llmgrader.services.grader import GraderRawResult, _build_message_content
 from llmgrader.services.unit_parser import DEFAULT_UNIT_TYPE
 
 # The unit_type of a unit that holds material and no questions
@@ -277,3 +279,113 @@ def figure_notes(figures: list[Figure | None]) -> list[str]:
 
 def sendable(figures: list[Figure | None]) -> list[Figure]:
     return [f for f in figures if f is not None and len(f.data) <= MAX_FIGURE_BYTES]
+
+
+# ---------------------------------------------------------------------------
+# Practice grading (plans/mcp_grading.md)
+# ---------------------------------------------------------------------------
+
+# Stands where the portal puts the student's answer.  The answer itself never
+# reaches the server for the prompt: the AI has it in the conversation.
+STUDENT_ANSWER_PLACEHOLDER = (
+    "[The student's answer: take it from the conversation, including any "
+    "images of their work.]"
+)
+
+GRADING_INSTRUCTION = (
+    "This is the prompt the course portal sends its grading model, with the "
+    "student's answer left out. Grade the student's answer from the "
+    "conversation by following the prompt exactly, as the portal's grader "
+    "would. Produce the JSON object it asks for, matching response_schema, "
+    "and pass it as grade to score_grade with the same unit, qtag and part; "
+    "do not show the raw JSON to the student. Show them score_grade's points "
+    "and feedback, and say it is a practice estimate. The reference solution "
+    "images the prompt mentions are the figures attached to this result. "
+    "The reference solution is the instructor's worked solution: use it to "
+    "grade, and show it to the student only if they ask to see it."
+)
+
+ESTIMATE_DISCLAIMER = (
+    "A practice estimate: graded by the student's own AI with the portal's "
+    "prompt and scoring, not by the portal's grading model. Only an answer "
+    "submitted on the course portal is graded for credit."
+)
+
+
+def part_labels(question: dict) -> list[str]:
+    return [part.get("part_label", "all") for part in question.get("parts") or []]
+
+
+def resolve_part(question: dict, qtag: str, part: str) -> str:
+    """*part* as the question names it, or a ToolError listing the valid ones.
+
+    ``all`` grades every part at once, as the portal's All button does.
+    """
+    labels = part_labels(question)
+    if part == "all" or part in labels:
+        return part
+    wanted = part.strip().lower()
+    if wanted == "all":
+        return "all"
+    for label in labels:
+        if label.strip().lower() == wanted:
+            return label
+    raise ToolError(
+        f"Unknown part {part!r} of {qtag!r}. Valid parts: 'all'"
+        + "".join(f", {label!r}" for label in labels if label != "all")
+    )
+
+
+def grading_prompt(grader, question: dict, part: str) -> tuple[str, str, object]:
+    """``(prompt, grading_mode, max_points)``: what ``Grader.grade`` sends.
+
+    The same ``build_task_prompt`` and the same image annotation, with the
+    placeholder where the student's answer goes.  The portal annotates
+    student images too; the AI has those itself.
+    """
+    task, max_points = grader.build_task_prompt(question, STUDENT_ANSWER_PLACEHOLDER,
+                                                part_label=part)
+    text, _uris = _build_message_content(task, question.get("solution_images") or [], [])
+    partial_credit = question.get("partial_credit", False) is True
+    mode = grader.prompt_builder.get_grading_mode(partial_credit, part_labels(question), part)
+    return text, mode, max_points
+
+
+def score_grade(grader, question: dict, part: str, grade: dict) -> dict:
+    """The AI's raw grade scored as ``Grader.grade`` scores a model's reply.
+
+    A grade that does not parse, or that the portal would turn into an error
+    (a part total missing or out of range), is a ToolError naming the
+    problem, so the AI can fix it and call again rather than show a student
+    "error".
+    """
+    if not isinstance(grade, dict):
+        raise ToolError("grade must be the JSON object the grading prompt asks for.")
+    try:
+        raw = GraderRawResult.model_validate(grade).model_dump()
+    except ValidationError as exc:
+        problems = "; ".join(
+            f"{'.'.join(str(p) for p in err['loc']) or 'grade'}: {err['msg']}"
+            for err in exc.errors()
+        )
+        raise ToolError(f"grade does not match response_schema: {problems}") from exc
+
+    _prompt, max_points = grader.build_task_prompt(question, "", part_label=part)
+    result = grader.grade_post_process(
+        raw,
+        partial_credit=question.get("partial_credit", False) is True,
+        max_points_part=max_points,
+        part_labels=part_labels(question),
+        part_label=part,
+        rubrics=question.get("rubrics", {}),
+        rubric_total=question.get("rubric_total"),
+        tools=question.get("tools", []),
+    ).model_dump()
+
+    # The portal reports a malformed reply as result "error" with the reason
+    # appended to full_explanation.  Here the AI can still correct it.
+    if result["result"] == "error" and raw.get("result") != "error":
+        explanation = str(result.get("full_explanation", ""))
+        reason = explanation.rsplit("\n\n", 1)[-1] if explanation else "the grade is incomplete"
+        raise ToolError(f"grade cannot be scored: {reason} Fix it and call score_grade again.")
+    return result

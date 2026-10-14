@@ -313,3 +313,16 @@ def test_init_is_idempotent_and_delete_before_trims(tmp_path) -> None:
             [("2026-10-01T00:00:00+00:00",)]
     finally:
         conn.close()
+
+
+def test_a_practice_grade_is_never_recorded(app, client) -> None:
+    """score_grade's grade paraphrases the student's work (plans/mcp_grading.md)."""
+    sentinel = "STUDENT-WORK-SENTINEL"
+    response = call(client, "score_grade", {
+        "course_id": "alpha", "unit": "Alpha Unit", "qtag": "q1",
+        "grade": {"result": "pass", "full_explanation": sentinel, "feedback": sentinel}})
+    assert response.get_json()["result"].get("isError") is not True
+    [row] = tool_rows(app)
+    assert row["tool"] == "score_grade" and row["qtag"] == "q1"
+    assert sentinel not in json.dumps(row)
+    assert json.loads(row["args_json"])["grade"] == REDACTED
