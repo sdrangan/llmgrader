@@ -6,7 +6,7 @@ has_children: false
 ---
 # Studying with Your Own AI (Course MCP)
 
-If you already use an AI assistant such as Claude, ChatGPT or GitHub Copilot,
+If you already use an AI assistant such as Claude, Gemini, ChatGPT or GitHub Copilot,
 you can connect it to the course portal. Once connected, your assistant can look
 up the course material for itself, so you can ask it things like:
 
@@ -173,6 +173,39 @@ connect through VS Code instead.
 
 ---
 
+## Connecting Gemini (gemini.google.com)
+
+Gemini calls an MCP server a **custom app**.
+
+1. On a computer, go to [gemini.google.com](https://gemini.google.com) and sign
+   in. A custom app can only be added in the web app; once added, it also
+   works in the Gemini mobile app.
+2. At the bottom of the side panel, open **Settings → Connected Apps**. If you
+   do not see **Connected Apps** there, look under **Personal Intelligence**.
+3. Under **Custom apps**, click **Add a custom app**.
+4. Paste the address (ending in `/mcp`). *Only if your course uses a token:*
+   paste the address with the token at the end instead,
+   `https://<portal>/mcp/<token>` -- Gemini has no field for a request header.
+5. Leave **Advanced features** alone: the course MCP has no sign-in.
+6. Click **Next** and follow the on-screen steps.
+
+To use it, type `@` in a chat and choose the course app, then ask your
+question. Gemini asks your permission the first time it calls one of the
+course's tools.
+
+{: .note }
+Custom apps in Gemini need a **personal** Google account -- not a school or
+work account, such as an NYU one -- and **Keep Activity** switched on. Google
+also limits them to users 18 or over in the US, using Gemini in English. If
+**Custom apps** does not appear in Connected Apps, one of these is the reason;
+use Claude or VS Code instead.
+
+To remove it: **Settings → Connected Apps**, then **More details** on the course
+app, then **Remove app**. Switching off its toggle disconnects it without
+removing it.
+
+---
+
 ## Connecting VS Code (GitHub Copilot)
 
 Copilot Chat in **agent mode** can use MCP servers.
@@ -228,8 +261,9 @@ In a new chat, ask:
 > List the problems in unit 2.
 
 A working connection shows the assistant **calling a tool** -- Claude shows a
-small "list_questions" box you can expand, and Copilot shows the tool call in
-the chat -- and then answers with the unit's actual problems.
+small "list_questions" box you can expand, Gemini asks your permission to use
+the course app, and Copilot shows the tool call in the chat -- and then
+answers with the unit's actual problems.
 
 If instead the assistant answers from general knowledge without calling
 anything, or says it has no such tool:
