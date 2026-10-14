@@ -93,6 +93,8 @@ packages.
 | `get_question` | one question dict | its HTML text with `[Figure n]` placeholders, the figures as image blocks, `variation_guidance` |
 | `get_rubric` | one question dict | rubric items, grading notes |
 | `get_solution` | one question dict | the worked solution and its figures |
+| `get_grading_prompt` | one question dict, `Grader.build_task_prompt` | the portal's grading prompt with `content.STUDENT_ANSWER_PLACEHOLDER` for the answer, the reply schema (`GraderRawResult`), the solution figures |
+| `score_grade` | one question dict, `Grader.grade_post_process` | the AI's grade scored as the portal scores a model's reply (`GradeResult`), marked `estimate` |
 | `list_materials` | the catalog | the kinds (description, policy), the units with material, every item: id, title, kind, units, part count |
 | `get_material` | the catalog | one item: units with how each was found, parts (a deck with its outline, docs pages, files), slides citing it, related items |
 | `read_material` | a deck, a mirrored PDF, or a `SourceFile` | one slide or page (image block, text, notes, figure description, link), or a window of a file's numbered lines with links |
@@ -100,6 +102,13 @@ packages.
 
 `get_solution`, and every result carrying a `tutor` item's content, adds
 `instruction`: `content.TUTOR_INSTRUCTION`, the one text both share.
+
+`get_grading_prompt` and `score_grade` call no model and write nothing
+(`plans/mcp_grading.md`). The prompt is the one `Grader.grade` sends, byte for
+byte apart from the placeholder, and a test holds it there. The tool takes no
+answer, so the student's words stay in the conversation. `score_grade`'s
+`grade` is in `REDACTED_ARGUMENTS`, and a reply the portal would mark `error`
+is a `ToolError` naming the fix instead.
 
 The code: tools in `coursemcp/server.py`; question lookups, figure resolution
 and the tutor instruction in `coursemcp/content.py`; the config, the package

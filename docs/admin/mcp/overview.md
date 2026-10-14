@@ -36,6 +36,7 @@ behind an optional course access token.
 | Optional course access token (`LLMGRADER_MCP_TOKEN`) | Done |
 | `list_courses`, `list_units` | Done |
 | `list_questions`, `get_question`, `get_rubric`, `get_solution` | Done |
+| Practice grading: `get_grading_prompt`, `score_grade` | Done |
 | Materials: `list_materials`, `get_material`, `read_material`, `search_materials` | Done |
 | Kinds, material-only units and items in `llmgrader_mcp_config.xml` | Done |
 | Formats: slides, PDFs page by page, docs pages, text and code | Done |
@@ -57,6 +58,8 @@ behind an optional course access token.
 | `get_question` | One question's full text and figures, and your `variation_guidance` if any |
 | `get_rubric` | One question's rubric items and grading notes |
 | `get_solution` | One question's worked solution and its figures |
+| `get_grading_prompt` | The prompt the portal grades one question (or one part) with, minus the student's answer, plus the solution figures |
+| `score_grade` | The assistant's grade, scored as the portal scores its grader's reply: points, maximum, and feedback with the rubric table, marked as an estimate |
 | `list_materials` | The course's kinds of material with your description of each, its units, and every item: id, title, kind, units |
 | `get_material` | One item: its units and how each was found, its parts (a deck with its outline, docs pages, files), and the slides that cite it |
 | `read_material` | One slide or PDF page (image, text, notes, figure description), or one file's lines, with a link the student can open |
@@ -72,6 +75,16 @@ the student reason toward an answer, use the rubric and solution to check
 their work or build a hint, and show the solution only when they ask for it.
 The same instruction comes with every worked solution, whether it is a
 question's (`get_solution`) or an item of a kind you mark `tutor`.
+
+**Practice grading.** When a student asks how an answer would score, the
+assistant gets the portal's own grading prompt from `get_grading_prompt`,
+grades the answer itself, and passes its reply to `score_grade`, which totals
+it the way the portal does. The student's answer stays in the conversation:
+`get_grading_prompt` takes none, and the grade `score_grade` receives is never
+logged or stored. The grade comes from the student's assistant, not the
+portal's grading model, so every result is labelled a practice estimate;
+only answers submitted on the portal are graded for credit. Neither tool
+calls a model, so they cost you nothing. See `plans/mcp_grading.md`.
 
 **Quick check that it is running:** open `https://<portal>/mcp` in a browser.
 *"This is the course MCP server, and it is running."* means the MCP is up; an

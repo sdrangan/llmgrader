@@ -117,7 +117,8 @@ curl -s -X POST https://<portal>/mcp \
 
 A working server replies with JSON listing its tools: `list_courses`,
 `list_units`, `list_unit_types`, `list_questions`, `get_question`,
-`get_rubric`, `get_solution`, `list_materials`, `get_material`,
+`get_rubric`, `get_solution`, `get_grading_prompt`, `score_grade`,
+`list_materials`, `get_material`,
 `read_material` and `search_materials`.
 
 | Reply | Meaning |
