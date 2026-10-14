@@ -160,7 +160,9 @@ them -- the LMS, not a public page. Posting the single address
 needs no header.
 
 and point them to [Studying with Your Own AI](../../student/mcp.md), which walks
-through connecting Claude, VS Code or Claude Code.
+through connecting Claude, Gemini, VS Code or Claude Code. Gemini cannot send
+a request header, so with a token its students need the
+`https://<portal>/mcp/<token>` address.
 
 **Changing the token** -- if it leaks, or each semester -- is a new value in
 `LLMGRADER_MCP_TOKEN`. Every student then has to update their connector, so
