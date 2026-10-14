@@ -108,8 +108,12 @@ def build_course_mcp(registry: CourseRegistry, *, content: bool = False,
             )
         return registry.grader_for(course_id)
 
+    # A list a tool returns is sent as one content block per entry, and some
+    # clients (Gemini, 2026-10-13) keep only the last block: they saw one
+    # course and one unit.  So every result travels as one object, its list
+    # under a key.
     @mcp.tool()
-    def list_courses() -> list[dict]:
+    def list_courses() -> dict:
         """List the courses this portal serves: id, name, semester and the
         version of the course material being served.
 
@@ -126,10 +130,10 @@ def build_course_mcp(registry: CourseRegistry, *, content: bool = False,
             if code_version:
                 item["code_version"] = code_version
             courses.append(item)
-        return courses
+        return {"courses": courses}
 
     @mcp.tool()
-    def list_units(course_id: str) -> list[dict]:
+    def list_units(course_id: str) -> dict:
         """List a course's units in teaching order, with section headings.
 
         Each item is a section heading or a unit.  A unit carries its number
@@ -155,10 +159,10 @@ def build_course_mcp(registry: CourseRegistry, *, content: bool = False,
                 items.append(entry)
             else:
                 items.append({"type": item["type"], "name": item["name"]})
-        return items
+        return {"units": items}
 
     @mcp.tool()
-    def list_unit_types(course_id: str) -> list[dict]:
+    def list_unit_types(course_id: str) -> dict:
         """List the kinds of unit in a course, with what each is like.
 
         Each item is a unit_type -- problem_set, midterm, final, quiz, as the
@@ -191,7 +195,7 @@ def build_course_mcp(registry: CourseRegistry, *, content: bool = False,
                 entry["description"] = described[type_id]["description"]
             entry["units"] = names
             result.append(entry)
-        return result
+        return {"unit_types": result}
 
     if content:
         _add_content_tools(mcp, require_course)
@@ -200,8 +204,20 @@ def build_course_mcp(registry: CourseRegistry, *, content: bool = False,
     return mcp
 
 
+def _payload_last(payload: dict, images: list) -> list:
+    """A result with images: the images first, the JSON payload last.
+
+    Last, because a client that keeps only one content block keeps the last
+    (Gemini did): it then still has every word of the result, and loses only
+    the pictures, which ``figures_attached`` says it was sent.
+    """
+    if images:
+        payload = {**payload, "figures_attached": sum(1 for b in images if isinstance(b, Image))}
+    return [*images, json.dumps(payload, indent=2, ensure_ascii=False)]
+
+
 def _with_figures(payload: dict, figures: list) -> list:
-    """A tool result: the JSON payload, then each figure after its own label.
+    """A tool result: each figure after its own label, then the JSON payload.
 
     Each image is preceded by "Figure n:", so the [Figure n] placeholders in
     the text map onto images unambiguously even when one could not be sent.
@@ -210,12 +226,12 @@ def _with_figures(payload: dict, figures: list) -> list:
     notes = cc.figure_notes(figures)
     if notes:
         payload["figure_notes"] = notes
-    blocks: list = [json.dumps(payload, indent=2, ensure_ascii=False)]
+    blocks: list = []
     for number, figure in enumerate(figures, start=1):
         if figure is not None and len(figure.data) <= cc.MAX_FIGURE_BYTES:
             blocks.append(f"Figure {number}:")
             blocks.append(Image(data=figure.data, format=figure.mime.split("/", 1)[1]))
-    return blocks
+    return _payload_last(payload, blocks)
 
 
 def _slide_url(public_url, course_id: str, deck: str, number: int) -> str | None:
@@ -229,7 +245,7 @@ def _add_content_tools(mcp: MCPServer, require_course) -> None:
 
     @mcp.tool()
     def list_questions(course_id: str, unit: str | None = None,
-                       unit_type: str | None = None) -> list[dict]:
+                       unit_type: str | None = None) -> dict:
         """List a course's questions: unit, qtag, a short label, parts and points.
 
         Omit unit for every question in the course -- the whole index is small,
@@ -258,7 +274,7 @@ def _add_content_tools(mcp: MCPServer, require_course) -> None:
                     "parts": parts,
                     "points": sum(p["points"] or 0 for p in parts),
                 })
-        return index
+        return {"questions": index}
 
     @mcp.tool()
     def get_question(course_id: str, unit: str, qtag: str):
@@ -602,10 +618,8 @@ def _add_material_tools(mcp: MCPServer, require_course, public_url, code) -> Non
                 url = page_url(catalog, part, paged, entry["n"], slide_url_for(course_id))
                 if url:
                     payload["view_url"] = url
-            blocks: list = [json.dumps(with_policy(payload, item), indent=2, ensure_ascii=False)]
-            if image is not None:
-                blocks.append(Image(data=image.read_bytes(), format="jpeg"))
-            return blocks
+            images = [Image(data=image.read_bytes(), format="jpeg")] if image is not None else []
+            return _payload_last(with_policy(payload, item), images)
 
         try:
             source = catalog.text(part)
