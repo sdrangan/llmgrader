@@ -108,7 +108,9 @@ def client(tmp_path, monkeypatch):
 
 def items(result: dict) -> list:
     assert not result.get("isError"), result
-    return result["structuredContent"]["result"]
+    assert len(result["content"]) == 1, "a list result is one block (Gemini keeps only the last)"
+    [entries] = json.loads(result["content"][0]["text"]).values()
+    return entries
 
 
 # ---------------------------------------------------------------------------

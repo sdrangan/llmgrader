@@ -160,13 +160,11 @@ def test_list_materials_filters_by_unit_and_kind(client) -> None:
 
 
 def test_a_material_unit_is_listed_with_no_questions(client) -> None:
-    units = {u["name"]: u for u in json.loads(
-        json.dumps([json.loads(b["text"]) for b in tool(client, "list_units")["content"]]))
-        if u["type"] == "unit"}
+    units = {u["name"]: u for u in ok(tool(client, "list_units"))["units"]
+             if u["type"] == "unit"}
     assert units["Course setup"]["questions"] == 0
     assert units["Course setup"]["unit_type"] == "material"
-    types = {t["unit_type"] for t in json.loads(
-        json.dumps([json.loads(b["text"]) for b in tool(client, "list_unit_types")["content"]]))}
+    types = {t["unit_type"] for t in ok(tool(client, "list_unit_types"))["unit_types"]}
     assert "material" not in types
 
 

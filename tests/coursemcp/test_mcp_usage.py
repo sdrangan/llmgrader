@@ -155,7 +155,7 @@ def test_a_failed_write_still_answers(app, client, tmp_path) -> None:
 
     response = call(client, "list_courses", {})
     assert response.status_code == 200
-    courses = response.get_json()["result"]["structuredContent"]["result"]
+    courses = json.loads(response.get_json()["result"]["content"][0]["text"])["courses"]
     assert {c["course_id"] for c in courses} == {"alpha", "beta"}
 
 

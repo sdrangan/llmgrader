@@ -154,20 +154,19 @@ def _payload_of(result: dict):
 
     A dict return comes back as ``structuredContent``; a list return as
     ``structuredContent.result``; a list of content blocks (a result with
-    figures) has no structured form, and its first text block is the JSON
-    payload.
+    figures) has no structured form, and its JSON payload is the last text
+    block that parses as JSON -- "Figure 1:" labels come before it.
     """
     structured = result.get("structuredContent")
     if isinstance(structured, dict):
         if set(structured) == {"result"}:
             return structured["result"]
         return structured
-    for block in result.get("content") or []:
+    for block in reversed(result.get("content") or []):
         if isinstance(block, dict) and block.get("type") == "text":
             parsed = parse_json(block.get("text", "").encode("utf-8"))
             if isinstance(parsed, (dict, list)):
                 return parsed
-            break
     return None
 
 
@@ -212,9 +211,15 @@ def _apply_response(row: dict, response, status_code: int) -> None:
                             ("kind", "kind"), ("path", "path"), ("format", "format")):
             if isinstance(payload.get(key), str):
                 row[column] = payload[key][:MAX_ARG_CHARS]
-        for key in ("hits", "items"):
+        for key in ("hits", "items", "courses", "units", "unit_types", "questions"):
             if isinstance(payload.get(key), list):
                 row["result_items"] = len(payload[key])
+        # list_questions asked for one unit resolved it: every question names it.
+        questions = payload.get("questions")
+        if row.get("unit") and isinstance(questions, list):
+            values = {q.get("unit") for q in questions if isinstance(q, dict)}
+            if len(values) == 1 and None not in values:
+                row["unit"] = str(values.pop())[:MAX_ARG_CHARS]
         if isinstance(payload.get("page"), int):
             row["slide"] = payload["page"]
 

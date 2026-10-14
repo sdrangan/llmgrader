@@ -112,8 +112,10 @@ def call_tool(client, name: str, arguments: dict | None = None) -> dict:
 
 
 def tool_items(result: dict) -> list:
-    """A list result arrives as one text content block per item."""
-    return [json.loads(block["text"]) for block in result["content"]]
+    """A list result: one text block, a JSON object holding the one list."""
+    assert len(result["content"]) == 1, "a list result is one block (Gemini keeps only the last)"
+    [entries] = json.loads(result["content"][0]["text"]).values()
+    return entries
 
 
 # ---------------------------------------------------------------------------
@@ -225,7 +227,7 @@ def test_modern_protocol_tool_call(client) -> None:
         client, "tools/call", {"name": "list_courses", "arguments": {}},
         {"Mcp-Name": "list_courses"}))
     assert response.status_code == 200
-    courses = response.get_json()["result"]["structuredContent"]["result"]
+    courses = json.loads(response.get_json()["result"]["content"][0]["text"])["courses"]
     assert {c["course_id"] for c in courses} == {"alpha", "beta"}
 
 

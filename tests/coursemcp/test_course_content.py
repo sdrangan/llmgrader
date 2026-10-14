@@ -143,8 +143,15 @@ def call(client, name, arguments=None, **kwargs) -> dict:
 
 
 def payload(result: dict):
-    """The JSON payload: the first text block."""
-    return json.loads(result["content"][0]["text"])
+    """The JSON payload: the last text block, after any figures."""
+    return json.loads([b for b in result["content"] if b["type"] == "text"][-1]["text"])
+
+
+def listed(result: dict) -> list:
+    """A list tool's entries: the one list in its one JSON object."""
+    body = payload(result)
+    [entries] = body.values()
+    return entries
 
 
 def tool_names(client, **kwargs) -> set[str]:
@@ -251,7 +258,11 @@ def test_get_question_returns_text_figure_and_guidance(client) -> None:
     assert "<img" not in body["question"]
     assert body["variation_guidance"].startswith("Vary the wall positions")
     assert images(result) == [PNG]
-    assert result["content"][1] == {"type": "text", "text": "Figure 1:"}
+    # Label, image, then the JSON last: a client that keeps only the last
+    # block (Gemini) still gets every word of the question.
+    assert [b["type"] for b in result["content"]] == ["text", "image", "text"]
+    assert result["content"][0] == {"type": "text", "text": "Figure 1:"}
+    assert body["figures_attached"] == 1
 
 
 def test_qtag_tolerates_case(client) -> None:
@@ -312,6 +323,7 @@ def test_portal_page_payload_is_unchanged_by_variation_guidance(client) -> None:
 
 
 def payload_list(result: dict) -> list:
-    """A list tool's items: one JSON text block per item."""
+    """A list tool's items, from its single JSON block."""
     assert result.get("isError") is not True, result
-    return [json.loads(block["text"]) for block in result["content"]]
+    assert len(result["content"]) == 1, "a list result is one block (Gemini keeps only the last)"
+    return listed(result)

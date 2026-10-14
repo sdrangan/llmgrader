@@ -246,7 +246,7 @@ def client(app):
 
 def payload(result: dict):
     assert not result.get("isError"), result
-    return json.loads(result["content"][0]["text"])
+    return json.loads([b for b in result["content"] if b["type"] == "text"][-1]["text"])
 
 
 def error_text(result: dict) -> str:
