@@ -336,9 +336,45 @@ def normalize_json_response_text(text: str) -> str:
     start = normalized.find("{")
     end = normalized.rfind("}")
     if start != -1 and end != -1 and end >= start:
-        return normalized[start:end + 1]
+        normalized = normalized[start:end + 1]
 
-    return normalized
+    return strip_trailing_commas(normalized)
+
+
+def strip_trailing_commas(text: str) -> str:
+    """
+    Remove commas that directly precede a closing ``}`` or ``]``.
+
+    A request with the web_search tool cannot also ask for JSON mode, so the
+    model writes its JSON freehand and now and then leaves a trailing comma
+    (seen from GPT-6 Luna on a long rubric), which fails the whole grade.
+    Commas inside string literals are left alone.
+    """
+    out = []
+    in_string = False
+    escaped = False
+    pending_comma = None  # index in `out` of a comma not yet known to be valid
+    for ch in text:
+        if in_string:
+            out.append(ch)
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == '"':
+                in_string = False
+            continue
+        if ch in "}]" and pending_comma is not None:
+            del out[pending_comma]
+            pending_comma = None
+        elif ch == ",":
+            pending_comma = len(out)
+        elif not ch.isspace():
+            pending_comma = None
+        if ch == '"':
+            in_string = True
+        out.append(ch)
+    return "".join(out)
 
 
 def _build_message_content(task, ref_images, student_images):
