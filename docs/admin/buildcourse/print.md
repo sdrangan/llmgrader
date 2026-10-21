@@ -82,6 +82,7 @@ together, with no answer pages.
 | `id` | Required. Names the block for `--print <id>`: lowercase letters, digits, `-` and `_`. Unique within the unit. |
 | `answer_pages` | Blank pages after each question. Default **1** if the block has a `<title_page>`, **0** otherwise. |
 | `page_per_question` | `true` starts each question on a new page. Default **true** with a `<title_page>`, **false** otherwise. |
+| `extra_pages` | Blank pages after the last problem, headed *"Extra page. Use it for any problem..."*. Default **0**. Left out of the `--soln` key. |
 | `<title_page>` | Optional. Without it, the unit's title is printed as a heading. |
 | `<question qtag answer_pages>` | Optional, repeated. The questions to print, **in printed order**; `answer_pages` overrides the block's default for that question. Without any, every question prints in document order. |
 

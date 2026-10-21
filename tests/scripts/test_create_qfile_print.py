@@ -116,6 +116,15 @@ def test_answer_pages_follow_each_problem_and_name_it(tmp_path, monkeypatch) -> 
     assert html.count('class="answer-page newpage"') == 3
 
 
+def test_extra_pages_follow_the_last_problem_and_not_the_key(tmp_path, monkeypatch) -> None:
+    blocks = EXAM_BLOCK.replace('<print id="exam">', '<print id="exam" extra_pages="2">')
+    _, html = run(tmp_path, monkeypatch, blocks, "--print", "exam")
+    assert html.count("Extra page.") == 2
+    assert html.rfind("Use this page for Problem 2") < html.find("Extra page.")
+    _, key = run(tmp_path, monkeypatch, blocks, "--print", "exam", "--soln")
+    assert "Extra page." not in key
+
+
 def test_a_minimal_handout_block(tmp_path, monkeypatch) -> None:
     _, html = run(tmp_path, monkeypatch, EXAM_BLOCK, "--print", "handout")
     text = body_text(html)

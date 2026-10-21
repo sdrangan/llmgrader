@@ -439,7 +439,8 @@ def read_print_block(xml_file, print_id=None):
     else:
         questions = [(q.get('qtag', ''), default_pages) for q in root.findall('question')]
     return {'id': block.get('id', ''), 'title_page': title_page,
-            'page_per_question': page_per_question, 'questions': questions}
+            'page_per_question': page_per_question, 'questions': questions,
+            'extra_pages': int(block.get('extra_pages', 0))}
 
 
 PRINT_STYLE = """
@@ -490,9 +491,10 @@ def generate_print_html(questions, output_file, block, unit_title='Questions',
     """Write *block* (``read_print_block``) of *questions* as print-styled HTML.
 
     Answer pages are headed "Use this page for Problem n" -- generated, so
-    the header cannot go stale when questions move.  With
+    the header cannot go stale when questions move -- and the block's
+    ``extra_pages`` follow the last problem, for any of them.  With
     *include_solutions*, each question is followed by its solution and the
-    answer pages are left out: it is the key.
+    answer and extra pages are left out: it is the key.
     """
     by_tag = {q['qtag']: q for q in questions}
     printed = [(by_tag[qtag], pages) for qtag, pages in block['questions']]
@@ -564,6 +566,11 @@ def generate_print_html(questions, output_file, block, unit_title='Questions',
             out.append(f'<div class="answer-page newpage"><p class="answer-head">'
                        f'Use this page for Problem {number}.</p></div>')
         previous_pages = pages
+    if not include_solutions:
+        for _ in range(block.get('extra_pages', 0)):
+            out.append('<div class="answer-page newpage"><p class="answer-head">'
+                       'Extra page. Use it for any problem, and label each answer with '
+                       'its problem number.</p></div>')
 
     out.extend(['</body>', '</html>'])
     with open(output_file, 'w', encoding='utf-8') as f:
