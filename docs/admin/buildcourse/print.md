@@ -1,6 +1,6 @@
 ---
 title: Printing a Unit as an Exam
-parent: Building a Course
+parent: Building a Course Package
 nav_order: 5.2
 has_children: false
 ---
