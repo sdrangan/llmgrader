@@ -178,6 +178,8 @@
     <xs:attribute name="id" type="printId" use="required"/>
     <xs:attribute name="answer_pages" type="xs:nonNegativeInteger" use="optional"/>
     <xs:attribute name="page_per_question" type="trueFalseEnum" use="optional"/>
+    <!-- Blank pages after the last problem, for work on any problem. -->
+    <xs:attribute name="extra_pages" type="xs:nonNegativeInteger" use="optional"/>
   </xs:complexType>
 
   <xs:element name="unit">
