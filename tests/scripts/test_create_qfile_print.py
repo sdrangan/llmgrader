@@ -125,6 +125,23 @@ def test_extra_pages_follow_the_last_problem_and_not_the_key(tmp_path, monkeypat
     assert "Extra page." not in key
 
 
+def test_duplex_pdf_puts_a_blank_page_after_every_page(tmp_path) -> None:
+    pymupdf = pytest.importorskip("pymupdf")
+    src = tmp_path / "exam.pdf"
+    with pymupdf.open() as doc:
+        for n, size in enumerate([(612, 792), (612, 792), (595, 842)], start=1):
+            doc.new_page(width=size[0], height=size[1]).insert_text((72, 72), f"PAGE-{n}")
+        doc.save(src)
+    duplex = tmp_path / "exam_duplex.pdf"
+    assert create_qfile.write_duplex_pdf(str(src), str(duplex)) == 3
+    with pymupdf.open(duplex) as doc:
+        assert doc.page_count == 6
+        texts = [page.get_text().strip() for page in doc]
+        assert texts == ["PAGE-1", "", "PAGE-2", "", "PAGE-3", ""]
+        # Each back is the size of its front, so a mixed-size scan still lines up.
+        assert doc[5].rect == doc[4].rect
+
+
 def test_a_minimal_handout_block(tmp_path, monkeypatch) -> None:
     _, html = run(tmp_path, monkeypatch, EXAM_BLOCK, "--print", "handout")
     text = body_text(html)
