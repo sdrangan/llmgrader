@@ -655,6 +655,30 @@ async def generate_pdf_from_html(html_file, pdf_file, *, page_footer=False):
         return False
 
 
+def write_duplex_pdf(pdf_file, duplex_file):
+    """Write *pdf_file* to *duplex_file* with a blank page after every page.
+
+    A paper printed one-sided and scanned double-sided comes back with each
+    page's blank back as the next page; this is the template that matches it.
+    Done on the rendered PDF rather than in the HTML, because only the
+    renderer knows where a long question spills onto a second page.
+
+    Returns:
+        The page count of the original, or None if PyMuPDF is not installed.
+    """
+    try:
+        import pymupdf
+    except ImportError:
+        print("Error: --duplex needs PyMuPDF. Install it with: pip install pymupdf")
+        return None
+    with pymupdf.open(pdf_file) as src, pymupdf.open() as out:
+        for i, page in enumerate(src):
+            out.insert_pdf(src, from_page=i, to_page=i)
+            out.new_page(width=page.rect.width, height=page.rect.height)
+        out.save(duplex_file)
+        return src.page_count
+
+
 def main():
     """Main function to parse arguments and generate HTML."""
     parser = argparse.ArgumentParser(
@@ -684,6 +708,13 @@ def main():
         '--pdf',
         action='store_true',
         help='Generate a PDF file from the HTML output'
+    )
+    parser.add_argument(
+        '--duplex',
+        action='store_true',
+        help='Also write a ..._duplex.pdf with a blank page after every page, matching '
+             'a one-sided paper scanned double-sided (e.g. a Gradescope template). '
+             'Implies --pdf'
     )
     parser.add_argument(
         '--print',
@@ -772,15 +803,21 @@ def main():
     print(f'Successfully created {output_file} with {count} question(s).')
 
     # Generate PDF if requested
-    if args.pdf:
+    if args.pdf or args.duplex:
         pdf_file = os.path.splitext(output_file)[0] + '.pdf'
         print(f'Generating PDF: {pdf_file}...')
         success = asyncio.run(generate_pdf_from_html(
             output_file, pdf_file, page_footer=args.print_id is not None))
-        if success:
-            print(f'Successfully created {pdf_file}')
-        else:
+        if not success:
             print('Failed to create PDF')
+            return 0
+        print(f'Successfully created {pdf_file}')
+        if args.duplex:
+            duplex_file = os.path.splitext(output_file)[0] + '_duplex.pdf'
+            pages = write_duplex_pdf(pdf_file, duplex_file)
+            if pages is None:
+                return 1
+            print(f'Successfully created {duplex_file} ({pages} pages, {2 * pages} with blank backs)')
 
     return 0
 

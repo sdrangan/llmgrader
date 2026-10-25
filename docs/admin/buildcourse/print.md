@@ -133,6 +133,7 @@ writes `exams/midterm_f2026_exam.html` and `exams/midterm_f2026_exam.pdf`.
 | `--print` | Render the unit's only block. With several, it asks for an id; with none, it prints the unit's title and every question. |
 | `--soln` | **The key**: each question is followed by its solution, and the answer pages are left out. Writes `..._exam_soln.html`. |
 | `--pdf` | Also write the PDF, with the *Page n of N* footer. |
+| `--duplex` | Also write `..._duplex.pdf`, with a blank page after every page: the template for a double-sided scan. Implies `--pdf`. See [below](#double-sided-scanning-for-gradescope). |
 | `--config` | As without `--print`: resolves `/pkg_assets/...` figures (see [Creating HTML Files](./htmlnotes.md)). |
 
 The PDF needs Playwright and an internet connection, as without `--print`:
@@ -141,3 +142,42 @@ MathJax and the Computer Modern fonts are loaded when the page renders.
 **Check the PDF before printing.** A long question can run past one page;
 that is the question's length, not a setting -- give it a second answer page,
 or split it.
+
+---
+
+## Double-sided scanning for Gradescope
+
+Print the exam **one-sided**, so that students can write on the back of a page.
+Then scan the papers **double-sided**, so that work on the backs is captured too.
+A 14-page exam then scans as 28 pages: each printed page, followed by its back.
+
+Gradescope matches a scan to the template PDF page by page. The 14-page PDF
+you printed no longer lines up with the scan: from page 2 onward every page is
+offset, so answers are assigned to the wrong questions. The template has to
+have the same 28 pages, with a blank page wherever the scan has a back.
+
+`--duplex` writes that template next to the printed PDF:
+
+```bash
+create_qfile --input exams/midterm_f2026.xml --print exam --duplex
+```
+
+This writes
+
+- `exams/midterm_f2026_exam.pdf` -- 14 pages, **print this one**;
+- `exams/midterm_f2026_exam_duplex.pdf` -- 28 pages, each page followed by a
+  blank one, **upload this one to Gradescope** as the assignment template.
+
+The printed pages keep their *Page n of 14* footer in the duplex file,
+because that is what is on the paper. The blank pages carry no footer.
+
+When you mark question regions in Gradescope, add the back of each answer page
+to that question's region, so that work a student continued onto the back is
+graded with the question.
+
+Blank pages are added to the rendered PDF, not to the HTML. So a question that
+runs onto a second page still gets a blank page after each of its pages, and the
+template stays aligned with the scan.
+
+`--duplex` needs PyMuPDF (`pip install pymupdf`, which is included in the
+`mcp-build` extra).
