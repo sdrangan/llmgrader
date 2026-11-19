@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-cp /autograder/submission/* /autograder/source
+# autograde.py reads /autograder/submission directly; nothing is copied.
+# (A plain `cp submission/*` aborts under `set -e` once the zip holds a
+# directory, such as images/, and Gradescope then gets no results at all.)
 
 cd /autograder/source
 
