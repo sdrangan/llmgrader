@@ -230,6 +230,28 @@ MODEL_REGISTRY: dict[str, ModelSpec] = {
         ),
         tier_default=True,
     ),
+    # The GPT-6 flagship, in the complex tier beside GPT-5.6 Sol at 2.5x its
+    # list price.  Opt-in like the other GPT-6 models: not a tier default and
+    # not on the shared key until a replay eval says it grades better.
+    "gpt-6-astra": ModelSpec(
+        id="gpt-6-astra",
+        provider="openai",
+        label="GPT-6 Astra",
+        tier="complex",
+        context_tokens=_GPT6_CONTEXT_TOKENS,
+        long_context_threshold=_GPT6_LONG_CONTEXT_THRESHOLD,
+        usd_per_mtok_in=10.00,
+        usd_per_mtok_out=50.00,
+        usd_per_mtok_in_long=20.00,
+        usd_per_mtok_out_long=75.00,
+        supports_temperature=False,
+        supports_web_search=True,
+        supports_images=True,
+        notes=(
+            "Newer, the GPT-6 flagship, for projects and reports — about 2.5x "
+            "the list price of GPT-5.6 Sol; not yet measured on real grading."
+        ),
+    ),
 }
 
 def _tier_default(tier: str) -> ModelSpec:
